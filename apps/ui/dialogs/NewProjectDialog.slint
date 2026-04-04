@@ -1,0 +1,420 @@
+﻿import { HorizontalBox, VerticalBox, ComboBox, LineEdit, Button } from "std-widgets.slint";
+import { Themes, Separator-H } from "../components/Themes.slint";
+import { I18n } from "../components/I18n.slint";
+
+/// Development platforms
+export enum Platform {
+    Desktop,
+    Mobile,
+    Web
+}
+
+/// Development mode
+export enum DevMode {
+    Code,
+    Nodes,
+    Hybrid
+}
+
+/// Initial page size
+export enum PageSize {
+    Desktop,
+    Tablet,
+    Mobile
+}
+
+/// New project dialog
+export component NewProjectDialog inherits Rectangle {
+    in-out property <bool> show-dialog: false;
+    in-out property <string> project-name: "New Project";
+    in-out property <string> project-path: "";
+    in-out property <Platform> platform: Platform.Desktop;
+    in-out property <DevMode> dev-mode: DevMode.Nodes;
+    in-out property <PageSize> page-size: PageSize.Desktop;
+    in-out property <int> custom-width: 1920;
+    in-out property <int> custom-height: 1080;
+    in-out property <string> error-message: "";
+    
+    callback create-project(string, string, int, int, int, int, int);
+    callback cancel();
+    callback browse-path();
+
+    background: transparent;
+    
+    // Helper functions to convert enum to int
+    pure function platform-to-int(p: Platform) -> int {
+        return p == Platform.Desktop ? 0 :
+               p == Platform.Mobile ? 1 : 2;
+    }
+    
+    pure function dev-mode-to-int(d: DevMode) -> int {
+        return d == DevMode.Code ? 0 :
+               d == DevMode.Nodes ? 1 : 2;
+    }
+    
+    pure function page-size-to-int(s: PageSize) -> int {
+        return s == PageSize.Desktop ? 0 :
+               s == PageSize.Tablet ? 1 :
+               s == PageSize.Mobile ? 2 : 3;
+    }
+    
+    if show-dialog : TouchArea {
+        Rectangle {
+            background: Themes.overlay-bg;
+            
+            Rectangle {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: 500px;
+                height: 600px;
+                background: Themes.current.primary-bg;
+                border-radius: Themes.border-radius;
+                drop-shadow-blur: Themes.shadow-size;
+                drop-shadow-color: Themes.shadow-color;
+                drop-shadow-offset-x: 0;
+                drop-shadow-offset-y: 4px;
+
+                VerticalBox {
+                    padding: 24px;
+                    spacing: 16px;
+
+                    // Title
+                    HorizontalBox {
+                        height: 40px;
+                        spacing: 8px;
+                        
+                        Text {
+                            text: I18n.t("Create New Project");
+                            font-size: 20px;
+                            font-weight: 600;
+                            color: Themes.current.primary-text;
+                            vertical-alignment: center;
+                        }
+                        
+                        Rectangle {
+                            horizontal-stretch: 1;
+                        }
+                        
+                        // Close button
+                        close-btn := TouchArea {
+                            width: 32px;
+                            height: 32px;
+                            clicked => { root.cancel(); }
+                            
+                            Text {
+                                text: "×";
+                                font-size: 26px;
+                                color: close-btn.has-hover ? Themes.current.hover-color : Themes.current.secondary-text;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                animate color { duration: 130ms; }
+                            }
+                        }
+                    }
+
+                    // Error message
+                    if root.error-message != "" : Rectangle {
+                        height: 40px;
+                        background: Themes.error-bg;
+                        border-radius: 4px;
+                        
+                        HorizontalBox {
+                            padding: 8px;
+                            spacing: 8px;
+                            
+                            Text {
+                                text: "!";
+                                font-size: 16px;
+                                color: Themes.error-text;
+                                vertical-alignment: center;
+                            }
+                            
+                            Text {
+                                text: root.error-message;
+                                font-size: 13px;
+                                color: Themes.error-text;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    Separator-H {}
+
+                    // Project name
+                    VerticalBox {
+                        padding: 5px;
+                        height: 60px;
+                        spacing: 4px;
+                        
+                        Text {
+                            text: I18n.t("Project Name");
+                            font-size: 14px;
+                            color: Themes.current.secondary-text;
+                        }
+                        
+                        Rectangle {
+                            background: Themes.current.secondary-bg;
+                            border-radius: 4px;
+                            height: 32px;
+                            
+                            TextInput {
+                                y: 8px;
+                                x: 12px;
+                                width: parent.width - 24px;
+                                height: parent.height;
+                                text <=> root.project-name;
+                                font-size: 14px;
+                                color: Themes.current.primary-text;
+                                input-type: InputType.text;
+                            }
+                        }
+                    }
+
+                    // Project path
+                    VerticalBox {
+                        padding: 5px;
+                        height: 60px;
+                        spacing: 4px;
+                        
+                        Text {
+                            text: I18n.t("Project Location");
+                            font-size: 14px;
+                            color: Themes.current.secondary-text;
+                        }
+                        
+                        HorizontalBox {
+                            padding: 0;
+                            spacing: 8px;
+                            
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                background: Themes.current.secondary-bg;
+                                border-radius: 4px;
+                                height: 32px;
+                                
+                                TextInput {
+                                    y: 8px;
+                                    x: 12px;
+                                    width: parent.width - 24px;
+                                    height: parent.height;
+                                    text <=> root.project-path;
+                                    font-size: 14px;
+                                    color: Themes.current.primary-text;
+                                    read-only: true;
+                                }
+                            }
+                            
+                            Button {
+                                width: 80px;
+                                text: I18n.t("Browse");
+                                clicked => { root.browse-path(); }
+                            }
+                        }
+                    }
+
+                    // Platform
+                    VerticalBox {
+                        height: 60px;
+                        spacing: 4px;
+                        
+                        Text {
+                            text: I18n.t("Platform");
+                            font-size: 14px;
+                            color: Themes.current.secondary-text;
+                        }
+                        
+                        HorizontalBox {
+                            padding: 0;
+                            spacing: 8px;
+                            
+                            for platform-item in [
+                                { name: I18n.t("Desktop"), value: Platform.Desktop },
+                                { name: I18n.t("Mobile"), value: Platform.Mobile },
+                                { name: I18n.t("Web"), value: Platform.Web }
+                            ]: btn-platform := TouchArea {
+                                width: 80px;
+                                height: 32px;
+                                
+                                Rectangle {
+                                    width: 80px;
+                                    height: 32px;
+                                    background: root.platform == platform-item.value ? Themes.current.active-color : btn-platform.has-hover ? Themes.current.hover-color : Themes.current.secondary-bg;
+                                    border-radius: 4px;
+                                    border-color: Themes.current.border-color;
+                                    border-width: 1px;
+                                }
+                                
+                                clicked => { root.platform = platform-item.value; }
+                                
+                                Text {
+                                    text: platform-item.name;
+                                    font-size: 12px;
+                                    color: root.platform == platform-item.value ? Themes.on-accent-text : Themes.current.primary-text;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+
+                    // Development mode
+                    VerticalBox {
+                        height: 60px;
+                        spacing: 4px;
+                        
+                        Text {
+                            text: I18n.t("Development Mode");
+                            font-size: 14px;
+                            color: Themes.current.secondary-text;
+                        }
+                        
+                        HorizontalBox {
+                            padding: 0;
+                            spacing: 8px;
+                            
+                            for mode-item in [
+                                { name: I18n.t("Code"), value: DevMode.Code },
+                                { name: I18n.t("Nodes"), value: DevMode.Nodes },
+                                { name: I18n.t("Hybrid"), value: DevMode.Hybrid }
+                            ]: btn-mode := TouchArea {
+                                width: 80px;
+                                height: 32px;
+                                
+                                Rectangle {
+                                    width: 80px;
+                                    height: 32px;
+                                    background: root.dev-mode == mode-item.value ? Themes.current.active-color : btn-mode.has-hover ? Themes.current.hover-color : Themes.current.secondary-bg;
+                                    border-radius: 4px;
+                                    border-color: Themes.current.border-color;
+                                    border-width: 1px;
+                                } 
+                                    
+                                clicked => { root.dev-mode = mode-item.value; }
+                                    
+                                    
+                                Text {
+                                    text: mode-item.name;
+                                    font-size: 12px;
+                                    color: root.dev-mode == mode-item.value ? Themes.on-accent-text : Themes.current.primary-text;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+
+                    // Page size
+                    VerticalBox {
+                        height: 60px;
+                        spacing: 4px;
+                        
+                        Text {
+                            text: I18n.t("Initial Page Size");
+                            font-size: 14px;
+                            color: Themes.current.secondary-text;
+                        }
+                        
+                        HorizontalBox {
+                            padding: 0;
+                            spacing: 8px;
+                            
+                            for size-item in [
+                                { name: I18n.t("Desktop"), value: PageSize.Desktop },
+                                { name: I18n.t("Tablet"), value: PageSize.Tablet },
+                                { name: I18n.t("Mobile"), value: PageSize.Mobile }
+                            ]: btn-page := TouchArea {
+                                width: 80px;
+                                height: 32px;
+                                Rectangle {
+                                    width: 80px;
+                                    height: 32px;
+                                    background: root.page-size == size-item.value ? Themes.current.active-color : btn-page.has-hover ? Themes.current.hover-color : Themes.current.secondary-bg;
+                                    border-radius: 4px;
+                                    border-color: Themes.current.border-color;
+                                    border-width: 1px;
+                                } 
+                                
+                                    
+                                TouchArea {
+                                    clicked => { root.page-size = size-item.value; }
+                                }
+                                
+                                Text {
+                                    text: size-item.name;
+                                    font-size: 12px;
+                                    color: root.page-size == size-item.value ? Themes.on-accent-text : Themes.current.primary-text;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle { vertical-stretch: 1; }
+
+                    // Buttons
+                    HorizontalBox {
+                        height: 50px;
+                        spacing: 8px;
+                        
+                        Rectangle { horizontal-stretch: 1; }
+                        
+                        Rectangle {
+                            width: 100px;
+                            height: 40px;
+                            background: cancel-btn.has-hover ? Themes.current.hover-color : Themes.current.secondary-bg;
+                            border-radius: 5px;
+                            border-width: 1px;
+                            border-color: Themes.current.border-color;
+                            
+                            Text {
+                                font-size: 14px;
+                                color: Themes.current.secondary-text;
+                                text: I18n.t("Cancel");
+                            }
+
+                            cancel-btn := TouchArea {
+                                mouse-cursor: MouseCursor.alias;
+                                clicked => { root.cancel(); }
+                            }
+                            animate background { duration: 130ms; }
+                        }
+                        
+                        Rectangle {
+                            width: 100px;
+                            height: 40px;
+                            background: create-btn.has-hover ? Themes.on-accent-bg : Themes.on-accent-color;
+                            border-radius: 5px;
+                            border-width: 1px;
+                            border-color: Themes.current.border-color;
+
+                            Text {
+                                font-size: 14px;
+                                color: create-btn.has-hover ? Themes.current.primary-text : Themes.on-accent-text;
+                                text: I18n.t("Create");
+                                animate color { duration: 130ms; }
+                            }
+
+                            create-btn := TouchArea {
+                                mouse-cursor: MouseCursor.alias;
+                                clicked => { 
+                                    root.create-project(
+                                        root.project-name, 
+                                        root.project-path, 
+                                        root.platform-to-int(root.platform), 
+                                        root.dev-mode-to-int(root.dev-mode),
+                                        root.page-size-to-int(root.page-size),
+                                        root.custom-width,
+                                        root.custom-height
+                                    ); 
+                                }
+                            }
+                            animate background { duration: 130ms; }
+                        }
+                        
+                    }
+                }
+            }
+        }
+    }
+}

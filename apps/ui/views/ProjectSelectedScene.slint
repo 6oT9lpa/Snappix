@@ -1,0 +1,460 @@
+import { HorizontalBox, VerticalBox } from "std-widgets.slint";
+import { I18n } from "../components/I18n.slint";
+import { Themes } from "../components/Themes.slint";
+import { RenameDialog } from "../dialogs/RenameDialog.slint";
+
+export struct RecentProjectData {
+    name: string,
+    path: string,
+    date: string,
+}
+
+component ProjectFileIcon inherits Path {
+    width: 16px;
+    height: 18px;
+    viewbox-width: 16;
+    viewbox-height: 18;
+    commands: "M2 1 L10 1 L14 5 L14 17 L2 17 Z M10 1 L10 5 L14 5";
+    fill: transparent;
+    stroke: Themes.current.secondary-text;
+    stroke-width: 1.2px;
+    stroke-line-cap: round;
+    stroke-line-join: round;
+}
+
+component FolderIcon inherits Path {
+    width: 18px;
+    height: 14px;
+    viewbox-width: 18;
+    viewbox-height: 14;
+    commands: "M1 3 L7 3 L8.5 1 L17 1 L17 13 L1 13 Z";
+    fill: transparent;
+    stroke: Themes.current.secondary-text;
+    stroke-width: 1.2px;
+    stroke-line-cap: round;
+    stroke-line-join: round;
+}
+
+component ContextAction inherits Rectangle {
+    in property <string> title: "";
+    callback selected();
+
+    height: 30px;
+    border-radius: Themes.border-radius;
+    background: action-touch.has-hover ? Themes.current.hover-color : transparent;
+
+    Text {
+        x: 10px;
+        y: (parent.height - self.height) / 2;
+        text: root.title;
+        font-size: 12px;
+        color: Themes.current.primary-text;
+        vertical-alignment: TextVerticalAlignment.center;
+    }
+
+    action-touch := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.selected(); }
+    }
+}
+
+component ProjectItem inherits Rectangle {
+    in property <string> project-name: "new project";
+    in property <string> project-path: "C:/new project";
+    in property <string> project-date: "20.11.2000 20:20";
+
+    callback clicked();
+    callback context-requested();
+
+    height: 60px;
+    clip: false;
+    background: Themes.current.secondary-bg;
+    border-radius: Themes.border-radius;
+    border-width: 1px;
+    border-color: Themes.current.border-color;
+
+    HorizontalBox {
+        spacing: 12px;
+        padding-left: 12px;
+        alignment: LayoutAlignment.start;
+
+        Rectangle {
+            width: 28px;
+            height: 42px;
+            y: (parent.height - self.height) / 2;
+            background: transparent;
+
+            ProjectFileIcon {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+            }
+        }
+
+        VerticalBox {
+            spacing: 4px;
+            padding: 0;
+            alignment: LayoutAlignment.center;
+
+            Text {
+                text: root.project-name;
+                font-size: 14px;
+                font-weight: 500;
+                color: Themes.current.primary-text;
+                font-family: Themes.font-family-regular;
+            }
+
+            Text {
+                text: root.project-path == "" ? "-" : root.project-path;
+                font-size: 11px;
+                color: Themes.current.secondary-text;
+                font-family: Themes.font-family-display;
+            }
+        }
+    }
+
+    Text {
+        x: parent.width - 100px;
+        y: (parent.height - self.height) / 2;
+        width: 92px;
+        text: root.project-date;
+        font-size: 11px;
+        color: Themes.current.secondary-text;
+        horizontal-alignment: TextHorizontalAlignment.right;
+        font-family: Themes.font-family-display;
+    }
+
+    item-touch := TouchArea {
+        width: parent.width - 56px;
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.clicked(); }
+
+        pointer-event(ev) => {
+            if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right {
+                root.context-requested();
+            }
+        }
+    }
+
+    states [
+        hovered when item-touch.has-hover: {
+            background: Themes.current.hover-color;
+            in { animate background { duration: 130ms; } }
+        }
+    ]
+}
+
+component ActionButton inherits Rectangle {
+    in property <string> text: "";
+    in property <bool> is-primary: false;
+
+    callback clicked();
+
+    height: 40px;
+    background: is-primary ? Themes.current.button-color : Themes.current.primary-bg;
+    border-radius: Themes.border-radius;
+    border-width: 1px;
+    border-color: is-primary ? Themes.current.button-color : Themes.current.border-color;
+
+    HorizontalBox {
+        alignment: LayoutAlignment.center;
+        spacing: 12px;
+
+        @children
+
+        Text {
+            text: root.text;
+            font-size: 14px;
+            color: Themes.current.primary-text;
+            vertical-alignment: TextVerticalAlignment.center;
+        }
+    }
+
+    btn-touch := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.clicked(); }
+    }
+
+    states [
+        hovered when btn-touch.has-hover: {
+            background: Themes.current.hover-color;
+            in { animate background { duration: 150ms; } }
+        }
+    ]
+}
+
+export component ProjectSelectedScene inherits Rectangle {
+    background: Themes.current.primary-bg;
+
+    in property <[RecentProjectData]> recent-projects: [];
+
+    callback create-project();
+    callback open-project();
+    callback load-project(string);
+    callback remove-project(string, string);
+    callback rename-project(string, string, string);
+    callback relocate-project(string, string);
+
+    in-out property <bool> context-menu-open: false;
+    in-out property <string> context-project-path: "";
+    in-out property <string> context-project-name: "";
+    in-out property <int> context-project-index: -1;
+    in-out property <length> context-menu-x: 0px;
+    in-out property <length> context-menu-y: 0px;
+
+    in-out property <bool> rename-dialog-open: false;
+    in-out property <string> rename-target-path: "";
+    in-out property <string> rename-target-name: "";
+    in-out property <string> rename-input: "";
+    in-out property <string> rename-error: "";
+
+    function open-context(path: string, name: string, index: int) {
+        root.context-menu-open = true;
+        root.context-project-path = path;
+        root.context-project-name = name;
+        root.context-project-index = index;
+        root.context-menu-x = root.width * 0.6 - 248px;
+        root.context-menu-y = Math.max(
+            84px,
+            Math.min(142px + index * 70px, root.height - 116px)
+        );
+    }
+
+    function open-rename(path: string, name: string) {
+        root.rename-dialog-open = true;
+        root.rename-target-path = path;
+        root.rename-target-name = name;
+        root.rename-input = name;
+        root.rename-error = "";
+    }
+
+    function commit-rename() {
+        if root.rename-input == "" {
+            root.rename-error = I18n.t("Project name cannot be empty");
+            return;
+        }
+        root.rename-project(root.rename-target-path, root.rename-target-name, root.rename-input);
+        root.rename-dialog-open = false;
+        root.rename-error = "";
+    }
+
+    TouchArea {
+        width: parent.width;
+        height: parent.height;
+
+        pointer-event(ev) => {
+            if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                root.context-menu-open = false;
+            }
+        }
+    }
+
+    Rectangle {
+        x: 0;
+        y: 0;
+        width: parent.width * 0.6;
+        height: parent.height;
+
+        VerticalBox {
+            padding-left: 40px;
+            padding-top: 40px;
+            padding-right: 40px;
+            spacing: 20px;
+            alignment: LayoutAlignment.start;
+
+            Text {
+                text: I18n.t("Open recent");
+                font-size: 24px;
+                font-weight: 700;
+                font-family: Themes.font-family-regular;
+                color: Themes.current.primary-text;
+            }
+
+            VerticalBox {
+                spacing: 10px;
+
+                if root.recent-projects.length == 0: Rectangle {
+                    height: 100px;
+                    background: transparent;
+
+                    Text {
+                        text: I18n.t("No recent projects");
+                        font-size: 14px;
+                        color: Themes.current.secondary-text;
+                        horizontal-alignment: TextHorizontalAlignment.center;
+                        vertical-alignment: TextVerticalAlignment.center;
+                    }
+                }
+
+                for project[idx] in root.recent-projects: ProjectItem {
+                    project-name: project.name;
+                    project-path: project.path;
+                    project-date: project.date;
+
+                    clicked => {
+                        root.context-menu-open = false;
+                        root.load-project(project.path);
+                    }
+
+                    context-requested => {
+                        root.open-context(project.path, project.name, idx);
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            x: parent.width - 1px;
+            width: 1px;
+            height: parent.height;
+            background: Themes.current.border-color;
+        }
+    }
+
+    Rectangle {
+        x: parent.width * 0.6;
+        y: 0;
+        width: parent.width * 0.4;
+        height: parent.height;
+
+        VerticalBox {
+            padding: 40px;
+            spacing: 40px;
+            alignment: LayoutAlignment.start;
+
+            HorizontalBox {
+                alignment: LayoutAlignment.start;
+                spacing: 16px;
+
+                Image {
+                    source: @image-url("../assets/images/logo.svg");
+                    width: 55px;
+                    height: 53px;
+                }
+
+                Text {
+                    text: "Snappix";
+                    font-size: 24px;
+                    font-weight: 600;
+                    color: Themes.current.primary-text;
+                    vertical-alignment: TextVerticalAlignment.center;
+                }
+            }
+
+            VerticalBox {
+                spacing: 15px;
+
+                Text {
+                    text: I18n.t("Get started");
+                    font-size: 18px;
+                    font-weight: 700;
+                    font-family: Themes.font-family-regular;
+                    color: Themes.current.primary-text;
+                }
+
+                ActionButton {
+                    text: I18n.t("Create New Project");
+                    is-primary: true;
+                    clicked => {
+                        root.context-menu-open = false;
+                        root.create-project();
+                    }
+
+                    Rectangle {
+                        width: 20px;
+                        height: 25px;
+
+                        Text {
+                            text: "+";
+                            font-size: 20px;
+                            color: Themes.current.primary-text;
+                            horizontal-alignment: TextHorizontalAlignment.center;
+                            vertical-alignment: TextVerticalAlignment.center;
+                        }
+                    }
+                }
+
+                ActionButton {
+                    height: 40px;
+                    is-primary: false;
+                    text: I18n.t("Open Project");
+                    clicked => {
+                        root.context-menu-open = false;
+                        root.open-project();
+                    }
+
+                    Rectangle {
+                        width: 20px;
+                        height: 25px;
+
+                        FolderIcon {
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if root.context-menu-open: Rectangle {
+        z: 2400;
+        x: root.context-menu-x;
+        y: root.context-menu-y;
+        width: 210px;
+        height: 102px;
+        background: Themes.current.primary-bg;
+        border-width: 1px;
+        border-color: Themes.current.border-color;
+        border-radius: Themes.border-radius;
+        drop-shadow-color: Themes.shadow-color;
+        drop-shadow-blur: Themes.shadow-size;
+
+        VerticalBox {
+            padding: 6px;
+            spacing: 4px;
+
+            ContextAction {
+                title: I18n.t("Delete project");
+                selected => {
+                    root.context-menu-open = false;
+                    root.remove-project(root.context-project-path, root.context-project-name);
+                }
+            }
+
+            ContextAction {
+                title: I18n.t("Rename project");
+                selected => {
+                    root.context-menu-open = false;
+                    root.open-rename(root.context-project-path, root.context-project-name);
+                }
+            }
+
+            ContextAction {
+                title: I18n.t("Change storage location");
+                selected => {
+                    root.context-menu-open = false;
+                    root.relocate-project(root.context-project-path, root.context-project-name);
+                }
+            }
+        }
+    }
+
+    RenameDialog {
+        z: 260;
+        width: parent.width;
+        height: parent.height;
+        show-dialog: root.rename-dialog-open;
+        dialog-title: I18n.t("Rename project");
+        confirm-label: I18n.t("Save");
+        dialog-width: 360px;
+        confirm-primary: true;
+        error-message: root.rename-error;
+        input-text <=> root.rename-input;
+        cancelled => {
+            root.rename-dialog-open = false;
+            root.rename-error = "";
+        }
+        input-edited(_value) => { root.rename-error = ""; }
+        confirmed(_value) => { root.commit-rename(); }
+    }
+}

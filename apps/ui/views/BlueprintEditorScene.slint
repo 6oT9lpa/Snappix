@@ -1,0 +1,110 @@
+import { HorizontalBox, VerticalBox } from "std-widgets.slint";
+import { Themes, Separator-H, Separator-V } from "../components/Themes.slint";
+import { PageTabsBar } from "../editor/PageTabs.slint";
+import { BlueprintCanvas } from "../editor/BlueprintCanvas.slint";
+import { BlueprintSidebar } from "./blueprint/BlueprintSidebar.slint";
+import { EditorDocumentInfo, HotkeyBinding, ProjectPageInfo } from "../models/EditorModels.slint";
+
+export component BlueprintEditorScene inherits Rectangle {
+    background: Themes.current.primary-bg;
+    forward-focus: hotkey-scope;
+
+    in-out property <string> project-name: "";
+    in-out property <[EditorDocumentInfo]> editor-documents: [];
+    in-out property <int> active-document-index: 0;
+    in-out property <[ProjectPageInfo]> project-page-items: [];
+    in-out property <int> active-page-index: 0;
+    in-out property <HotkeyBinding> reset-view-hotkey: { key: "0", ctrl: true, shift: false, alt: false };
+
+    property <float> blueprint-zoom-level: 1.0;
+    property <length> blueprint-offset-x: 0px;
+    property <length> blueprint-offset-y: 0px;
+
+    callback document-selected(int);
+    callback document-closed(int);
+    callback new-page-requested();
+    callback open-project-page(int);
+    callback open-page-blueprint(int);
+    callback open-server-blueprint();
+
+    function matches-hotkey-binding(
+        text: string,
+        ctrl: bool,
+        shift: bool,
+        alt: bool,
+        binding: HotkeyBinding
+    ) -> bool {
+        binding.key != ""
+            && ctrl == binding.ctrl
+            && shift == binding.shift
+            && alt == binding.alt
+            && text.to-lowercase() == binding.key.to-lowercase();
+    }
+
+    hotkey-scope := FocusScope {
+        width: parent.width;
+        height: parent.height;
+        focus-on-click: true;
+        init => { self.focus(); }
+
+        key-pressed(event) => {
+            if root.matches-hotkey-binding(
+                event.text,
+                event.modifiers.control,
+                event.modifiers.shift,
+                event.modifiers.alt,
+                root.reset-view-hotkey
+            ) {
+                blueprint-canvas.reset-view();
+                return accept;
+            }
+            reject
+        }
+    }
+
+    VerticalBox {
+        padding: 0;
+        spacing: 0;
+
+        PageTabsBar {
+            documents: root.editor-documents;
+            active-document-index: root.active-document-index;
+            show-new-button: false;
+            document-selected(idx) => { root.document-selected(idx); }
+            document-closed(idx) => { root.document-closed(idx); }
+        }
+
+        Separator-H {}
+
+        HorizontalBox {
+            padding: 0;
+            spacing: 0;
+
+            BlueprintSidebar {
+                project-name: root.project-name;
+                project-page-items: root.project-page-items;
+                open-project-page(page-index) => { root.open-project-page(page-index); }
+                open-page-blueprint(page-index) => { root.open-page-blueprint(page-index); }
+                open-server-blueprint => { root.open-server-blueprint(); }
+            }
+
+            Separator-V {}
+
+            canvas-host := Rectangle {
+                horizontal-stretch: 1;
+                background: Themes.current.primary-bg;
+
+                blueprint-canvas := BlueprintCanvas {
+                    width: parent.width;
+                    height: parent.height;
+                    zoom-level <=> root.blueprint-zoom-level;
+                    offset-x <=> root.blueprint-offset-x;
+                    offset-y <=> root.blueprint-offset-y;
+                    grid-visible: true;
+                    grid-size: 24px;
+                    ui-helpers-visible: true;
+                }
+            }
+        }
+    }
+}

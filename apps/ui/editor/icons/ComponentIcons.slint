@@ -1,0 +1,375 @@
+// Иконки компонентов для библиотеки и canvas
+
+import { Themes } from "../../components/Themes.slint";
+
+// === Layout Container Icons ===
+
+/// Иконка Flex контейнера
+export component IconFlexContainer inherits Path {
+    width: 16px;
+    height: 16px;
+    stroke: Themes.current.primary-text;
+    stroke-width: 1px;
+    fill: transparent;
+    commands: "M 0 2 L 16 2 M 0 8 L 16 8 M 0 14 L 16 14 M 4 0 L 4 4 M 12 6 L 12 10 M 4 12 L 4 16";
+}
+
+/// Иконка Grid контейнера
+export component IconGridContainer inherits Path {
+    width: 16px;
+    height: 16px;
+    stroke: Themes.current.primary-text;
+    stroke-width: 1px;
+    fill: transparent;
+    commands: "M 0 0 L 16 0 L 16 16 L 0 16 Z M 0 5.5 L 16 5.5 M 0 11 L 16 11 M 5.5 0 L 5.5 16 M 11 0 L 11 16";
+}
+
+/// Иконка Stack контейнера
+export component IconStackContainer inherits Path {
+    width: 16px;
+    height: 16px;
+    stroke: Themes.current.primary-text;
+    stroke-width: 1px;
+    fill: transparent;
+    commands: "M 2 2 L 14 2 L 14 6 L 2 6 Z M 4 7 L 16 7 L 16 11 L 4 11 Z M 2 12 L 14 12 L 14 16 L 2 16 Z";
+}
+
+// === Basic Element Icons ===
+
+/// Иконка Div элемента
+export component IconDiv inherits Path {
+    width: 16px;
+    height: 16px;
+    stroke: Themes.current.primary-text;
+    stroke-width: 1px;
+    fill: transparent;
+    commands: "M 2 2 L 14 2 L 14 14 L 2 14 Z";
+}
+
+/// Иконка Text элемента
+export component IconText inherits Path {
+    width: 16px;
+    height: 16px;
+    stroke: Themes.current.primary-text;
+    stroke-width: 1.5px;
+    fill: transparent;
+    commands: "M 2 4 L 14 4 M 2 8 L 12 8 M 2 12 L 10 12";
+}
+
+export component IconLabel inherits Path {
+    width: 16px;
+    height: 16px;
+    stroke: Themes.current.primary-text;
+    stroke-width: 1.5px;
+    fill: transparent;
+    commands: "M 2 4 L 14 4 M 2 8 L 14 8";
+}
+
+/// Иконка Image элемента
+export component IconImage inherits Path {
+    width: 16px;
+    height: 16px;
+    stroke: Themes.current.primary-text;
+    stroke-width: 1px;
+    fill: transparent;
+    commands: "M 1 3 L 15 3 L 15 13 L 1 13 Z M 4 6 L 4 6 M 3 11 L 7 7 L 10 10 L 12 8 L 14 10 L 14 11 Z";
+}
+
+/// Иконка Button элемента
+export component IconButton inherits Path {
+    width: 16px;
+    height: 16px;
+    stroke: Themes.current.primary-text;
+    stroke-width: 1px;
+    fill: transparent;
+    commands: "M 4 5 L 4 11 L 12 11 L 12 5 Z M 6 8 L 10 8";
+}
+
+// === Form Element Icons ===
+
+/// Иконка Input элемента
+export component IconInput inherits Path {
+    width: 16px;
+    height: 16px;
+    stroke: Themes.current.primary-text;
+    stroke-width: 1px;
+    fill: transparent;
+    commands: "M 2 5 L 14 5 L 14 11 L 2 11 Z M 5 8 L 5 8";
+}
+
+/// Иконка Textarea элемента
+export component IconTextarea inherits Path {
+    width: 16px;
+    height: 16px;
+    stroke: Themes.current.primary-text;
+    stroke-width: 1px;
+    fill: transparent;
+    commands: "M 2 3 L 14 3 L 14 13 L 2 13 Z M 5 6 L 11 6 M 5 8 L 11 8 M 5 10 L 8 10";
+}
+
+/// Иконка Checkbox элемента
+export component IconCheckbox inherits Path {
+    width: 16px;
+    height: 16px;
+    stroke: Themes.current.primary-text;
+    stroke-width: 1px;
+    fill: transparent;
+    commands: "M 3 3 L 13 3 L 13 13 L 3 13 Z M 5 8 L 7 10 L 11 6";
+}
+
+/// Иконка Select/Dropdown элемента
+export component IconSelect inherits Path {
+    width: 16px;
+    height: 16px;
+    stroke: Themes.current.primary-text;
+    stroke-width: 1px;
+    fill: transparent;
+    commands: "M 2 5 L 14 5 L 14 11 L 2 11 Z M 10 7 L 12 9 L 14 7";
+}
+
+/// Иконка Radio кнопки
+export component IconRadio inherits Path {
+    width: 16px;
+    height: 16px;
+    stroke: Themes.current.primary-text;
+    stroke-width: 1px;
+    fill: transparent;
+    commands: "M 8 1 A 7 7 0 0 1 8 15 A 7 7 0 0 1 8 1 M 8 5 A 3 3 0 0 1 8 11 A 3 3 0 0 1 8 5";
+}
+
+/// Иконка Slider элемента
+export component IconSlider inherits Path {
+    width: 16px;
+    height: 16px;
+    stroke: Themes.current.primary-text;
+    stroke-width: 1px;
+    fill: transparent;
+    commands: "M 2 8 L 14 8 M 6 5 L 6 11 M 10 5 L 10 11";
+}
+
+/// Иконка Switch элемента
+export component IconSwitch inherits Path {
+    width: 16px;
+    height: 16px;
+    stroke: Themes.current.primary-text;
+    stroke-width: 1px;
+    fill: transparent;
+    commands: "M 2 6 L 14 6 L 14 10 L 2 10 Z M 5 8 A 2 2 0 0 0 5 8";
+}
+
+// === Navigation Icons ===
+
+/// Иконка навигации (меню)
+export component IconMenu inherits Path {
+    width: 16px;
+    height: 16px;
+    stroke: Themes.current.primary-text;
+    stroke-width: 1.5px;
+    fill: transparent;
+    commands: "M 2 3 L 14 3 M 2 8 L 14 8 M 2 13 L 14 13";
+}
+
+/// Иконка вкладки (Tab)
+export component IconTab inherits Path {
+    width: 16px;
+    height: 16px;
+    stroke: Themes.current.primary-text;
+    stroke-width: 1px;
+    fill: transparent;
+    commands: "M 1 4 L 5 4 L 7 2 L 15 2 L 15 14 L 1 14 Z";
+}
+
+/// Иконка ссылки (Link)
+export component IconLink inherits Path {
+    width: 16px;
+    height: 16px;
+    stroke: Themes.current.primary-text;
+    stroke-width: 1px;
+    fill: transparent;
+    commands: "M 7 9 L 9 7 M 5 11 L 3 13 M 11 5 L 13 3 M 4 8 L 8 4 M 8 12 L 12 8";
+}
+
+// === Media Icons ===
+
+/// Иконка видео элемента
+export component IconVideo inherits Path {
+    width: 16px;
+    height: 16px;
+    stroke: Themes.current.primary-text;
+    stroke-width: 1px;
+    fill: transparent;
+    commands: "M 1 4 L 10 4 L 10 12 L 1 12 Z M 10 6 L 15 4 L 15 12 L 10 10 Z";
+}
+
+/// Иконка аудио элемента
+export component IconAudio inherits Path {
+    width: 16px;
+    height: 16px;
+    stroke: Themes.current.primary-text;
+    stroke-width: 1px;
+    fill: transparent;
+    commands: "M 4 4 L 4 12 M 4 4 L 12 2 L 12 10 M 4 8 L 4 14 A 3 3 0 0 0 4 8 M 9 10 A 3 3 0 0 0 9 16 A 3 3 0 0 0 9 10";
+}
+
+/// Компонент-обёртка для отображения иконки по имени типа
+export component ComponentIcon inherits Rectangle {
+    in property <string> icon-type: "div";
+    in property <color> icon-color: Themes.current.primary-text;
+    
+    width: 16px;
+    height: 16px;
+    background: transparent;
+    
+    if icon-type == "flex" : Path {
+        width: 16px;
+        height: 16px;
+        stroke: icon-color;
+        stroke-width: 1px;
+        fill: transparent;
+        commands: "M 0 2 L 16 2 M 0 8 L 16 8 M 0 14 L 16 14 M 4 0 L 4 4 M 12 6 L 12 10 M 4 12 L 4 16";
+    }
+    
+    if icon-type == "grid" : Path {
+        width: 16px;
+        height: 16px;
+        stroke: icon-color;
+        stroke-width: 1px;
+        fill: transparent;
+        commands: "M 0 0 L 16 0 L 16 16 L 0 16 Z M 0 5.5 L 16 5.5 M 0 11 L 16 11 M 5.5 0 L 5.5 16 M 11 0 L 11 16";
+    }
+    
+    if icon-type == "stack" : Path {
+        width: 16px;
+        height: 16px;
+        stroke: icon-color;
+        stroke-width: 1px;
+        fill: transparent;
+        commands: "M 2 2 L 14 2 L 14 6 L 2 6 Z M 4 7 L 16 7 L 16 11 L 4 11 Z M 2 12 L 14 12 L 14 16 L 2 16 Z";
+    }
+    
+    if icon-type == "div" : Path {
+        width: 16px;
+        height: 16px;
+        stroke: icon-color;
+        stroke-width: 1px;
+        fill: transparent;
+        commands: "M 2 2 L 14 2 L 14 14 L 2 14 Z";
+    }
+    
+    if icon-type == "text" : Path {
+        width: 16px;
+        height: 16px;
+        stroke: icon-color;
+        stroke-width: 1.5px;
+        fill: transparent;
+        commands: "M 2 4 L 14 4 M 2 8 L 12 8 M 2 12 L 10 12";
+    }
+
+    if icon-type == "label" : Path {
+        width: 16px;
+        height: 16px;
+        stroke: icon-color;
+        stroke-width: 1.5px;
+        fill: transparent;
+        commands: "M 2 4 L 14 4 M 2 8 L 14 8";
+    }
+    
+    if icon-type == "image" : Path {
+        width: 16px;
+        height: 16px;
+        stroke: icon-color;
+        stroke-width: 1px;
+        fill: transparent;
+        commands: "M 1 3 L 15 3 L 15 13 L 1 13 Z M 4 6 L 4 6 M 3 11 L 7 7 L 10 10 L 12 8 L 14 10 L 14 11 Z";
+    }
+    
+    if icon-type == "button" : Path {
+        width: 16px;
+        height: 16px;
+        stroke: icon-color;
+        stroke-width: 1px;
+        fill: transparent;
+        commands: "M 4 5 L 4 11 L 12 11 L 12 5 Z M 6 8 L 10 8";
+    }
+
+    if icon-type == "input" : Path {
+        width: 16px;
+        height: 16px;
+        stroke: icon-color;
+        stroke-width: 1px;
+        fill: transparent;
+        commands: "M 2 5 L 14 5 L 14 11 L 2 11 Z M 5 8 L 5 8";
+    }
+    
+    if icon-type == "textarea" : Path {
+        width: 16px;
+        height: 16px;
+        stroke: icon-color;
+        stroke-width: 1px;
+        fill: transparent;
+        commands: "M 2 3 L 14 3 L 14 13 L 2 13 Z M 5 6 L 11 6 M 5 8 L 11 8 M 5 10 L 8 10";
+    }
+    
+    if icon-type == "checkbox" : Path {
+        width: 16px;
+        height: 16px;
+        stroke: icon-color;
+        stroke-width: 1px;
+        fill: transparent;
+        commands: "M 3 3 L 13 3 L 13 13 L 3 13 Z M 5 8 L 7 10 L 11 6";
+    }
+    
+    if icon-type == "select" : Path {
+        width: 16px;
+        height: 16px;
+        stroke: icon-color;
+        stroke-width: 1px;
+        fill: transparent;
+        commands: "M 2 5 L 14 5 L 14 11 L 2 11 Z M 10 7 L 12 9 L 14 7";
+    }
+    
+    if icon-type == "radio" : Path {
+        width: 16px;
+        height: 16px;
+        stroke: icon-color;
+        stroke-width: 1px;
+        fill: transparent;
+        commands: "M 8 1 A 7 7 0 0 1 8 15 A 7 7 0 0 1 8 1 M 8 5 A 3 3 0 0 1 8 11 A 3 3 0 0 1 8 5";
+    }
+    
+    if icon-type == "slider" : Path {
+        width: 16px;
+        height: 16px;
+        stroke: icon-color;
+        stroke-width: 1px;
+        fill: transparent;
+        commands: "M 2 8 L 14 8 M 6 5 L 6 11 M 10 5 L 10 11";
+    }
+    
+    if icon-type == "switch" : Path {
+        width: 16px;
+        height: 16px;
+        stroke: icon-color;
+        stroke-width: 1px;
+        fill: transparent;
+        commands: "M 2 6 L 14 6 L 14 10 L 2 10 Z M 5 8 A 2 2 0 0 0 5 8";
+    }
+    
+    if icon-type == "video" : Path {
+        width: 16px;
+        height: 16px;
+        stroke: icon-color;
+        stroke-width: 1px;
+        fill: transparent;
+        commands: "M 1 4 L 10 4 L 10 12 L 1 12 Z M 10 6 L 15 4 L 15 12 L 10 10 Z";
+    }
+    
+    if icon-type == "audio" : Path {
+        width: 16px;
+        height: 16px;
+        stroke: icon-color;
+        stroke-width: 1px;
+        fill: transparent;
+        commands: "M 4 4 L 4 12 M 4 4 L 12 2 L 12 10 M 4 8 L 4 14 A 3 3 0 0 0 4 8 M 9 10 A 3 3 0 0 0 9 16 A 3 3 0 0 0 9 10";
+    }
+}

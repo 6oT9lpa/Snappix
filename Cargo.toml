@@ -1,0 +1,9 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/shared",
+    "crates/core-ui-graphs",
+    "crates/core-blueprint",
+    "crates/project-manager",
+    "apps",
+]

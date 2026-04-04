@@ -1,0 +1,191 @@
+﻿// Data models for visual editor
+
+export struct CanvasPosition {
+    x: length,
+    y: length,
+}
+
+export struct CanvasSize {
+    width: length,
+    height: length,
+}
+
+export struct CanvasBounds {
+    position: CanvasPosition,
+    size: CanvasSize,
+}
+
+export enum DragItemType {
+    Component,
+    Asset,
+    Template,
+}
+
+export struct DragData {
+    component-id: string,
+    component-name: string,
+    component-type: string,
+    item-type: DragItemType,
+    preview-image: image,
+}
+
+export enum DragState {
+    None,
+    Dragging,
+    Dropping,
+}
+
+export enum SelectionMode {
+    Single,
+    Multi,
+    Range,
+}
+
+export struct SelectionInfo {
+    element-id: string,
+    element-name: string,
+    element-type: string,
+    parent-id: string,
+    depth: int,
+    has-children: bool,
+    is-outline-expanded: bool,
+    bounds: CanvasBounds,
+    rotation: float,
+    text-content: string,
+    placeholder: string,
+    checked: bool,
+    container-mode: string,
+    allow-absolute-children: bool,
+    layout-padding: float,
+    layout-spacing: float,
+    layout-margin: float,
+    layout-order: float,
+    stack-alignment: string,
+    flex-direction: string,
+    flex-wrap: string,
+    justify-items: string,
+    justify-content: string,
+    align-items: string,
+    align-content: string,
+    place-items: string,
+    flex-flow: string,
+    grid-template-columns: string,
+    grid-template-rows: string,
+    grid-template-areas: string,
+    checkbox-box-side: string,
+    checkbox-check-color: color,
+    checkbox-box-color: color,
+    checkbox-box-border-color: color,
+    checkbox-box-border-width: float,
+    checkbox-space-between: bool,
+    background: color,
+    background-image-path: string,
+    background-image: image,
+    border-color: color,
+    border-width: float,
+    border-radius: float,
+    font-size: float,
+    font-family: string,
+    text-wrap: string,
+    inherit-text-style: bool,
+    image-source-path: string,
+    image-source: image,
+    text-color: color,
+    is-selected: bool,
+    is-group-anchor: bool,
+    is-hovered: bool,
+}
+
+export struct ProjectPageInfo {
+    page-index: int,
+    page-name: string,
+    is-open: bool,
+    is-active: bool,
+}
+
+export struct CanvasCommentInfo {
+    comment-id: string,
+    position: CanvasPosition,
+    width: float,
+    body-height: float,
+    title: string,
+    body: string,
+    title-font-size: float,
+    body-font-size: float,
+    has-image: bool,
+    image: image,
+    image-width: int,
+    image-height: int,
+}
+
+export struct EditorDocumentInfo {
+    document-id: string,
+    label: string,
+    kind: string,
+    linked-page-index: int,
+    is-active: bool,
+    is-dirty: bool,
+}
+
+export enum CanvasCursor {
+    Default,
+    Move,
+    Resize-NW,
+    Resize-N,
+    Resize-NE,
+    Resize-E,
+    Resize-SE,
+    Resize-S,
+    Resize-SW,
+    Resize-W,
+    Crosshair,
+    Grab,
+    Grabbing,
+}
+
+export struct CanvasState {
+    zoom-level: float,
+    offset: CanvasPosition,
+    grid-visible: bool,
+    grid-size: length,
+    snap-to-grid: bool,
+    show-rulers: bool,
+}
+
+export struct HotkeyBinding {
+    key: string,
+    ctrl: bool,
+    shift: bool,
+    alt: bool,
+}
+
+export struct TimelineEntry {
+    index: int,
+    title: string,
+    details: string,
+    timestamp: string,
+    action-kind: string,
+}
+
+export struct AppErrorNotification {
+    id: string,
+    message: string,
+    details: string,
+}
+
+export enum ElementAction {
+    Create,
+    Delete,
+    Move,
+    Resize,
+    Duplicate,
+    BringForward,
+    SendBackward,
+}
+
+export struct HistoryAction {
+    action: ElementAction,
+    element-id: string,
+    action-data: string,
+    timestamp: int,
+}

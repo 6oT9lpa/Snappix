@@ -1,0 +1,2135 @@
+import { VerticalBox, HorizontalBox, TextEdit, ComboBox } from "std-widgets.slint";
+import { Themes, Separator-H } from "../components/Themes.slint";
+import { I18n } from "../components/I18n.slint";
+import { CanvasBounds } from "../models/EditorModels.slint";
+
+component NumberAdjust inherits Rectangle {
+    in property <string> label: "";
+    in property <float> value: 0;
+    in property <float> min: -9999;
+    in property <float> max: 9999;
+    in property <float> step: 1;
+    callback value-changed(float);
+    property <bool> editing: false;
+    property <string> editing-text: "";
+    property <string> error-message: "";
+    private property <bool> has-error: root.error-message != "";
+
+    function begin-editing() {
+        root.editing = true;
+        root.error-message = "";
+        root.editing-text = (round(root.value * 100) / 100) + "";
+    }
+
+    function commit-editing() {
+        if root.editing-text == "" || root.editing-text == "-" || root.editing-text == "." || root.editing-text == "-." {
+            root.error-message = I18n.t("Invalid number");
+            return;
+        }
+
+        let parsed = root.editing-text.to-float();
+        if parsed != parsed {
+            root.error-message = I18n.t("Invalid number");
+            return;
+        }
+
+        let nv = Math.max(root.min, Math.min(root.max, parsed));
+        root.value-changed(nv);
+        root.error-message = "";
+        root.editing = false;
+    }
+
+    height: root.has-error ? 42px : 28px;
+    horizontal-stretch: 1;
+    background: transparent;
+
+    VerticalBox {
+        padding: 0;
+        spacing: 2px;
+
+        Rectangle {
+            height: 28px;
+            background: Themes.current.primary-bg;
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: root.has-error ? Themes.error-text : Themes.current.border-color;
+
+            HorizontalBox {
+                padding: 0;
+                padding-left: 8px;
+                padding-right: 8px;
+                spacing: 6px;
+
+                Rectangle {
+                    height: parent.height;
+                    background: transparent;
+
+                    Text {
+                        height: 28px;
+                        text: root.label == "" ? I18n.t("Value") : root.label;
+                        font-size: 12px;
+                        color: Themes.current.secondary-text;
+                        width: parent.width;
+                        horizontal-alignment: left;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+
+                HorizontalBox {
+                    padding: 0;
+                    padding-top: 4px;
+                    width: 100px;
+
+                    Rectangle {
+                        width: 20px;
+                        height: 20px;
+                        border-radius: 4px;
+                        background: minus-touch.has-hover ? Themes.current.hover-color : Themes.current.secondary-bg;
+
+                        minus-touch := TouchArea {
+                            mouse-cursor: MouseCursor.pointer;
+                            clicked => {
+                                root.error-message = "";
+                                let nv = Math.max(root.min, root.value - root.step);
+                                root.value-changed(nv);
+                            }
+                        }
+
+                        Text {
+                            text: "–";
+                            font-size: 14px;
+                            font-weight: 600;
+                            color: Themes.current.primary-text;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        background: transparent;
+
+                        value-touch := TouchArea {
+                            mouse-cursor: MouseCursor.pointer;
+                            double-clicked => { root.begin-editing(); }
+                        }
+
+                        if !root.editing: Text {
+                            height: 24px;
+                            width: 50px;
+                            text: round(root.value * 100) / 100;
+                            font-size: 12px;
+                            font-weight: 600;
+                            color: Themes.current.primary-text;
+                            horizontal-alignment: TextHorizontalAlignment.center;
+                            vertical-alignment: TextVerticalAlignment.center;
+                        }
+
+                        if root.editing: TextInput {
+                            text <=> root.editing-text;
+                            input-type: InputType.number;
+                            horizontal-alignment: TextHorizontalAlignment.center;
+                             vertical-alignment: TextVerticalAlignment.center;
+                            color: Themes.current.primary-text;
+                            font-size: 12px;
+                            font-weight: 600;
+                            accepted => { root.commit-editing(); }
+                            edited => { root.error-message = ""; }
+                        }
+                    }
+
+                    Rectangle {
+                        width: 20px;
+                        height: 20px;
+                        border-radius: 4px;
+                        background: plus-touch.has-hover ? Themes.current.hover-color : Themes.current.secondary-bg;
+
+                        plus-touch := TouchArea {
+                            mouse-cursor: MouseCursor.pointer;
+                            clicked => {
+                                root.error-message = "";
+                                let nv = Math.min(root.max, root.value + root.step);
+                                root.value-changed(nv);
+                            }
+                        }
+
+                        Text {
+                            text: "+";
+                            font-size: 14px;
+                            font-weight: 600;
+                            color: Themes.current.primary-text;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                
+            }
+        }
+
+        if root.has-error: Rectangle {
+            height: 12px;
+            background: transparent;
+
+            Text {
+                x: 8px;
+                width: parent.width - 16px;
+                text: root.error-message;
+                font-size: 10px;
+                color: Themes.error-text;
+                horizontal-alignment: TextHorizontalAlignment.left;
+                vertical-alignment: TextVerticalAlignment.center;
+                overflow: elide;
+            }
+        }
+    }
+}
+
+component StringField inherits Rectangle {
+    in property <string> label: "";
+    in-out property <string> value: "";
+    callback value-changed(string);
+
+    height: 28px;
+    horizontal-stretch: 1;
+    background: Themes.current.primary-bg;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: Themes.current.border-color;
+
+    HorizontalBox {
+        padding: 0;
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 6px;
+
+        Rectangle {
+            width: 106px;
+            height: parent.height;
+            background: transparent;
+
+            Text {
+                height: 20px;
+                horizontal-alignment: TextHorizontalAlignment.left;
+                text: root.label == "" ? I18n.t("Value") : root.label;
+                font-size: 12px;
+                color: Themes.current.secondary-text;
+                font-weight: 600;
+                vertical-alignment: TextVerticalAlignment.center;
+                width: parent.width;
+                overflow: elide;
+            }
+        }
+
+        Rectangle {
+            horizontal-stretch: 1;
+            height: 25px;
+            background: transparent;
+            clip: true;
+
+            TextInput {
+                width: parent.width;
+                height: parent.height;
+                horizontal-alignment: TextHorizontalAlignment.right;
+                vertical-alignment: TextVerticalAlignment.center;
+                single-line: true;
+                text <=> root.value;
+                font-size: 12px;
+                color: Themes.current.primary-text;
+                edited => { root.value-changed(root.value); }
+            }
+        }
+    }
+}
+
+component BrowseStringField inherits Rectangle {
+    in property <string> label: "";
+    in-out property <string> value: "";
+    in property <string> display-value: "";
+    in property <bool> read-only: false;
+    callback value-changed(string);
+    callback browse-requested();
+
+    height: 28px;
+    horizontal-stretch: 1;
+    background: Themes.current.primary-bg;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: Themes.current.border-color;
+
+    HorizontalBox {
+        padding: 0;
+        padding-left: 8px;
+        padding-right: 6px;
+        spacing: 6px;
+
+        Rectangle {
+            width: 106px;
+            height: parent.height;
+            background: transparent;
+
+            Text {
+                height: 20px;
+                horizontal-alignment: TextHorizontalAlignment.left;
+                text: root.label == "" ? I18n.t("Value") : root.label;
+                font-size: 12px;
+                color: Themes.current.secondary-text;
+                font-weight: 600;
+                vertical-alignment: TextVerticalAlignment.center;
+                width: parent.width;
+                overflow: elide;
+            }
+        }
+
+        Rectangle {
+            horizontal-stretch: 1;
+            height: 25px;
+            background: transparent;
+            clip: true;
+
+            if root.read-only: Text {
+                width: parent.width;
+                height: parent.height;
+                horizontal-alignment: TextHorizontalAlignment.right;
+                vertical-alignment: TextVerticalAlignment.center;
+                text: root.display-value == "" ? root.value : root.display-value;
+                font-size: 12px;
+                color: Themes.current.primary-text;
+                overflow: elide;
+            }
+
+            if !root.read-only: TextInput {
+                width: parent.width;
+                height: parent.height;
+                horizontal-alignment: TextHorizontalAlignment.right;
+                vertical-alignment: TextVerticalAlignment.center;
+                single-line: true;
+                text <=> root.value;
+                font-size: 12px;
+                color: Themes.current.primary-text;
+                edited => { root.value-changed(root.value); }
+            }
+        }
+
+        VerticalBox {
+            padding: 4px;
+
+            Rectangle {
+                width: 42px;
+                height: 20px;
+                border-radius: 4px;
+                background: browse-touch.has-hover ? Themes.current.hover-color : Themes.current.secondary-bg;
+
+                browse-touch := TouchArea {
+                    mouse-cursor: MouseCursor.pointer;
+                    clicked => { root.browse-requested(); }
+                }
+
+                Text {
+                    text: "Open";
+                    font-size: 10px;
+                    font-weight: 700;
+                    color: Themes.current.primary-text;
+                    horizontal-alignment: TextHorizontalAlignment.center;
+                    vertical-alignment: TextVerticalAlignment.center;
+                }
+            }
+        }
+    }
+}
+
+component ColorField inherits Rectangle {
+    in property <string> label: "";
+    in-out property <string> value: "";
+    callback value-changed(string);
+    callback picker-requested();
+
+    height: 28px;
+    horizontal-stretch: 1;
+    background: Themes.current.primary-bg;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: Themes.current.border-color;
+
+    HorizontalBox {
+        padding: 0;
+        padding-left: 8px;
+        padding-right: 6px;
+        spacing: 6px;
+
+        Rectangle {
+            width: 106px;
+            height: parent.height;
+            background: transparent;
+
+            Text {
+                height: 20px;
+                horizontal-alignment: TextHorizontalAlignment.left;
+                text: root.label == "" ? I18n.t("Value") : root.label;
+                font-size: 12px;
+                color: Themes.current.secondary-text;
+                font-weight: 600;
+                vertical-alignment: TextVerticalAlignment.center;
+                width: parent.width;
+                overflow: elide;
+            }
+        }
+
+        Rectangle {
+            horizontal-stretch: 1;
+            height: 25px;
+            background: transparent;
+            clip: true;
+
+            TextInput {
+                width: parent.width;
+                height: parent.height;
+                horizontal-alignment: TextHorizontalAlignment.right;
+                vertical-alignment: TextVerticalAlignment.center;
+                single-line: true;
+                text <=> root.value;
+                font-size: 12px;
+                color: Themes.current.primary-text;
+                edited => { root.value-changed(root.value); }
+            }
+        }
+
+        VerticalBox {
+            padding: 2px;
+
+            Rectangle {
+                width: 25px;
+                height: 25px;
+                border-radius: 4px;
+                background: pick-touch.has-hover ? Themes.current.hover-color : Themes.current.secondary-bg;
+
+                pick-touch := TouchArea {
+                    mouse-cursor: MouseCursor.pointer;
+                    clicked => { root.picker-requested(); }
+                }
+
+                Path {
+                    width: 15px;
+                    height: 15px;
+                    viewbox-width: 25;
+                    viewbox-height: 25;
+                    commands: "M10.5312 19.2911L10.0008 18.7608L10.5312 19.2911ZM11.333 6.84476L11.8633 6.31443L11.333 6.84476ZM10.2413 5.75308L9.71095 6.28341L9.71095 6.28341L10.2413 5.75308ZM12.4246 3.56973L12.955 3.0394L12.4246 3.56973ZM13.5163 4.6614L12.986 5.19173C13.1266 5.33239 13.3174 5.4114 13.5163 5.4114C13.7152 5.4114 13.906 5.33239 14.0466 5.19173L13.5163 4.6614ZM14.9719 3.20583L14.4416 2.6755L14.9719 3.20583ZM19.3386 10.4837L18.8083 9.95336C18.5154 10.2462 18.5154 10.7211 18.8083 11.014L19.3386 10.4837ZM20.4303 11.5754L19.8999 12.1057L20.4303 11.5754ZM2.45219 19.3645L2.98252 19.8948H2.98252L2.45219 19.3645ZM3.0809 18.7357L2.55057 18.2054H2.55057L3.0809 18.7357ZM4.63554 21.5478L5.16587 22.0781L4.63554 21.5478ZM5.26425 20.9191L4.73392 20.3888L5.26425 20.9191ZM3.77862 16.7467L3.03321 16.8295L3.03321 16.8295L3.77862 16.7467ZM3.72581 16.2714L4.47122 16.1885L4.47122 16.1885L3.72581 16.2714ZM7.25332 20.2214L7.17049 20.9668H7.1705L7.25332 20.2214ZM7.72863 20.2742L7.81145 19.5288H7.81145L7.72863 20.2742ZM5.51488 20.6781L6.00027 21.2499H6.00027L5.51488 20.6781ZM6.90709 20.1898L6.92895 19.4401H6.92894L6.90709 20.1898ZM3.88016 14.4259L3.21747 14.0747L3.21746 14.0747L3.88016 14.4259ZM3.67658 15.0063L2.93971 14.8665L2.93971 14.8665L3.67658 15.0063ZM3.32186 18.4851L2.75011 17.9997L2.75011 17.9997L3.32186 18.4851ZM3.81022 17.0929L4.5599 17.0711L4.5599 17.0711L3.81022 17.0929ZM9.57407 20.1198L9.92526 20.7825H9.92526L9.57407 20.1198ZM8.99371 20.3234L9.13345 21.0603H9.13345L8.99371 20.3234ZM13.1769 12.9385C12.884 12.6456 12.4091 12.6456 12.1162 12.9385C11.8233 13.2314 11.8233 13.7063 12.1162 13.9992L13.1769 12.9385ZM11.9697 17.8526C12.2626 18.1455 12.7374 18.1455 13.0303 17.8526C13.3232 17.5597 13.3232 17.0848 13.0303 16.792L11.9697 17.8526ZM11.1769 14.9385C10.884 14.6456 10.4091 14.6456 10.1162 14.9385C9.82332 15.2314 9.82332 15.7063 10.1162 15.9992L11.1769 14.9385ZM8.61927 8.49779C8.32638 8.79068 8.32638 9.26555 8.61927 9.55845C8.91217 9.85134 9.38704 9.85134 9.67993 9.55845L8.61927 8.49779ZM6.70805 12.5303C7.00094 12.2374 7.00094 11.7626 6.70805 11.4697C6.41515 11.1768 5.94028 11.1768 5.64739 11.4697L6.70805 12.5303ZM21.1243 5.20279C21.2363 5.60157 21.6503 5.83406 22.0491 5.72207C22.4479 5.61007 22.6804 5.196 22.5684 4.79721L21.1243 5.20279ZM22.1046 8.54098C22.311 8.18188 22.1873 7.72341 21.8282 7.51697C21.4691 7.31053 21.0106 7.43428 20.8042 7.79338L22.1046 8.54098ZM11.8633 6.31443L10.7716 5.22275L9.71095 6.28341L10.8026 7.37509L11.8633 6.31443ZM18.7772 13.2284L17.6856 12.1367L16.6249 13.1974L17.7166 14.2891L18.7772 13.2284ZM11.8943 4.10006L12.986 5.19173L14.0466 4.13107L12.955 3.0394L11.8943 4.10006ZM14.0466 5.19173L15.5022 3.73616L14.4416 2.6755L12.986 4.13107L14.0466 5.19173ZM20.2638 8.49779L18.8083 9.95336L19.8689 11.014L21.3245 9.55845L20.2638 8.49779ZM10.8026 7.37509L16.6249 13.1974L17.6856 12.1367L11.8633 6.31443L10.8026 7.37509ZM2.98252 19.8948L3.61123 19.2661L2.55057 18.2054L1.92186 18.8341L2.98252 19.8948ZM5.16587 22.0781L5.79458 21.4494L4.73392 20.3888L4.10521 21.0175L5.16587 22.0781ZM4.52404 16.6639L4.47122 16.1885L2.9804 16.3542L3.03321 16.8295L4.52404 16.6639ZM7.1705 20.9668L7.64581 21.0196L7.81145 19.5288L7.33614 19.476L7.1705 20.9668ZM5.79458 21.4494C5.92779 21.3162 5.96506 21.2798 6.00027 21.2499L5.02949 20.1064C4.93671 20.1852 4.84956 20.2731 4.73392 20.3888L5.79458 21.4494ZM7.33615 19.476C7.17359 19.4579 7.05059 19.4436 6.92895 19.4401L6.88523 20.9395C6.9314 20.9408 6.98329 20.946 7.17049 20.9668L7.33615 19.476ZM6.00027 21.2499C6.24677 21.0406 6.56202 20.93 6.88523 20.9395L6.92894 19.4401C6.23522 19.4199 5.55857 19.6572 5.02949 20.1064L6.00027 21.2499ZM1.92186 22.0781C2.81767 22.974 4.27006 22.974 5.16587 22.0781L4.10521 21.0175C3.79519 21.3275 3.29254 21.3275 2.98252 21.0175L1.92186 22.0781ZM4.17856 12.9385C3.75541 13.3616 3.42729 13.6788 3.21747 14.0747L4.54285 14.7771C4.62249 14.6269 4.75037 14.488 5.23922 13.9992L4.17856 12.9385ZM4.47122 16.1885C4.39488 15.5014 4.38176 15.3131 4.41345 15.146L2.93971 14.8665C2.85622 15.3068 2.91431 15.7594 2.9804 16.3542L4.47122 16.1885ZM3.21746 14.0747C3.08575 14.3233 2.99212 14.5902 2.93971 14.8665L4.41345 15.146C4.43786 15.0173 4.48149 14.8929 4.54285 14.7771L3.21746 14.0747ZM15.5022 3.73616C16.8171 2.42128 18.949 2.42128 20.2638 3.73616L21.3245 2.6755C19.4238 0.774832 16.3422 0.774832 14.4416 2.6755L15.5022 3.73616ZM19.8999 13.2284C19.5899 13.5384 19.0873 13.5384 18.7772 13.2284L17.7166 14.2891C18.6124 15.1849 20.0648 15.1849 20.9606 14.2891L19.8999 13.2284ZM3.61123 19.2661C3.72688 19.1504 3.81485 19.0633 3.8936 18.9705L2.75011 17.9997C2.72021 18.0349 2.68376 18.0722 2.55057 18.2054L3.61123 19.2661ZM3.03321 16.8295C3.05401 17.0167 3.05919 17.0686 3.06054 17.1148L4.5599 17.0711C4.55635 16.9494 4.5421 16.8264 4.52404 16.6639L3.03321 16.8295ZM3.8936 18.9705C4.34277 18.4414 4.58012 17.7648 4.5599 17.0711L3.06054 17.1148C3.06996 17.438 2.95937 17.7532 2.75011 17.9997L3.8936 18.9705ZM10.7716 4.10006C11.0816 3.79003 11.5843 3.79003 11.8943 4.10006L12.955 3.0394C12.0592 2.14359 10.6068 2.14359 9.71095 3.0394L10.7716 4.10006ZM2.98252 21.0175C2.67249 20.7075 2.67249 20.2048 2.98252 19.8948L1.92186 18.8341C1.02605 19.7299 1.02605 21.1823 1.92186 22.0781L2.98252 21.0175ZM10.7716 5.22275C10.4616 4.91273 10.4616 4.41008 10.7716 4.10006L9.71095 3.0394C8.81514 3.93521 8.81514 5.3876 9.71095 6.28341L10.7716 5.22275ZM20.9606 14.2891C21.8564 13.3932 21.8564 11.9408 20.9606 11.045L19.8999 12.1057C20.21 12.4157 20.21 12.9184 19.8999 13.2284L20.9606 14.2891ZM10.0008 18.7608C9.51199 19.2496 9.37315 19.3775 9.22287 19.4571L9.92526 20.7825C10.3212 20.5727 10.6384 20.2446 11.0615 19.8214L10.0008 18.7608ZM7.64581 21.0196C8.24057 21.0857 8.6932 21.1438 9.13345 21.0603L8.85397 19.5866C8.68687 19.6182 8.49856 19.6051 7.81145 19.5288L7.64581 21.0196ZM9.22287 19.4571C9.10708 19.5185 8.98272 19.5621 8.85397 19.5866L9.13345 21.0603C9.40981 21.0079 9.67672 20.9142 9.92526 20.7825L9.22287 19.4571ZM18.8083 11.014L19.8999 12.1057L20.9606 11.045L19.8689 9.95336L18.8083 11.014ZM11.0615 19.8214L15.0303 15.8526L13.9697 14.792L10.0008 18.7608L11.0615 19.8214ZM15.0303 15.8526L17.6856 13.1974L16.6249 12.1367L13.9697 14.792L15.0303 15.8526ZM15.0303 14.792L13.1769 12.9385L12.1162 13.9992L13.9697 15.8526L15.0303 14.792ZM13.0303 16.792L11.1769 14.9385L10.1162 15.9992L11.9697 17.8526L13.0303 16.792ZM9.67993 9.55845L11.8633 7.37509L10.8026 6.31443L8.61927 8.49779L9.67993 9.55845ZM5.23922 13.9992L6.70805 12.5303L5.64739 11.4697L4.17856 12.9385L5.23922 13.9992ZM20.2638 3.73616C20.6875 4.15982 20.9736 4.66633 21.1243 5.20279L22.5684 4.79721C22.35 4.01956 21.9347 3.2857 21.3245 2.6755L20.2638 3.73616ZM20.8042 7.79338C20.6598 8.04458 20.4799 8.28174 20.2638 8.49779L21.3245 9.55845C21.6347 9.24821 21.895 8.90558 22.1046 8.54098L20.8042 7.79338Z";
+                    fill: pick-touch.has-hover ? Themes.current.primary-text : Themes.current.secondary-text;
+                }
+            }
+        }
+    }
+}
+
+component ColorSwatch inherits Rectangle {
+    in property <string> hex: "#ffffff";
+    in property <color> swatch-color: #ffffff;
+    in property <bool> is-selected: false;
+    callback picked(string);
+
+    width: 26px;
+    height: 26px;
+    border-radius: 4px;
+    border-width: is-selected ? 2px : 1px;
+    border-color: is-selected ? Themes.current.active-color : Themes.current.border-color;
+    background: swatch-color;
+
+    TouchArea {
+        width: parent.width;
+        height: parent.height;
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.picked(root.hex); }
+    }
+}
+
+component ColorPickerHandle inherits Rectangle {
+    in property <length> size: 18px;
+    in property <color> accent-color: #707070;
+
+    width: root.size;
+    height: root.size;
+    border-radius: self.width / 2;
+    border-width: 2px;
+    border-color: Colors.white;
+    background: transparent;
+    drop-shadow-color: Themes.shadow-color;
+    drop-shadow-blur: 8px;
+
+    Rectangle {
+        x: 4px;
+        y: 4px;
+        width: parent.width - 8px;
+        height: parent.height - 8px;
+        border-radius: self.width / 2;
+        border-width: 2px;
+        border-color: Themes.current.primary-bg;
+        background: root.accent-color;
+    }
+}
+
+component MultilineStringField inherits Rectangle {
+    in property <string> label: "";
+    in-out property <string> value: "";
+    in property <length> input-height: 88px;
+    callback value-changed(string);
+
+    height: input-height + 5px;
+    horizontal-stretch: 1;
+    background: transparent;
+
+    VerticalBox {
+        padding: 0;
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 6px;
+
+        TextEdit {
+            height: root.input-height;
+            text <=> root.value;
+            wrap: word-wrap;
+            font-size: 12px;
+            edited => { root.value-changed(root.value); }
+        }
+    }
+}
+
+component ChoiceField inherits Rectangle {
+    in property <string> label: "";
+    in property <[string]> options: [];
+    in-out property <string> value: "";
+    callback value-changed(string);
+
+    height: 28px;
+    horizontal-stretch: 1;
+    background: Themes.current.primary-bg;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: Themes.current.border-color;
+
+    HorizontalBox {
+        padding: 0;
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 6px;
+
+        Rectangle {
+            width: 106px;
+            height: parent.height;
+            background: transparent;
+
+            Text {
+                height: 20px;
+                horizontal-alignment: TextHorizontalAlignment.left;
+                text: root.label == "" ? I18n.t("Value") : root.label;
+                font-size: 12px;
+                color: Themes.current.secondary-text;
+                font-weight: 600;
+                vertical-alignment: TextVerticalAlignment.center;
+                width: parent.width;
+                overflow: elide;
+            }
+        }
+
+        VerticalBox {
+            padding: 4px;
+            
+            Rectangle {
+                horizontal-stretch: 1;
+                height: 20px;
+                background: transparent;
+
+                ComboBox {
+                    width: parent.width;
+                    height: parent.height;
+                    model: root.options;
+                    current-value <=> root.value;
+                    selected(value) => { root.value-changed(value); }
+                }
+            }
+        }
+    }
+}
+
+component ToggleField inherits Rectangle {
+    in property <string> label: "";
+    in property <bool> checked: false;
+    callback toggled(bool);
+
+    height: 28px;
+    horizontal-stretch: 1;
+    background: Themes.current.primary-bg;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: Themes.current.border-color;
+
+    HorizontalBox {
+        padding: 0;
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 6px;
+
+        Text {
+            text: root.label == "" ? I18n.t("Value") : root.label;
+            font-size: 12px;
+            color: Themes.current.secondary-text;
+            vertical-alignment: TextVerticalAlignment.center;
+        }
+
+        Rectangle {
+            horizontal-stretch: 1;
+            background: transparent;
+        }
+
+        VerticalBox {
+            padding: 4px;
+            Rectangle {
+                width: 58px;
+                height: 20px;
+                border-radius: 4px;
+                border-width: 1px;
+                border-color: root.checked ? Themes.current.active-color : Themes.current.border-color;
+                background: root.checked ? Themes.current.active-color : Themes.current.secondary-bg;
+
+                toggle-touch := TouchArea {
+                    mouse-cursor: MouseCursor.pointer;
+                    clicked => { root.toggled(!root.checked); }
+                }
+
+                Text {
+                    text: root.checked ? "true" : "false";
+                    color: root.checked ? Themes.on-accent-text : Themes.current.primary-text;
+                    font-size: 10px;
+                    horizontal-alignment: TextHorizontalAlignment.center;
+                    vertical-alignment: TextVerticalAlignment.center;
+                }
+            }
+        }
+    }
+}
+
+export component PropertiesPanel inherits Rectangle {
+    in property <string> selected-element-id: "";
+    in property <string> selected-element-type: "";
+    in property <CanvasBounds> element-bounds: { position: { x: 0px, y: 0px }, size: { width: 100px, height: 100px } };
+    in property <float> element-rotation: 0;
+    in property <string> element-text: "";
+    in property <bool> element-checked: false;
+    in property <string> element-container-mode: "absolute";
+    in property <bool> element-allow-absolute-children: false;
+    in property <float> element-layout-padding: 8;
+    in property <float> element-layout-spacing: 8;
+    in property <float> element-layout-margin: 0;
+    in property <float> element-layout-order: 0;
+    in property <string> element-stack-alignment: "stretch";
+    in property <string> element-flex-direction: "column";
+    in property <string> element-flex-wrap: "nowrap";
+    in property <string> element-justify-items: "stretch";
+    in property <string> element-justify-content: "flex-start";
+    in property <string> element-align-items: "stretch";
+    in property <string> element-align-content: "stretch";
+    in property <string> element-place-items: "stretch stretch";
+    in property <string> element-flex-flow: "column nowrap";
+    in property <string> element-grid-template-columns: "1fr 1fr";
+    in property <string> element-grid-template-rows: "auto auto";
+    in property <string> element-grid-template-areas: "";
+    in property <string> element-checkbox-box-side: "left";
+    in property <string> element-checkbox-check-color: "#f5f5f5";
+    in property <string> element-checkbox-box-color: "#151515";
+    in property <string> element-checkbox-box-border-color: "#4a4a4a";
+    in property <float> element-checkbox-box-border-width: 1;
+    in property <bool> element-checkbox-space-between: false;
+    in property <string> element-background: "#ffffff";
+    in property <string> element-border-color: "#4a4a4a";
+    in property <float> element-border-width: 0;
+    in property <float> element-border-radius: 4;
+    in property <float> element-font-size: 14;
+    in property <string> element-font-family: "Sans";
+    in property <string> element-text-wrap: "wrap";
+    in property <string> element-text-color: "#f5f5f5";
+    in property <string> element-placeholder: "";
+    in property <string> element-background-image: "";
+    in property <string> element-image-source: "";
+    in property <string> element-image-source-display: "";
+    in property <bool> element-inherit-text-style: true;
+
+    callback bounds-changed(CanvasBounds, float);
+    callback text-changed(string);
+    callback style-changed(string, string, float, float, float, string, string, string, string, string, string, bool, bool, string, string, string, string, float, bool);
+    callback container-settings-changed(string, bool, float, float, float, float, string, string, string, string, string, string, string, string, string, string, string, string);
+    callback browse-image-source-requested();
+
+    property <CanvasBounds> editing-bounds: element-bounds;
+    property <float> editing-rotation: element-rotation;
+    property <string> editing-text: element-text;
+    property <bool> editing-checked: element-checked;
+    property <string> editing-container-mode: element-container-mode;
+    property <bool> editing-allow-absolute-children: element-allow-absolute-children;
+    property <float> editing-layout-padding: element-layout-padding;
+    property <float> editing-layout-spacing: element-layout-spacing;
+    property <float> editing-layout-margin: element-layout-margin;
+    property <float> editing-layout-order: element-layout-order;
+    property <string> editing-stack-alignment: element-stack-alignment;
+    property <string> editing-flex-direction: element-flex-direction;
+    property <string> editing-flex-wrap: element-flex-wrap;
+    property <string> editing-justify-items: element-justify-items;
+    property <string> editing-justify-content: element-justify-content;
+    property <string> editing-align-items: element-align-items;
+    property <string> editing-align-content: element-align-content;
+    property <string> editing-place-items: element-place-items;
+    property <string> editing-flex-flow: element-flex-flow;
+    property <string> editing-grid-template-columns: element-grid-template-columns;
+    property <string> editing-grid-template-rows: element-grid-template-rows;
+    property <string> editing-grid-template-areas: element-grid-template-areas;
+    property <string> editing-checkbox-box-side: element-checkbox-box-side;
+    property <string> editing-checkbox-check-color: element-checkbox-check-color;
+    property <string> editing-checkbox-box-color: element-checkbox-box-color;
+    property <string> editing-checkbox-box-border-color: element-checkbox-box-border-color;
+    property <float> editing-checkbox-box-border-width: element-checkbox-box-border-width;
+    property <bool> editing-checkbox-space-between: element-checkbox-space-between;
+    property <string> editing-background: element-background;
+    property <string> editing-border-color: element-border-color;
+    property <float> editing-border-width: element-border-width;
+    property <float> editing-border-radius: element-border-radius;
+    property <float> editing-font-size: element-font-size;
+    property <string> editing-font-family: element-font-family;
+    property <string> editing-text-wrap: element-text-wrap;
+    property <string> editing-text-color: element-text-color;
+    property <string> editing-placeholder: element-placeholder;
+    property <string> editing-background-image: element-background-image;
+    property <string> editing-image-source: element-image-source;
+    property <bool> editing-inherit-text-style: element-inherit-text-style;
+    property <bool> is-container:
+        selected-element-type == "div"
+        || selected-element-type == "flex"
+        || selected-element-type == "flex-container"
+        || selected-element-type == "grid"
+        || selected-element-type == "grid-container"
+        || selected-element-type == "stack"
+        || selected-element-type == "stack-container";
+    property <bool> supports-container-settings: root.is-container;
+    property <string> effective-container-mode:
+        selected-element-type == "div" ? editing-container-mode
+        : selected-element-type == "flex" ? "flex"
+        : selected-element-type == "flex-container" ? "flex"
+        : selected-element-type == "grid" ? "grid"
+        : selected-element-type == "grid-container" ? "grid"
+        : selected-element-type == "stack" ? "stack"
+        : selected-element-type == "stack-container" ? "stack"
+        : "absolute";
+    property <bool> supports-stack-layout: root.supports-container-settings && root.effective-container-mode == "stack";
+    property <bool> supports-flex-layout: root.supports-container-settings && root.effective-container-mode == "flex";
+    property <bool> supports-grid-layout: root.supports-container-settings && root.effective-container-mode == "grid";
+    property <bool> supports-container-layout-controls:
+        root.supports-container-settings && root.effective-container-mode != "absolute";
+    property <bool> supports-text-content:
+        selected-element-type == "div"
+        || selected-element-type == "text"
+        || selected-element-type == "label"
+        || selected-element-type == "button"
+        || selected-element-type == "input"
+        || selected-element-type == "textarea"
+        || selected-element-type == "checkbox";
+    property <bool> supports-text-style:
+        root.is-container || root.supports-text-content;
+    property <bool> supports-placeholder:
+        selected-element-type == "input" || selected-element-type == "textarea";
+    property <bool> supports-checked: selected-element-type == "checkbox";
+    property <bool> supports-checkbox-style: selected-element-type == "checkbox";
+    property <bool> supports-image-source: selected-element-type == "image";
+    property <bool> supports-background-image: root.is-container;
+    property <bool> color-picker-open: false;
+    property <string> color-picker-target: "";
+    property <string> color-picker-label: "";
+    property <string> color-picker-value: "#ffffff";
+    property <color> color-picker-selected-color: #ffffff;
+    property <bool> color-picker-selection-known: false;
+    property <bool> color-picker-preview-visible: false;
+    property <string> color-picker-preview-value: "#ffffff";
+    property <color> color-picker-preview-color: #ffffff;
+    property <length> color-picker-preview-x: 0px;
+    property <length> color-picker-preview-y: 0px;
+    property <string> recent-color-1-hex: "";
+    property <color> recent-color-1-color: #ffffff;
+    property <string> recent-color-2-hex: "";
+    property <color> recent-color-2-color: #ffffff;
+    property <string> recent-color-3-hex: "";
+    property <color> recent-color-3-color: #ffffff;
+    property <string> recent-color-4-hex: "";
+    property <color> recent-color-4-color: #ffffff;
+    property <string> recent-color-5-hex: "";
+    property <color> recent-color-5-color: #ffffff;
+    property <string> recent-color-6-hex: "";
+    property <color> recent-color-6-color: #ffffff;
+    property <string> recent-color-7-hex: "";
+    property <color> recent-color-7-color: #ffffff;
+    property <string> recent-color-8-hex: "";
+    property <color> recent-color-8-color: #ffffff;
+    property <bool> no-recent-colors:
+        root.recent-color-1-hex == ""
+        && root.recent-color-2-hex == ""
+        && root.recent-color-3-hex == ""
+        && root.recent-color-4-hex == ""
+        && root.recent-color-5-hex == ""
+        && root.recent-color-6-hex == ""
+        && root.recent-color-7-hex == ""
+        && root.recent-color-8-hex == "";
+    property <int> color-disc-grid-size: 29;
+    property <int> color-ring-segment-count: 84;
+    property <float> color-picker-base-hue: 0.0;
+    property <float> color-picker-base-saturation: 1.0;
+    property <float> color-picker-ring-phase: 0.75;
+    property <color> color-picker-base-color:
+        Colors.hsv(root.color-picker-base-hue, root.color-picker-base-saturation, 1.0);
+
+    function clamp01(value: float) -> float {
+        Math.max(0, Math.min(1, value))
+    }
+
+    function normalize-angle(value: float) -> float {
+        let wrapped = value - Math.floor(value / 360) * 360;
+        wrapped < 0 ? wrapped + 360 : wrapped
+    }
+
+    function normalize-phase(value: float) -> float {
+        let wrapped = value - Math.floor(value);
+        wrapped < 0 ? wrapped + 1 : wrapped
+    }
+
+    function wheel-hue(dx: float, dy: float) -> float {
+        root.normalize-angle(Math.atan2(dy, dx) / 1deg + 90)
+    }
+
+    function wheel-saturation(dx: float, dy: float) -> float {
+        root.clamp01(Math.sqrt(dx * dx + dy * dy))
+    }
+
+    function wheel-color(dx: float, dy: float) -> color {
+        Colors.hsv(root.wheel-hue(dx, dy), root.wheel-saturation(dx, dy), 1.0)
+    }
+
+    function shade-color(base: color, phase: float) -> color {
+        let wrapped = root.normalize-phase(phase);
+        wrapped < 0.25
+            ? Colors.white.mix(base, wrapped / 0.25)
+            : wrapped < 0.5
+                ? base.mix(Colors.black, (wrapped - 0.25) / 0.25)
+                : wrapped < 0.75
+                    ? Colors.black.mix(base, (wrapped - 0.5) / 0.25)
+                    : base.mix(Colors.white, (wrapped - 0.75) / 0.25)
+    }
+
+    function hex-digit(value: float) -> string {
+        value < 0.5 ? "0"
+        : value < 1.5 ? "1"
+        : value < 2.5 ? "2"
+        : value < 3.5 ? "3"
+        : value < 4.5 ? "4"
+        : value < 5.5 ? "5"
+        : value < 6.5 ? "6"
+        : value < 7.5 ? "7"
+        : value < 8.5 ? "8"
+        : value < 9.5 ? "9"
+        : value < 10.5 ? "a"
+        : value < 11.5 ? "b"
+        : value < 12.5 ? "c"
+        : value < 13.5 ? "d"
+        : value < 14.5 ? "e"
+        : "f"
+    }
+
+    function hex-byte(value: float) -> string {
+        let clamped = Math.max(0, Math.min(255, value));
+        let high = Math.floor(clamped / 16);
+        let low = clamped - high * 16;
+        root.hex-digit(high) + root.hex-digit(low)
+    }
+
+    function color-to-hex(value: color) -> string {
+        "#" + root.hex-byte(value.red) + root.hex-byte(value.green) + root.hex-byte(value.blue)
+    }
+
+    function set-picker-color(next-color: color) {
+        root.color-picker-selected-color = next-color;
+        root.color-picker-selection-known = true;
+        root.color-picker-value = root.color-to-hex(next-color);
+    }
+
+    function preview-picker-color(next-color: color, pointer-x: length, pointer-y: length) {
+        root.preview-color-picker(root.color-to-hex(next-color), next-color, pointer-x, pointer-y);
+    }
+
+    function select-wheel-color(hue: float, saturation: float) {
+        root.color-picker-base-hue = root.normalize-angle(hue);
+        root.color-picker-base-saturation = root.clamp01(saturation);
+        root.set-picker-color(root.shade-color(root.color-picker-base-color, root.color-picker-ring-phase));
+    }
+
+    function preview-wheel-color(hue: float, saturation: float, pointer-x: length, pointer-y: length) {
+        let preview-base = Colors.hsv(root.normalize-angle(hue), root.clamp01(saturation), 1.0);
+        root.preview-picker-color(
+            root.shade-color(preview-base, root.color-picker-ring-phase),
+            pointer-x,
+            pointer-y
+        );
+    }
+
+    function select-ring-color(phase: float) {
+        root.color-picker-ring-phase = root.normalize-phase(phase);
+        root.set-picker-color(root.shade-color(root.color-picker-base-color, root.color-picker-ring-phase));
+    }
+
+    function preview-ring-color(phase: float, pointer-x: length, pointer-y: length) {
+        root.preview-picker-color(
+            root.shade-color(root.color-picker-base-color, root.normalize-phase(phase)),
+            pointer-x,
+            pointer-y
+        );
+    }
+
+    function emit-style-change() {
+        root.style-changed(
+            editing-background,
+            editing-border-color,
+            editing-border-width,
+            editing-border-radius,
+            editing-font-size,
+            editing-text-color,
+            editing-font-family,
+            editing-text-wrap,
+            editing-placeholder,
+            editing-background-image,
+            editing-image-source,
+            editing-inherit-text-style,
+            editing-checked,
+            editing-checkbox-box-side,
+            editing-checkbox-check-color,
+            editing-checkbox-box-color,
+            editing-checkbox-box-border-color,
+            editing-checkbox-box-border-width,
+            editing-checkbox-space-between
+        );
+    }
+
+    function emit-container-settings-change() {
+        root.container-settings-changed(
+            editing-container-mode,
+            editing-allow-absolute-children,
+            editing-layout-padding,
+            editing-layout-spacing,
+            editing-layout-margin,
+            editing-layout-order,
+            editing-stack-alignment,
+            editing-flex-direction,
+            editing-flex-wrap,
+            editing-justify-items,
+            editing-justify-content,
+            editing-align-items,
+            editing-align-content,
+            editing-place-items,
+            editing-flex-flow,
+            editing-grid-template-columns,
+            editing-grid-template-rows,
+            editing-grid-template-areas
+        );
+    }
+
+    function open-color-picker(target: string, label: string, current-value: string) {
+        root.color-picker-target = target;
+        root.color-picker-label = label;
+        root.color-picker-value = current-value == "" ? "#ffffff" : current-value;
+        root.color-picker-base-hue = 0;
+        root.color-picker-base-saturation = 1;
+        root.color-picker-ring-phase = 0.75;
+        root.color-picker-selected-color = root.shade-color(root.color-picker-base-color, root.color-picker-ring-phase);
+        root.color-picker-selection-known = false;
+        root.color-picker-preview-visible = false;
+        root.color-picker-preview-value = root.color-picker-value;
+        root.color-picker-preview-color = root.color-picker-selected-color;
+        root.color-picker-preview-x = 0px;
+        root.color-picker-preview-y = 0px;
+        root.color-picker-open = true;
+    }
+
+    function close-color-picker() {
+        root.color-picker-open = false;
+        root.color-picker-target = "";
+        root.color-picker-label = "";
+        root.color-picker-preview-visible = false;
+    }
+
+    function preview-color-picker(hex: string, swatch-color: color, pointer-x: length, pointer-y: length) {
+        root.color-picker-preview-visible = true;
+        root.color-picker-preview-value = hex;
+        root.color-picker-preview-color = swatch-color;
+        root.color-picker-preview-x = pointer-x;
+        root.color-picker-preview-y = pointer-y;
+    }
+
+    function select-color-picker(hex: string, swatch-color: color) {
+        root.color-picker-value = hex;
+        root.color-picker-selected-color = swatch-color;
+        root.color-picker-selection-known = true;
+        if root.color-picker-preview-visible {
+            root.preview-color-picker(hex, swatch-color, root.color-picker-preview-x, root.color-picker-preview-y);
+        }
+    }
+
+    function remember-color(hex: string, swatch-color: color) {
+        if hex == "" {
+            return;
+        }
+        if root.recent-color-1-hex == hex {
+            root.recent-color-1-color = swatch-color;
+            return;
+        }
+
+        root.recent-color-8-hex = root.recent-color-7-hex;
+        root.recent-color-8-color = root.recent-color-7-color;
+        root.recent-color-7-hex = root.recent-color-6-hex;
+        root.recent-color-7-color = root.recent-color-6-color;
+        root.recent-color-6-hex = root.recent-color-5-hex;
+        root.recent-color-6-color = root.recent-color-5-color;
+        root.recent-color-5-hex = root.recent-color-4-hex;
+        root.recent-color-5-color = root.recent-color-4-color;
+        root.recent-color-4-hex = root.recent-color-3-hex;
+        root.recent-color-4-color = root.recent-color-3-color;
+        root.recent-color-3-hex = root.recent-color-2-hex;
+        root.recent-color-3-color = root.recent-color-2-color;
+        root.recent-color-2-hex = root.recent-color-1-hex;
+        root.recent-color-2-color = root.recent-color-1-color;
+        root.recent-color-1-hex = hex;
+        root.recent-color-1-color = swatch-color;
+    }
+
+    function apply-color-picker() {
+        let next-value = root.color-picker-value == "" ? "#ffffff" : root.color-picker-value;
+
+        if root.color-picker-target == "background" {
+            editing-background = next-value;
+        } else if root.color-picker-target == "border-color" {
+            editing-border-color = next-value;
+        } else if root.color-picker-target == "text-color" {
+            editing-inherit-text-style = false;
+            editing-text-color = next-value;
+        } else if root.color-picker-target == "checkbox-check-color" {
+            editing-checkbox-check-color = next-value;
+        } else if root.color-picker-target == "checkbox-box-color" {
+            editing-checkbox-box-color = next-value;
+        } else if root.color-picker-target == "checkbox-box-border-color" {
+            editing-checkbox-box-border-color = next-value;
+        }
+
+        if root.color-picker-selection-known && next-value == root.color-picker-value {
+            root.remember-color(next-value, root.color-picker-selected-color);
+        }
+
+        root.emit-style-change();
+        root.close-color-picker();
+    }
+
+    changed element-bounds => { editing-bounds = element-bounds; }
+    changed element-rotation => { editing-rotation = element-rotation; }
+    changed element-text => { editing-text = element-text; }
+    changed element-checked => { editing-checked = element-checked; }
+    changed element-container-mode => { editing-container-mode = element-container-mode; }
+    changed element-allow-absolute-children => { editing-allow-absolute-children = element-allow-absolute-children; }
+    changed element-layout-padding => { editing-layout-padding = element-layout-padding; }
+    changed element-layout-spacing => { editing-layout-spacing = element-layout-spacing; }
+    changed element-layout-margin => { editing-layout-margin = element-layout-margin; }
+    changed element-layout-order => { editing-layout-order = element-layout-order; }
+    changed element-stack-alignment => { editing-stack-alignment = element-stack-alignment; }
+    changed element-flex-direction => { editing-flex-direction = element-flex-direction; }
+    changed element-flex-wrap => { editing-flex-wrap = element-flex-wrap; }
+    changed element-justify-items => { editing-justify-items = element-justify-items; }
+    changed element-justify-content => { editing-justify-content = element-justify-content; }
+    changed element-align-items => { editing-align-items = element-align-items; }
+    changed element-align-content => { editing-align-content = element-align-content; }
+    changed element-place-items => { editing-place-items = element-place-items; }
+    changed element-flex-flow => { editing-flex-flow = element-flex-flow; }
+    changed element-grid-template-columns => { editing-grid-template-columns = element-grid-template-columns; }
+    changed element-grid-template-rows => { editing-grid-template-rows = element-grid-template-rows; }
+    changed element-grid-template-areas => { editing-grid-template-areas = element-grid-template-areas; }
+    changed element-checkbox-box-side => { editing-checkbox-box-side = element-checkbox-box-side; }
+    changed element-checkbox-check-color => { editing-checkbox-check-color = element-checkbox-check-color; }
+    changed element-checkbox-box-color => { editing-checkbox-box-color = element-checkbox-box-color; }
+    changed element-checkbox-box-border-color => { editing-checkbox-box-border-color = element-checkbox-box-border-color; }
+    changed element-checkbox-box-border-width => { editing-checkbox-box-border-width = element-checkbox-box-border-width; }
+    changed element-checkbox-space-between => { editing-checkbox-space-between = element-checkbox-space-between; }
+    changed element-background => { editing-background = element-background; }
+    changed element-border-color => { editing-border-color = element-border-color; }
+    changed element-border-width => { editing-border-width = element-border-width; }
+    changed element-border-radius => { editing-border-radius = element-border-radius; }
+    changed element-font-size => { editing-font-size = element-font-size; }
+    changed element-font-family => { editing-font-family = element-font-family; }
+    changed element-text-wrap => { editing-text-wrap = element-text-wrap; }
+    changed element-text-color => { editing-text-color = element-text-color; }
+    changed element-placeholder => { editing-placeholder = element-placeholder; }
+    changed element-background-image => { editing-background-image = element-background-image; }
+    changed element-image-source => { editing-image-source = element-image-source; }
+    changed element-inherit-text-style => { editing-inherit-text-style = element-inherit-text-style; }
+
+    background: Themes.current.primary-bg;
+
+    panel-layout := VerticalBox {
+        width: parent.width;
+        height: parent.height;
+        spacing: 0;
+        padding: 0;
+
+        Rectangle {
+            height: 40px;
+            background: Themes.current.secondary-bg;
+
+            HorizontalBox {
+                padding-left: 15px;
+                padding-right: 15px;
+
+                Text {
+                    height: 24px;
+                    text: I18n.t("COMPONENT PROPERTIES");
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: Themes.current.secondary-text;
+                    horizontal-stretch: 1;
+                    vertical-alignment: TextVerticalAlignment.center;
+                    overflow: elide;
+                }
+            }
+        }
+
+        Separator-H {}
+
+        if selected-element-id == "": Rectangle {
+            vertical-stretch: 1;
+            background: Themes.current.primary-bg;
+
+            Text {
+                text: I18n.t("Drop or select an element");
+                font-size: 12px;
+                color: Themes.current.disabled-text;
+                horizontal-alignment: TextHorizontalAlignment.center;
+                vertical-alignment: TextVerticalAlignment.center;
+            }
+        }
+
+        if selected-element-id != "": properties-flickable := Flickable {
+            horizontal-stretch: 1;
+            vertical-stretch: 1;
+            viewport-width: self.width;
+            viewport-height: properties-content.preferred-height;
+
+            properties-content := VerticalBox {
+            width: properties-flickable.width;
+            spacing: 10px;
+            padding: 10px;
+
+        Rectangle {
+            height: 40px;
+            background: Themes.current.primary-bg;
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: Themes.current.border-color;
+
+            VerticalBox {
+                padding-left: 8px;
+                padding-right: 8px;
+                spacing: 2px;
+
+                Text {
+                    text: "ID: " + selected-element-id;
+                    font-size: 10px;
+                    color: Themes.current.secondary-text;
+                    overflow: elide;
+                }
+
+                Text {
+                    text: I18n.t("Type") + ": " + selected-element-type;
+                    font-size: 12px;
+                    color: Themes.current.primary-text;
+                }
+            }
+        }
+
+        Text {
+            text: I18n.t("TRANSFORM");
+            font-size: 12px;
+            font-weight: 700;
+            color: Themes.current.secondary-text;
+        }
+
+        NumberAdjust {
+            label: "X";
+            value: editing-bounds.position.x / 1px;
+            step: 1;
+            value-changed(v) => {
+                editing-bounds.position.x = v * 1px;
+                root.bounds-changed(editing-bounds, editing-rotation);
+            }
+        }
+
+        NumberAdjust {
+            label: "Y";
+            value: editing-bounds.position.y / 1px;
+            step: 1;
+            value-changed(v) => {
+                editing-bounds.position.y = v * 1px;
+                root.bounds-changed(editing-bounds, editing-rotation);
+            }
+        }
+
+        NumberAdjust {
+            label: I18n.t("Width");
+            value: editing-bounds.size.width / 1px;
+            min: 1;
+            step: 2;
+            value-changed(v) => {
+                editing-bounds.size.width = v * 1px;
+                root.bounds-changed(editing-bounds, editing-rotation);
+            }
+        }
+
+        NumberAdjust {
+            label: I18n.t("Height");
+            value: editing-bounds.size.height / 1px;
+            min: 1;
+            step: 2;
+            value-changed(v) => {
+                editing-bounds.size.height = v * 1px;
+                root.bounds-changed(editing-bounds, editing-rotation);
+            }
+        }
+
+        NumberAdjust {
+            label: I18n.t("Rotate");
+            value: editing-rotation;
+            min: -180;
+            max: 180;
+            step: 1;
+            value-changed(v) => {
+                editing-rotation = v;
+                root.bounds-changed(editing-bounds, editing-rotation);
+            }
+        }
+
+        Text {
+            text: I18n.t("LAYOUT");
+            font-size: 12px;
+            font-weight: 700;
+            color: Themes.current.secondary-text;
+        }
+
+        if selected-element-type == "div": ChoiceField {
+            label: "Mode";
+            options: ["absolute", "stack", "flex", "grid"];
+            value <=> editing-container-mode;
+            value-changed(v) => {
+                editing-container-mode = v;
+                if v != "stack" {
+                    editing-allow-absolute-children = false;
+                }
+                root.emit-container-settings-change();
+            }
+        }
+
+        if root.supports-container-layout-controls: NumberAdjust {
+            label: "Padding";
+            value: editing-layout-padding;
+            min: 0;
+            max: 400;
+            step: 1;
+            value-changed(v) => {
+                editing-layout-padding = v;
+                root.emit-container-settings-change();
+            }
+        }
+
+        if root.supports-container-layout-controls: NumberAdjust {
+            label: "Spacing";
+            value: editing-layout-spacing;
+            min: 0;
+            max: 400;
+            step: 1;
+            value-changed(v) => {
+                editing-layout-spacing = v;
+                root.emit-container-settings-change();
+            }
+        }
+
+        if selected-element-id != "": NumberAdjust {
+            label: "Margin";
+            value: editing-layout-margin;
+            min: 0;
+            max: 400;
+            step: 1;
+            value-changed(v) => {
+                editing-layout-margin = v;
+                root.emit-container-settings-change();
+            }
+        }
+
+        if selected-element-id != "": NumberAdjust {
+            label: "Order";
+            value: editing-layout-order;
+            min: -99;
+            max: 99;
+            step: 1;
+            value-changed(v) => {
+                editing-layout-order = v;
+                root.emit-container-settings-change();
+            }
+        }
+
+        if root.supports-stack-layout: ChoiceField {
+            label: "Align";
+            options: ["stretch", "start", "center", "end"];
+            value <=> editing-stack-alignment;
+            value-changed(v) => {
+                editing-stack-alignment = v;
+                root.emit-container-settings-change();
+            }
+        }
+
+        if root.supports-stack-layout: Rectangle {
+            height: 28px;
+            background: Themes.current.primary-bg;
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: Themes.current.border-color;
+
+            HorizontalBox {
+                padding-left: 8px;
+                padding-right: 8px;
+                spacing: 6px;
+
+                Text {
+                    text: "Abs Pos";
+                    font-size: 12px;
+                    color: Themes.current.secondary-text;
+                    width: 56px;
+                    vertical-alignment: TextVerticalAlignment.center;
+                }
+
+                Rectangle {
+                    width: 58px;
+                    height: 20px;
+                    y: 4px;
+                    border-radius: 10px;
+                    border-width: 1px;
+                    border-color: editing-allow-absolute-children ? Themes.current.active-color : Themes.current.border-color;
+                    background: editing-allow-absolute-children ? Themes.current.active-color : Themes.current.secondary-bg;
+
+                    allow-absolute-touch := TouchArea {
+                        mouse-cursor: MouseCursor.pointer;
+                        clicked => {
+                            editing-allow-absolute-children = !editing-allow-absolute-children;
+                            root.emit-container-settings-change();
+                        }
+                    }
+
+                    Text {
+                        text: editing-allow-absolute-children ? "On" : "Off";
+                        color: editing-allow-absolute-children ? Themes.on-accent-text : Themes.current.primary-text;
+                        font-size: 10px;
+                        horizontal-alignment: TextHorizontalAlignment.center;
+                        vertical-alignment: TextVerticalAlignment.center;
+                    }
+                }
+            }
+        }
+
+        if root.supports-flex-layout: ChoiceField {
+            label: "Direction";
+            options: ["row", "column"];
+            value <=> editing-flex-direction;
+            value-changed(v) => {
+                editing-flex-direction = v;
+                editing-flex-flow = editing-flex-direction + " " + editing-flex-wrap;
+                root.emit-container-settings-change();
+            }
+        }
+
+        if root.supports-flex-layout: ChoiceField {
+            label: "Wrap";
+            options: ["nowrap", "wrap", "wrap-reverse"];
+            value <=> editing-flex-wrap;
+            value-changed(v) => {
+                editing-flex-wrap = v;
+                editing-flex-flow = editing-flex-direction + " " + editing-flex-wrap;
+                root.emit-container-settings-change();
+            }
+        }
+
+        if root.supports-flex-layout: ChoiceField {
+            label: "J.Items";
+            options: ["stretch", "flex-start", "center", "flex-end"];
+            value <=> editing-justify-items;
+            value-changed(v) => {
+                editing-justify-items = v;
+                editing-place-items = editing-justify-items + " " + editing-align-items;
+                root.emit-container-settings-change();
+            }
+        }
+
+        if root.supports-flex-layout: ChoiceField {
+            label: "J.Content";
+            options: ["flex-start", "center", "flex-end", "space-between", "space-around", "space-evenly"];
+            value <=> editing-justify-content;
+            value-changed(v) => {
+                editing-justify-content = v;
+                root.emit-container-settings-change();
+            }
+        }
+
+        if root.supports-flex-layout: ChoiceField {
+            label: "A.Items";
+            options: ["stretch", "flex-start", "center", "flex-end", "baseline"];
+            value <=> editing-align-items;
+            value-changed(v) => {
+                editing-align-items = v;
+                editing-place-items = editing-justify-items + " " + editing-align-items;
+                root.emit-container-settings-change();
+            }
+        }
+
+        if root.supports-flex-layout: ChoiceField {
+            label: "A.Content";
+            options: ["flex-start", "center", "flex-end", "space-between", "space-around", "stretch"];
+            value <=> editing-align-content;
+            value-changed(v) => {
+                editing-align-content = v;
+                root.emit-container-settings-change();
+            }
+        }
+
+        if root.supports-flex-layout: StringField {
+            label: "Place";
+            value <=> editing-place-items;
+            value-changed(v) => {
+                editing-place-items = v;
+                root.emit-container-settings-change();
+            }
+        }
+
+        if root.supports-flex-layout: StringField {
+            label: "Flow";
+            value <=> editing-flex-flow;
+            value-changed(v) => {
+                editing-flex-flow = v;
+                root.emit-container-settings-change();
+            }
+        }
+
+        if root.supports-grid-layout: StringField {
+            label: "Cols";
+            value <=> editing-grid-template-columns;
+            value-changed(v) => {
+                editing-grid-template-columns = v;
+                root.emit-container-settings-change();
+            }
+        }
+
+        if root.supports-grid-layout: StringField {
+            label: "Rows";
+            value <=> editing-grid-template-rows;
+            value-changed(v) => {
+                editing-grid-template-rows = v;
+                root.emit-container-settings-change();
+            }
+        }
+
+        if root.supports-grid-layout: ChoiceField {
+            label: "J.Items";
+            options: ["stretch", "flex-start", "center", "flex-end"];
+            value <=> editing-justify-items;
+            value-changed(v) => {
+                editing-justify-items = v;
+                editing-place-items = editing-justify-items + " " + editing-align-items;
+                root.emit-container-settings-change();
+            }
+        }
+
+        if root.supports-grid-layout: ChoiceField {
+            label: "J.Content";
+            options: ["flex-start", "center", "flex-end", "space-between", "space-around", "space-evenly"];
+            value <=> editing-justify-content;
+            value-changed(v) => {
+                editing-justify-content = v;
+                root.emit-container-settings-change();
+            }
+        }
+
+        if root.supports-grid-layout: ChoiceField {
+            label: "A.Items";
+            options: ["stretch", "flex-start", "center", "flex-end"];
+            value <=> editing-align-items;
+            value-changed(v) => {
+                editing-align-items = v;
+                editing-place-items = editing-justify-items + " " + editing-align-items;
+                root.emit-container-settings-change();
+            }
+        }
+
+        if root.supports-grid-layout: ChoiceField {
+            label: "A.Content";
+            options: ["flex-start", "center", "flex-end", "space-between", "space-around", "stretch"];
+            value <=> editing-align-content;
+            value-changed(v) => {
+                editing-align-content = v;
+                root.emit-container-settings-change();
+            }
+        }
+
+        if root.supports-grid-layout: StringField {
+            label: "Place";
+            value <=> editing-place-items;
+            value-changed(v) => {
+                editing-place-items = v;
+                root.emit-container-settings-change();
+            }
+        }
+
+        if root.supports-grid-layout: MultilineStringField {
+            label: "Areas";
+            value <=> editing-grid-template-areas;
+            input-height: 70px;
+            value-changed(v) => {
+                editing-grid-template-areas = v;
+                root.emit-container-settings-change();
+            }
+        }
+
+        if root.supports-text-content: Text {
+            text: I18n.t("TEXT");
+            font-size: 12px;
+            font-weight: 700;
+            color: Themes.current.secondary-text;
+        }
+
+        if root.supports-text-content
+            && (selected-element-type == "text" || selected-element-type == "label"): MultilineStringField {
+            label: I18n.t("Value");
+            value <=> editing-text;
+            value-changed(v) => {
+                editing-text = v;
+                root.text-changed(v);
+            }
+        }
+
+        if root.supports-text-content
+            && selected-element-type != "text"
+            && selected-element-type != "label": StringField {
+            label: I18n.t("Value");
+            value <=> editing-text;
+            value-changed(v) => {
+                editing-text = v;
+                root.text-changed(v);
+            }
+        }
+
+        if root.supports-placeholder: StringField {
+            label: "Hint";
+            value <=> editing-placeholder;
+            value-changed(v) => {
+                editing-placeholder = v;
+                root.emit-style-change();
+            }
+        }
+
+        if root.supports-checked: ToggleField {
+            label: "Checked";
+            checked: editing-checked;
+            toggled(next) => {
+                editing-checked = next;
+                root.emit-style-change();
+            }
+        }
+
+        if root.supports-checkbox-style: ChoiceField {
+            label: "Box Side";
+            options: ["left", "right"];
+            value: editing-checkbox-box-side;
+            value-changed(v) => {
+                editing-checkbox-box-side = v.to-lowercase();
+                root.emit-style-change();
+            }
+        }
+
+        if root.supports-checkbox-style: ToggleField {
+            label: "Between";
+            checked: editing-checkbox-space-between;
+            toggled(next) => {
+                editing-checkbox-space-between = next;
+                root.emit-style-change();
+            }
+        }
+
+        if root.supports-text-style: ToggleField {
+            label: "Inherit";
+            checked: editing-inherit-text-style;
+            toggled(next) => {
+                editing-inherit-text-style = next;
+                root.emit-style-change();
+            }
+        }
+
+        Text {
+            text: I18n.t("STYLE");
+            font-size: 12px;
+            font-weight: 700;
+            color: Themes.current.secondary-text;
+        }
+
+        if root.supports-checkbox-style: ColorField {
+            label: "Check C";
+            value <=> editing-checkbox-check-color;
+            value-changed(v) => {
+                editing-checkbox-check-color = v;
+                root.emit-style-change();
+            }
+            picker-requested => {
+                root.open-color-picker("checkbox-check-color", "Check C", editing-checkbox-check-color);
+            }
+        }
+
+        if root.supports-checkbox-style: ColorField {
+            label: "Box C";
+            value <=> editing-checkbox-box-color;
+            value-changed(v) => {
+                editing-checkbox-box-color = v;
+                root.emit-style-change();
+            }
+            picker-requested => {
+                root.open-color-picker("checkbox-box-color", "Box C", editing-checkbox-box-color);
+            }
+        }
+
+        if root.supports-checkbox-style: ColorField {
+            label: "Box Border";
+            value <=> editing-checkbox-box-border-color;
+            value-changed(v) => {
+                editing-checkbox-box-border-color = v;
+                root.emit-style-change();
+            }
+            picker-requested => {
+                root.open-color-picker("checkbox-box-border-color", "Box Border", editing-checkbox-box-border-color);
+            }
+        }
+
+        if root.supports-checkbox-style: NumberAdjust {
+            label: "Box B.Width";
+            value: editing-checkbox-box-border-width;
+            min: 0;
+            max: 12;
+            step: 1;
+            value-changed(v) => {
+                editing-checkbox-box-border-width = v;
+                root.emit-style-change();
+            }
+        }
+
+        ColorField {
+            label: "Background";
+            value <=> editing-background;
+            value-changed(v) => {
+                editing-background = v;
+                root.emit-style-change();
+            }
+            picker-requested => {
+                root.open-color-picker("background", "Background", editing-background);
+            }
+        }
+
+        if root.supports-background-image: StringField {
+            label: "Background Image";
+            value <=> editing-background-image;
+            value-changed(v) => {
+                editing-background-image = v;
+                root.emit-style-change();
+            }
+        }
+
+        if root.supports-image-source: BrowseStringField {
+            label: "Source";
+            value <=> editing-image-source;
+            display-value: element-image-source-display;
+            read-only: true;
+            browse-requested => { root.browse-image-source-requested(); }
+        }
+
+        ColorField {
+            label: I18n.t("Border");
+            value <=> editing-border-color;
+            value-changed(v) => {
+                editing-border-color = v;
+                root.emit-style-change();
+            }
+            picker-requested => {
+                root.open-color-picker("border-color", I18n.t("Border"), editing-border-color);
+            }
+        }
+
+        NumberAdjust {
+            label: "B.Width";
+            value: editing-border-width;
+            min: 0;
+            max: 40;
+            step: 1;
+            value-changed(v) => {
+                editing-border-width = v;
+                root.emit-style-change();
+            }
+        }
+
+        NumberAdjust {
+            label: "B.Radius";
+            value: editing-border-radius;
+            min: 0;
+            max: 200;
+            step: 1;
+            value-changed(v) => {
+                editing-border-radius = v;
+                root.emit-style-change();
+            }
+        }
+
+        if root.supports-text-style: NumberAdjust {
+            label: I18n.t("Font");
+            value: editing-font-size;
+            min: 6;
+            max: 160;
+            step: 1;
+            value-changed(v) => {
+                editing-inherit-text-style = false;
+                editing-font-size = v;
+                root.emit-style-change();
+            }
+        }
+
+        if root.supports-text-style: ColorField {
+            label: "Text C";
+            value <=> editing-text-color;
+            value-changed(v) => {
+                editing-inherit-text-style = false;
+                editing-text-color = v;
+                root.emit-style-change();
+            }
+            picker-requested => {
+                root.open-color-picker("text-color", "Text C", editing-text-color);
+            }
+        }
+
+        if root.supports-text-style: StringField {
+            label: "Font F";
+            value <=> editing-font-family;
+            value-changed(v) => {
+                editing-inherit-text-style = false;
+                editing-font-family = v;
+                root.emit-style-change();
+            }
+        }
+
+        if root.supports-text-style: StringField {
+            label: "Wrap";
+            value <=> editing-text-wrap;
+            value-changed(v) => {
+                editing-inherit-text-style = false;
+                editing-text-wrap = v;
+                root.emit-style-change();
+            }
+        }
+
+        Rectangle { height: 10px; background: transparent; }
+            }
+        }
+    }
+
+    if root.color-picker-open: Rectangle {
+        z: 200;
+        width: parent.width;
+        height: parent.height;
+        background: Themes.overlay-strong-bg;
+
+        TouchArea {
+            width: parent.width;
+            height: parent.height;
+            clicked => { root.close-color-picker(); }
+        }
+
+        Rectangle {
+            z: 1;
+            width: parent.width < 328px ? parent.width - 24px : 304px;
+            height: 454px;
+            x: (parent.width - self.width) / 2;
+            y: 20px;
+            background: Themes.current.secondary-bg;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: Themes.current.border-color;
+            drop-shadow-color: Themes.shadow-color;
+            drop-shadow-blur: Themes.shadow-size;
+
+            VerticalBox {
+                padding: 12px;
+                spacing: 10px;
+
+                Text {
+                    text: root.color-picker-label == "" ? I18n.t("Pick Color") : root.color-picker-label;
+                    font-size: 13px;
+                    font-weight: 700;
+                    color: Themes.current.primary-text;
+                }
+
+                Rectangle {
+                    height: 224px;
+                    background: transparent;
+
+                    wheel-stage := Rectangle {
+                        width: 220px;
+                        height: 220px;
+                        x: (parent.width - self.width) / 2;
+                        y: 2px;
+                        background: transparent;
+
+                        property <length> ring-thickness: 16px;
+                        property <length> ring-radius: self.width / 2 - ring-thickness / 2 - 2px;
+                        property <length> disc-radius: self.width / 2 - ring-thickness - 12px;
+                        property <length> disc-size: disc-radius * 2;
+                        property <length> disc-offset: (self.width - disc-size) / 2;
+                        property <length> disc-cell-size: disc-size / root.color-disc-grid-size;
+                        property <length> center-x: self.width / 2;
+                        property <length> center-y: self.height / 2;
+                        property <length> ring-handle-size: 18px;
+                        property <length> disc-handle-size: 18px;
+
+                        Rectangle {
+                            width: parent.width;
+                            height: parent.height;
+                            background: Themes.current.primary-bg;
+                            border-radius: self.width / 2;
+                            border-width: 1px;
+                            border-color: Themes.current.border-color;
+                            drop-shadow-color: Themes.shadow-color;
+                            drop-shadow-blur: 10px;
+                        }
+
+                        for idx in root.color-ring-segment-count: Rectangle {
+                            property <float> ratio: idx / root.color-ring-segment-count;
+                            property <float> angle-deg: ratio * 360 - 90;
+                            property <length> segment-size: wheel-stage.ring-thickness + 1px;
+                            property <length> segment-center-x:
+                                wheel-stage.center-x + Math.cos(angle-deg * 1deg) * wheel-stage.ring-radius;
+                            property <length> segment-center-y:
+                                wheel-stage.center-y + Math.sin(angle-deg * 1deg) * wheel-stage.ring-radius;
+
+                            x: segment-center-x - self.width / 2;
+                            y: segment-center-y - self.height / 2;
+                            width: segment-size;
+                            height: segment-size;
+                            border-radius: self.width / 2;
+                            background: root.shade-color(root.color-picker-base-color, ratio);
+                        }
+
+                        Rectangle {
+                            width: wheel-stage.disc-size + 10px;
+                            height: wheel-stage.disc-size + 10px;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            background: Themes.current.secondary-bg;
+                            border-radius: self.width / 2;
+                            border-width: 5px;
+                            border-color: Colors.white;
+                        }
+
+                        ring-touch := TouchArea {
+                            width: parent.width;
+                            height: parent.height;
+                            mouse-cursor: MouseCursor.pointer;
+
+                            pointer-event(ev) => {
+                                let dx = (self.mouse-x - parent.width / 2) / 1px;
+                                let dy = (self.mouse-y - parent.height / 2) / 1px;
+                                let distance = Math.sqrt(dx * dx + dy * dy);
+                                let outer-radius = (wheel-stage.width / 2 - 2px) / 1px;
+                                let inner-radius = (wheel-stage.width / 2 - wheel-stage.ring-thickness - 4px) / 1px;
+                                if distance >= inner-radius && distance <= outer-radius {
+                                    let phase = root.normalize-phase((Math.atan2(dy, dx) / 1deg + 90) / 360);
+                                    if ev.kind == PointerEventKind.move || ev.kind == PointerEventKind.down || ev.kind == PointerEventKind.up {
+                                        root.preview-ring-color(
+                                            phase,
+                                            wheel-stage.x + self.mouse-x,
+                                            wheel-stage.y + self.mouse-y
+                                        );
+                                    }
+                                    if (ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left)
+                                        || (ev.kind == PointerEventKind.move && self.pressed) {
+                                        root.select-ring-color(phase);
+                                    }
+                                }
+                            }
+                        }
+
+                        disc-area := Rectangle {
+                            width: wheel-stage.disc-size;
+                            height: wheel-stage.disc-size;
+                            x: wheel-stage.disc-offset;
+                            y: wheel-stage.disc-offset;
+                            background: transparent;
+                            border-radius: self.width / 2;
+                            clip: true;
+
+                            for idx in root.color-disc-grid-size * root.color-disc-grid-size: Rectangle {
+                                property <float> grid-size: root.color-disc-grid-size;
+                                property <float> row-index: Math.floor(idx / grid-size);
+                                property <float> col-index: idx - row-index * grid-size;
+                                property <float> norm-x: ((col-index + 0.5) / grid-size) * 2 - 1;
+                                property <float> norm-y: ((row-index + 0.5) / grid-size) * 2 - 1;
+                                property <float> distance-squared: norm-x * norm-x + norm-y * norm-y;
+
+                                x: col-index * wheel-stage.disc-cell-size;
+                                y: row-index * wheel-stage.disc-cell-size;
+                                width: wheel-stage.disc-cell-size + 0.5px;
+                                height: wheel-stage.disc-cell-size + 0.5px;
+                                border-radius: self.width / 2;
+                                background: distance-squared <= 1 ? root.wheel-color(norm-x, norm-y) : transparent;
+                            }
+
+                            disc-touch := TouchArea {
+                                width: parent.width;
+                                height: parent.height;
+                                mouse-cursor: MouseCursor.pointer;
+
+                                pointer-event(ev) => {
+                                    let local-x = ((self.mouse-x - parent.width / 2) / Math.max(1px, wheel-stage.disc-radius));
+                                    let local-y = ((self.mouse-y - parent.height / 2) / Math.max(1px, wheel-stage.disc-radius));
+                                    let distance = Math.sqrt(local-x * local-x + local-y * local-y);
+                                    if distance <= 1 {
+                                        let hue = root.wheel-hue(local-x, local-y);
+                                        let saturation = root.wheel-saturation(local-x, local-y);
+                                        if ev.kind == PointerEventKind.move || ev.kind == PointerEventKind.down || ev.kind == PointerEventKind.up {
+                                            root.preview-wheel-color(
+                                                hue,
+                                                saturation,
+                                                wheel-stage.x + parent.x + self.mouse-x,
+                                                wheel-stage.y + parent.y + self.mouse-y
+                                            );
+                                        }
+                                        if (ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left)
+                                            || (ev.kind == PointerEventKind.move && self.pressed) {
+                                            root.select-wheel-color(hue, saturation);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        ColorPickerHandle {
+                            x:
+                                wheel-stage.center-x
+                                + Math.cos((root.color-picker-base-hue - 90) * 1deg)
+                                    * (root.color-picker-base-saturation * wheel-stage.disc-radius)
+                                - self.width / 2;
+                            y:
+                                wheel-stage.center-y
+                                + Math.sin((root.color-picker-base-hue - 90) * 1deg)
+                                    * (root.color-picker-base-saturation * wheel-stage.disc-radius)
+                                - self.height / 2;
+                            size: wheel-stage.disc-handle-size;
+                            accent-color: root.shade-color(root.color-picker-base-color, root.color-picker-ring-phase);
+                        }
+
+                        ColorPickerHandle {
+                            x:
+                                wheel-stage.center-x
+                                + Math.cos((root.color-picker-ring-phase * 360 - 90) * 1deg)
+                                    * wheel-stage.ring-radius
+                                - self.width / 2;
+                            y:
+                                wheel-stage.center-y
+                                + Math.sin((root.color-picker-ring-phase * 360 - 90) * 1deg)
+                                    * wheel-stage.ring-radius
+                                - self.height / 2;
+                            size: wheel-stage.ring-handle-size;
+                            accent-color: root.shade-color(root.color-picker-base-color, root.color-picker-ring-phase);
+                        }
+
+                        if root.color-picker-preview-visible: Rectangle {
+                            z: 3;
+                            width: 22px;
+                            height: 22px;
+                            x: Math.max(
+                                4px,
+                                Math.min(parent.width - self.width - 4px, root.color-picker-preview-x + 14px)
+                            );
+                            y: Math.max(
+                                4px,
+                                Math.min(parent.height - self.height - 4px, root.color-picker-preview-y - self.height - 10px)
+                            );
+                            border-radius: self.width / 2;
+                            border-width: 2px;
+                            border-color: Themes.current.primary-text;
+                            background: root.color-picker-preview-color;
+                            drop-shadow-color: Themes.shadow-color;
+                            drop-shadow-blur: 8px;
+                        }
+                    }
+                }
+
+                Rectangle {
+                    height: 28px;
+                    background: Themes.current.primary-bg;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: Themes.current.border-color;
+                    clip: true;
+
+                    TextInput {
+                        width: parent.width - 16px;
+                        x: 8px;
+                        y: 1px;
+                        text <=> root.color-picker-value;
+                        font-size: 12px;
+                        color: Themes.current.primary-text;
+                        single-line: true;
+                        horizontal-alignment: TextHorizontalAlignment.right;
+                        vertical-alignment: TextVerticalAlignment.center;
+                        edited => {
+                            root.color-picker-selection-known = false;
+                            root.color-picker-preview-visible = false;
+                        }
+                        accepted => { root.apply-color-picker(); }
+                    }
+                }
+
+                Text {
+                    text: I18n.t("Recent Colors");
+                    font-size: 11px;
+                    font-weight: 600;
+                    color: Themes.current.secondary-text;
+                }
+
+                if root.no-recent-colors: Rectangle {
+                    height: 26px;
+                    background: Themes.current.primary-bg;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: Themes.current.border-color;
+
+                    Text {
+                        text: I18n.t("No recent colors");
+                        color: Themes.current.secondary-text;
+                        font-size: 11px;
+                        horizontal-alignment: TextHorizontalAlignment.center;
+                        vertical-alignment: TextVerticalAlignment.center;
+                    }
+                }
+
+                if !root.no-recent-colors: HorizontalBox {
+                    spacing: 6px;
+
+                    if root.recent-color-1-hex != "": ColorSwatch {
+                        hex: root.recent-color-1-hex;
+                        swatch-color: root.recent-color-1-color;
+                        is-selected: root.color-picker-value == root.recent-color-1-hex;
+                        picked(hex) => { root.select-color-picker(hex, root.recent-color-1-color); }
+                    }
+                    if root.recent-color-2-hex != "": ColorSwatch {
+                        hex: root.recent-color-2-hex;
+                        swatch-color: root.recent-color-2-color;
+                        is-selected: root.color-picker-value == root.recent-color-2-hex;
+                        picked(hex) => { root.select-color-picker(hex, root.recent-color-2-color); }
+                    }
+                    if root.recent-color-3-hex != "": ColorSwatch {
+                        hex: root.recent-color-3-hex;
+                        swatch-color: root.recent-color-3-color;
+                        is-selected: root.color-picker-value == root.recent-color-3-hex;
+                        picked(hex) => { root.select-color-picker(hex, root.recent-color-3-color); }
+                    }
+                    if root.recent-color-4-hex != "": ColorSwatch {
+                        hex: root.recent-color-4-hex;
+                        swatch-color: root.recent-color-4-color;
+                        is-selected: root.color-picker-value == root.recent-color-4-hex;
+                        picked(hex) => { root.select-color-picker(hex, root.recent-color-4-color); }
+                    }
+                    if root.recent-color-5-hex != "": ColorSwatch {
+                        hex: root.recent-color-5-hex;
+                        swatch-color: root.recent-color-5-color;
+                        is-selected: root.color-picker-value == root.recent-color-5-hex;
+                        picked(hex) => { root.select-color-picker(hex, root.recent-color-5-color); }
+                    }
+                    if root.recent-color-6-hex != "": ColorSwatch {
+                        hex: root.recent-color-6-hex;
+                        swatch-color: root.recent-color-6-color;
+                        is-selected: root.color-picker-value == root.recent-color-6-hex;
+                        picked(hex) => { root.select-color-picker(hex, root.recent-color-6-color); }
+                    }
+                    if root.recent-color-7-hex != "": ColorSwatch {
+                        hex: root.recent-color-7-hex;
+                        swatch-color: root.recent-color-7-color;
+                        is-selected: root.color-picker-value == root.recent-color-7-hex;
+                        picked(hex) => { root.select-color-picker(hex, root.recent-color-7-color); }
+                    }
+                    if root.recent-color-8-hex != "": ColorSwatch {
+                        hex: root.recent-color-8-hex;
+                        swatch-color: root.recent-color-8-color;
+                        is-selected: root.color-picker-value == root.recent-color-8-hex;
+                        picked(hex) => { root.select-color-picker(hex, root.recent-color-8-color); }
+                    }
+                }
+
+                Rectangle { height: 1px; background: Themes.current.border-color; }
+
+                HorizontalBox {
+                    spacing: 6px;
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        background: transparent;
+                    }
+
+                    Rectangle {
+                        width: 68px;
+                        height: 28px;
+                        border-radius: 4px;
+                        background: cancel-touch.has-hover ? Themes.current.hover-color : Themes.current.primary-bg;
+
+                        cancel-touch := TouchArea {
+                            mouse-cursor: MouseCursor.pointer;
+                            clicked => { root.close-color-picker(); }
+                        }
+
+                        Text {
+                            text: I18n.t("Cancel");
+                            font-size: 12px;
+                            font-weight: 600;
+                            color: Themes.current.primary-text;
+                            horizontal-alignment: TextHorizontalAlignment.center;
+                            vertical-alignment: TextVerticalAlignment.center;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 68px;
+                        height: 28px;
+                        border-radius: 4px;
+                        background: apply-touch.has-hover ? Themes.current.hover-color : Themes.current.active-color;
+
+                        apply-touch := TouchArea {
+                            mouse-cursor: MouseCursor.pointer;
+                            clicked => { root.apply-color-picker(); }
+                        }
+
+                        Text {
+                            text: I18n.t("Apply");
+                            font-size: 12px;
+                            font-weight: 600;
+                            color: Themes.on-accent-text;
+                            horizontal-alignment: TextHorizontalAlignment.center;
+                            vertical-alignment: TextVerticalAlignment.center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

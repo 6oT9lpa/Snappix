@@ -1,0 +1,158 @@
+﻿export global I18n {
+    in-out property <string> language: "ru";
+
+    public pure function t(key: string) -> string {
+        if language == "en" {
+            return key;
+        }
+
+        if key == "Log-in Snappix Account" { "Вход в аккаунт Snappix" }
+        else if key == "Email or Username" { "Email или имя пользователя" }
+        else if key == "Password" { "Пароль" }
+        else if key == "Loading..." { "Загрузка..." }
+        else if key == "Log In" { "Войти" }
+        else if key == "Blueprint Editor" { "Редактор Blueprint" }
+        else if key == "Blueprint Editor Placeholder" { "Здесь будет редактор blueprint-ов" }
+        else if key == "Open recent" { "Недавние проекты" }
+        else if key == "No recent projects" { "Нет недавних проектов" }
+        else if key == "Get started" { "Начало работы" }
+        else if key == "Create New Project" { "Создать новый проект" }
+        else if key == "Open Project" { "Открыть проект" }
+        else if key == "Create New Page" { "Создать новую страницу" }
+        else if key == "Project Name" { "Название проекта" }
+        else if key == "Project Location" { "Путь проекта" }
+        else if key == "Browse" { "Обзор" }
+        else if key == "Platform" { "Платформа" }
+        else if key == "Desktop" { "Десктоп" }
+        else if key == "Mobile" { "Мобильная" }
+        else if key == "Web" { "Веб" }
+        else if key == "Development Mode" { "Режим разработки" }
+        else if key == "Code" { "Код" }
+        else if key == "Nodes" { "Ноды" }
+        else if key == "Hybrid" { "Гибрид" }
+        else if key == "Initial Page Size" { "Начальный размер страницы" }
+        else if key == "Tablet" { "Планшет" }
+        else if key == "Cancel" { "Отмена" }
+        else if key == "Apply" { "Применить" }
+        else if key == "Create" { "Создать" }
+        else if key == "EXPLORER" { "ПРОВОДНИК" }
+        else if key == "PROJECT" { "ПРОЕКТ" }
+        else if key == "No pages" { "Нет страниц" }
+        else if key == "TIMELINE" { "ИСТОРИЯ" }
+        else if key == "Timeline is empty" { "История пуста" }
+        else if key == "OUTLINE" { "СТРУКТУРА" }
+        else if key == "Outline is empty" { "Структура пуста" }
+        else if key == "Rename page" { "Переименовать страницу" }
+        else if key == "Rename element" { "Переименовать объект" }
+        else if key == "Rename" { "Переименовать" }
+        else if key == "Timeline" { "История" }
+        else if key == "Outline" { "Структура" }
+        else if key == "Open Timeline" { "Открыть историю" }
+        else if key == "Cut" { "Вырезать" }
+        else if key == "Copy" { "Копировать" }
+        else if key == "Delete" { "Удалить" }
+        else if key == "Paste here" { "Вставить сюда" }
+        else if key == "Create Comment" { "Создать комментарий" }
+        else if key == "Comment" { "Комментарий" }
+        else if key == "Pick Color" { "Выбор цвета" }
+        else if key == "Recent Colors" { "Недавние цвета" }
+        else if key == "No recent colors" { "Недавних цветов пока нет" }
+        else if key == "Paste Image from Clipboard" { "Вставить изображение из буфера" }
+        else if key == "Delete Comment" { "Удалить комментарий" }
+        else if key == "Delete Image" { "Удалить изображение" }
+        else if key == "Increase Title Size" { "Увеличить заголовок" }
+        else if key == "Decrease Title Size" { "Уменьшить заголовок" }
+        else if key == "Increase Body Size" { "Увеличить основной текст" }
+        else if key == "Decrease Body Size" { "Уменьшить основной текст" }
+        else if key == "Title size" { "Размер заголовка" }
+        else if key == "Body size" { "Размер текста" }
+        else if key == "Show/Hide UI" { "Показать/Скрыть UI" }
+        else if key == "Show/Hide Comments" { "Показать/Скрыть комментарии" }
+        else if key == "Paste to replace" { "Вставить с заменой" }
+        else if key == "Group section" { "Сгруппировать секцию" }
+        else if key == "Ungroup section" { "Разгруппировать секцию" }
+        else if key == "Flip vertical" { "Отразить по вертикали" }
+        else if key == "Flip horizontal" { "Отразить по горизонтали" }
+        else if key == "Comments hidden" { "Комментарии скрыты" }
+        else if key == "COMPONENTS LIBRARY" || key == "LIBRARY COMPONENTS" { "БИБЛИОТЕКА КОМПОНЕНТОВ" }
+        else if key == "COMPONENT PROPERTIES" || key == "COMPONENTS PROPERTIES" { "СВОЙСТВА КОМПОНЕНТА" }
+        else if key == "Drop or select an element" { "Перетащите или выберите объект" }
+        else if key == "TRANSFORM" { "ТРАНСФОРМАЦИЯ" }
+        else if key == "TEXT" { "ТЕКСТ" }
+        else if key == "STYLE" { "СТИЛЬ" }
+        else if key == "Type" { "Тип" }
+        else if key == "Width" { "Ширина" }
+        else if key == "Height" { "Высота" }
+        else if key == "Rotate" { "Поворот" }
+        else if key == "Value" { "Значение" }
+        else if key == "Border" { "Граница" }
+        else if key == "Font" { "Шрифт" }
+        else if key == "History preview mode" { "Режим просмотра изменений" }
+        else if key == "Div" { "Блок" }
+        else if key == "Button" { "Кнопка" }
+        else if key == "Text" { "Текст" }
+        else if key == "Cursor" { "Курсор" }
+        else if key == "Hand" { "Рука" }
+        else if key == "Move" { "Движение" }
+        else if key == "Finish" { "Готово" }
+        else if key == "Label" { "Метка" }
+        else if key == "Input" { "Поле ввода" }
+        else if key == "Textarea" { "Текстовая область" }
+        else if key == "Checkbox" { "Чекбокс" }
+        else if key == "Image" { "Изображение" }
+        else if key == "Flex Container" { "Flex контейнер" }
+        else if key == "Grid Container" { "Grid контейнер" }
+        else if key == "Stack Container" { "Stack контейнер" }
+        else if key == "LAYOUTS" { "КОНТЕЙНЕРЫ" }
+        else if key == "BASIC ELEMENTS" { "БАЗОВЫЕ ЭЛЕМЕНТЫ" }
+        else if key == "FORM ELEMENTS" { "ЭЛЕМЕНТЫ ФОРМ" }
+        else if key == "MEDIA" { "МЕДИА" }
+        else if key == "Container that arranges children in flexible layout" { "Контейнер с гибким расположением дочерних элементов" }
+        else if key == "Container that arranges children in grid layout" { "Контейнер с расположением дочерних элементов по сетке" }
+        else if key == "Container that stacks children" { "Контейнер, который накладывает дочерние элементы" }
+        else if key == "Generic container element" { "Универсальный контейнер" }
+        else if key == "Editable text element" { "Редактируемый текстовый элемент" }
+        else if key == "Image placeholder element" { "Заглушка для изображения" }
+        else if key == "Clickable button element" { "Нажимаемый элемент кнопки" }
+        else if key == "Field for single-line text input" { "Поле для однострочного ввода" }
+        else if key == "Field for multi-line text input" { "Поле для многострочного ввода" }
+        else if key == "Selectable checkbox element" { "Элемент флажка" }
+        else if key == "Dropdown selection element" { "Элемент выпадающего списка" }
+        else if key == "Radio button group element" { "Элемент группы radio-кнопок" }
+        else if key == "Range slider element" { "Элемент слайдера диапазона" }
+        else if key == "Toggle switch element" { "Элемент переключателя" }
+        else if key == "Video player element" { "Элемент видеоплеера" }
+        else if key == "Audio player element" { "Элемент аудиоплеера" }
+        else if key == "Flex layout container; children are arranged by flex rules without absolute positioning" { "Flex-контейнер: дочерние элементы располагаются по правилам flex без абсолютного позиционирования" }
+        else if key == "Grid layout container with configurable rows and columns, children follow grid placement" { "Grid-контейнер с настраиваемыми строками и столбцами, дочерние элементы размещаются по сетке" }
+        else if key == "Free-form absolute container (display block); responsive behavior is configured manually" { "Свободный контейнер с абсолютным позиционированием (display: block); адаптивность настраивается вручную" }
+        else if key == "Generic container element without explicit display mode" { "Универсальный контейнер без явного режима display" }
+        else if key == "Editable text element with wrap and absolute positioning" { "Редактируемый текстовый элемент с переносом строк и абсолютным позиционированием" }
+        else if key == "Single-line heading text element with absolute positioning" { "Однострочный заголовок с абсолютным позиционированием" }
+        else if key == "Image container; shows No image until source is provided" { "Контейнер изображения: показывает \"No image\", пока не указан источник" }
+        else if key == "Single-line input field with click-to-focus and placeholder support" { "Однострочное поле ввода с фокусом по клику и поддержкой placeholder" }
+        else if key == "Multi-line text input area with wrapping support" { "Многострочное поле ввода с поддержкой переноса строк" }
+        else if key == "Checkbox control with box and check state" { "Элемент чекбокса с настройкой состояния флажка" }
+        else if key == "Could not open the project. Check the file path and access rights." { "Не удалось открыть проект. Проверьте путь к файлу и права доступа." }
+        else if key == "Could not save project changes. Please check disk access and free space." { "Не удалось сохранить изменения проекта. Проверьте доступ к диску и свободное место." }
+        else if key == "Could not delete project files. Check file access and try again." { "Не удалось удалить файлы проекта. Проверьте доступ к файлам и повторите попытку." }
+        else if key == "Application settings could not be read. Default settings were restored." { "Не удалось прочитать настройки приложения. Восстановлены настройки по умолчанию." }
+        else if key == "Application settings are corrupted. Default settings were restored." { "Файл настроек поврежден. Восстановлены настройки по умолчанию." }
+        else if key == "Could not save application settings. Some preferences may not persist." { "Не удалось сохранить настройки приложения. Часть параметров может не сохраниться." }
+        else if key == "Hotkey settings could not be read. Default hotkeys were restored." { "Не удалось загрузить горячие клавиши. Восстановлены горячие клавиши по умолчанию." }
+        else if key == "Could not save hotkey settings. Changes may be temporary." { "Не удалось сохранить настройки горячих клавиш. Изменения могут быть временными." }
+        else if key == "Could not update hotkey configuration. Please try again." { "Не удалось обновить конфигурацию горячих клавиш. Попробуйте еще раз." }
+        else if key == "Could not rename project. Please check the new name." { "Не удалось переименовать проект. Проверьте новое имя." }
+        else if key == "Could not change project location. Check file access and selected folder." { "Не удалось сменить место хранения проекта. Проверьте доступ к файлам и выбранную папку." }
+        else if key == "Delete project" { "Удалить проект" }
+        else if key == "Rename project" { "Переименовать проект" }
+        else if key == "Change storage location" { "Сменить место хранения" }
+        else if key == "Project options" { "Параметры проекта" }
+        else if key == "New project name" { "Новое имя проекта" }
+        else if key == "Save" { "Сохранить" }
+        else if key == "Project name cannot be empty" { "Имя проекта не может быть пустым" }
+        else if key == "Invalid number" { "Некорректное число" }
+        else { key }
+    }
+}
+

@@ -1,0 +1,202 @@
+﻿import { HorizontalBox, VerticalBox } from "std-widgets.slint";
+import { I18n } from "../components/I18n.slint";
+import { Themes } from "../components/Themes.slint";
+
+import "../assets/fonts/Comic-Regular.ttf";
+
+export component AuthForm inherits Rectangle {
+    width: 400px;
+    height: 300px;
+    background: Themes.current.secondary-bg;
+    border-radius: Themes.border-radius + 10px;
+    border-width: 1px;
+    border-color: Themes.current.border-color;
+    
+    drop-shadow-offset-x: 0px;
+    drop-shadow-offset-y: 8px;
+    drop-shadow-blur: Themes.shadow-size + 14px;
+    drop-shadow-color: Themes.shadow-color;
+
+    in-out property <string> email-or-username: "";
+    in-out property <string> password: "";
+    in-out property <string> error-message: "";
+    in-out property <bool> is-loading: false;
+
+    callback login(string, string);
+
+    VerticalBox {
+        HorizontalBox{
+            Rectangle {
+                width: 20px;
+                height: 20px;
+                Image {
+                    source: @image-url("../assets/images/logo.svg");
+                    width:  parent.width;
+                    height: parent.height;
+                }
+            }
+            Rectangle {
+                height: 25px;
+                
+                Text {
+                    text: I18n.t("Log-in Snappix Account");
+                    font-size: 16px;
+                    font-weight: 600;
+                    height: 25px;
+                    color: Themes.current.primary-text;
+                    vertical-alignment: center;
+                    horizontal-alignment: TextHorizontalAlignment.center;
+                }
+            }
+        }
+        
+        HorizontalBox {
+            spacing: 0px;
+            width: parent.width - 35px;
+
+            VerticalBox {
+                height: 65px;
+                padding: 0px;
+                spacing: 0px;
+                width: parent.width;
+
+                
+                    Text{
+                        text: I18n.t("Email or Username");
+                        x: 20px;
+                        font-size: 14px;
+                        color: Themes.current.secondary-text;
+                        font-weight: 500;
+                    }
+
+                input-field-email := Rectangle {
+                    background: Themes.current.primary-bg;
+                    border-radius: 8px;
+                    height: 40px;
+
+                    email-input := TextInput {
+                        text <=> root.email-or-username;
+                        width: parent.width - 40px;
+                        vertical-alignment: center;
+                        color: Themes.current.secondary-text;
+                        font-size: 12px;
+                        font-family: "Comic Sans MS";
+
+                        private property <length> margin: 1rem;
+                        cursor-position-changed(cursor-position) => {
+                            if cursor-position.x + self.x < margin {
+                                self.x = - cursor-position.x + margin;
+                            } else if cursor-position.x + self.x > parent.width - margin - self.text-cursor-width {
+                                self.x = parent.width - cursor-position.x - margin - self.text-cursor-width;
+                            }
+                        }
+                    }   
+                }
+            }
+        }
+        HorizontalBox {
+            spacing: 0px;
+            width: parent.width - 35px;
+
+            VerticalBox {
+                height: 65px;
+                padding: 0px;
+                spacing: 0px;
+                width: parent.width;
+
+                
+                    Text{
+                        text: I18n.t("Password");
+                        x: 20px;
+                        font-size: 14px;
+                        color: Themes.current.secondary-text;
+                        font-weight: 500;
+                    }
+                
+                input-field-password := Rectangle {
+                    width: parent.width;
+                    background: Themes.current.primary-bg;
+                    border-radius: 8px;
+                    height: 40px;
+                    password-input := TextInput {
+                        text <=> root.password;
+                        width: parent.width - 30px;
+                        vertical-alignment: center;
+                        color: Themes.current.secondary-text;
+                        font-size: 12px;
+                        font-family: "Comic Sans MS";
+
+                        private property <length> margin: 1rem;
+                        cursor-position-changed(cursor-position) => {
+                            if cursor-position.x + self.x < margin {
+                                self.x = - cursor-position.x + margin;
+                            } else if cursor-position.x + self.x > parent.width - margin - self.text-cursor-width {
+                                self.x = parent.width - cursor-position.x - margin - self.text-cursor-width;
+                            }
+                        } 
+                    }
+                } 
+            }
+        }
+        // Error message display
+        if root.error-message != "": HorizontalBox {
+            Rectangle {
+                height: 30px;
+                background: Themes.error-bg;
+                border-radius: 8px;
+                
+                Text {
+                    text: root.error-message;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                    color: Themes.error-text;
+                    font-size: 12px;
+                    font-family: "Comic Sans MS";
+                }
+            }
+        }
+
+        HorizontalBox {
+            Rectangle {
+                height: 40px;
+                background: Themes.current.button-color;
+                border-color: Themes.current.border-color;
+                border-width: 1px;
+                border-radius: 8px;
+                clip: true;
+                opacity: root.is-loading ? 0.6 : 1.0;
+
+                Text {
+                    text: root.is-loading ? I18n.t("Loading...") : I18n.t("Log In");
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                    color: Themes.current.primary-text;
+                    font-family: "Comic Sans MS";
+                    font-italic: false;
+                    font-size: 16px;
+                    font-weight: 800;
+                }
+
+                btn-login := TouchArea {
+                    mouse-cursor: MouseCursor.pointer;
+                    property<bool> hover <=> self.has-hover;
+                    enabled: !root.is-loading;
+
+                    clicked => {
+                        root.login(root.email-or-username, root.password);
+                    }
+                }
+
+                states [
+                    hovered when btn-login.has-hover && !root.is-loading : {
+                        background: Themes.current.hover-color;
+
+                        in { animate background { duration: 150ms; } }
+                    }
+                ]
+            }
+        }
+    }
+}
+
+

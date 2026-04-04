@@ -1,0 +1,106 @@
+{
+  "version": "1.4.0",
+  "description": "Core hotkeys configuration for Snappix editor",
+  "hotkeys": {
+    "project": {
+      "exit_to_project_select": {
+        "key": "Ctrl+Q",
+        "description": "Exit project to project chooser"
+      }
+    },
+    "editor": {
+      "undo": {
+        "key": "Ctrl+Z",
+        "description": "Undo last action"
+      },
+      "redo": {
+        "key": "Shift+Z",
+        "description": "Redo last action"
+      },
+      "cut": {
+        "key": "Ctrl+X",
+        "description": "Cut selected element"
+      },
+      "copy": {
+        "key": "Ctrl+C",
+        "description": "Copy selected element"
+      },
+      "paste": {
+        "key": "Ctrl+V",
+        "description": "Paste from clipboard"
+      },
+      "paste_replace": {
+        "key": "Ctrl+R",
+        "description": "Paste clipboard and replace selected objects"
+      },
+      "select_all": {
+        "key": "Ctrl+A",
+        "description": "Select all objects on canvas"
+      },
+      "delete": {
+        "key": "Delete",
+        "description": "Delete selected object"
+      },
+      "rename_selected": {
+        "key": "Alt+F2",
+        "description": "Rename selected object"
+      }
+    },
+    "canvas": {
+      "open_create_menu": {
+        "key": "W",
+        "description": "Open context menu at cursor"
+      },
+      "create_comment": {
+        "key": "Ctrl+M",
+        "description": "Create comment outside the active canvas"
+      }
+    },
+    "element": {
+      "group": {
+        "key": "Ctrl+G",
+        "description": "Group selected elements"
+      },
+      "ungroup": {
+        "key": "Shift+G",
+        "description": "Ungroup selected elements"
+      },
+      "flip_vertical": {
+        "key": "Shift+V",
+        "description": "Flip selected objects vertically"
+      },
+      "flip_horizontal": {
+        "key": "Shift+H",
+        "description": "Flip selected objects horizontally"
+      }
+    },
+    "view": {
+      "open_explorer": {
+        "key": "1",
+        "description": "Open explorer section"
+      },
+      "open_library": {
+        "key": "2",
+        "description": "Open library components section"
+      },
+      "toggle_ui": {
+        "key": "Ctrl+/",
+        "description": "Show or hide editor UI"
+      },
+      "toggle_comments": {
+        "key": "Shift+C",
+        "description": "Show or hide comments"
+      }
+    },
+    "outline": {
+      "select_prev": {
+        "key": "A",
+        "description": "Select previous object in outline"
+      },
+      "select_next": {
+        "key": "D",
+        "description": "Select next object in outline"
+      }
+    }
+  }
+}

@@ -1,0 +1,399 @@
+﻿import { VerticalBox, HorizontalBox } from "std-widgets.slint";
+import { Themes, Separator-H } from "../components/Themes.slint";
+import { I18n } from "../components/I18n.slint";
+import { StringSearch } from "../utils/StringSearch.slint";
+import { ComponentIcon } from "./icons/ComponentIcons.slint";
+
+export component LibraryComponentItem inherits Rectangle {
+    in property <string> component-name: "Component";
+    in property <string> component-description: "";
+    in property <string> component-icon-type: "div";
+    in property <string> component-id: "";
+    in property <bool> visible-in-search: true;
+
+    callback item-drag-started(string, string, string);
+    callback item-selected();
+
+    clip: true;
+    border-radius: 4px;
+    background: root.visible-in-search && item-touch.has-hover ? Themes.current.hover-color : transparent;
+    height: root.visible-in-search ? 60px : 0px;
+
+    item-touch := TouchArea {
+        enabled: root.visible-in-search;
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { item-selected(); }
+
+        pointer-event(ev) => {
+            if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                item-drag-started(root.component-id, root.component-name, root.component-icon-type);
+            }
+        }
+    }
+
+    if root.visible-in-search: HorizontalBox {
+        padding-left: 8px;
+        padding-right: 8px;
+        padding-top: 6px;
+        padding-bottom: 0;
+        spacing: 0;
+
+        Rectangle {
+            width: 20px;
+            height: 40px;
+            border-radius: 3px;
+            background: transparent;
+
+            ComponentIcon {
+                icon-type: component-icon-type;
+                icon-color: item-touch.has-hover ? Themes.current.primary-text : Themes.current.secondary-text;
+            }
+        }
+
+        VerticalBox {
+            spacing: 2px;
+            horizontal-stretch: 1;
+
+            Text {
+                text: I18n.t(component-name);
+                font-size: 12px;
+                font-weight: 600;
+                color: item-touch.has-hover ? Themes.current.primary-text : Themes.current.secondary-text;
+                vertical-alignment: TextVerticalAlignment.center;
+            }
+
+            Text {
+                text: I18n.t(component-description);
+                font-size: 11px;
+                color: Themes.current.disabled-text;
+                vertical-alignment: TextVerticalAlignment.top;
+                wrap: word-wrap;
+                overflow: elide;
+                height: 26px;
+            }
+        }
+    }
+}
+
+export component LibraryComponentGroup inherits Rectangle {
+    in property <string> group-title: "Group";
+    in property <[string]> component-ids: [];
+    in property <[string]> component-names: [];
+    in property <[string]> component-descriptions: [];
+    in property <[string]> component-icons: [];
+    in property <string> search-filter: "";
+    in property <bool> show-count-badge: true;
+    in property <string> count-badge-text: component-names.length + "";
+
+    callback component-drag-started(string, string, string);
+    callback component-selected(string);
+
+    property <bool> has-matching-components: search-filter == "" || StringSearch.contains-any(component-names, search-filter);
+
+    visible: has-matching-components;
+    vertical-stretch: 0;
+
+    VerticalBox {
+        padding: 0;
+        padding-top: 10px;
+        spacing: 0;
+        vertical-stretch: 0;
+
+        Rectangle {
+            height: 28px;
+            background: transparent;
+
+            HorizontalBox {
+                alignment: LayoutAlignment.space-between;
+
+            Text {
+                height: 20px;
+                text: I18n.t(group-title);
+                font-size: 12px;
+                font-weight: 600;
+                color: Themes.current.primary-text;
+                    vertical-alignment: TextVerticalAlignment.center;
+                }
+
+                if root.show-count-badge: Rectangle {
+                    width: 20px;
+                    height: 20px;
+                    border-radius: 3px;
+                    background: Themes.current.primary-bg;
+
+                    Text {
+                        text: root.count-badge-text;
+                        color: Themes.current.secondary-text;
+                        font-size: 10px;
+                        horizontal-alignment: TextHorizontalAlignment.center;
+                        vertical-alignment: TextVerticalAlignment.center;
+                    }
+                }
+            }
+        }
+
+        VerticalLayout {
+            padding-left: 15px;
+            padding-right: 10px;
+            vertical-stretch: 0;
+            padding-top: 5px;
+
+            for component-id[idx] in component-ids: LibraryComponentItem {
+                component-id: component-id;
+                component-name: component-names[idx];
+                component-description: component-descriptions[idx];
+                component-icon-type: component-icons[idx];
+                visible-in-search: root.search-filter == "" || StringSearch.contains(component-names[idx], root.search-filter);
+
+                item-drag-started(id, name, icon) => { root.component-drag-started(id, name, icon); }
+                item-selected() => { root.component-selected(component-id); }
+            }
+        }
+    }
+}
+
+component SearchInput inherits Rectangle {
+    in-out property <string> text: "";
+
+    height: 32px;
+    background: Themes.current.primary-bg;
+    border-color: Themes.current.border-color;
+    border-width: 1px;
+    border-radius: 4px;
+
+    HorizontalBox {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 8px;
+
+        Path {
+            stroke: Themes.current.secondary-text;
+            stroke-width: 1.5px;
+            fill: transparent;
+            width: 14px;
+            height: 14px;
+            commands: "M 0 0 m -6 0 a 6 6 0 1 0 12 0 a 6 6 0 1 0 -12 0 M 4 4 L 10 10";
+        }
+
+        TextInput {
+            horizontal-stretch: 1;
+            font-size: 12px;
+            color: Themes.current.primary-text;
+            text <=> root.text;
+        }
+
+        Rectangle {
+            width: 16px;
+            height: 16px;
+            border-radius: 8px;
+            visible: root.text != "";
+            background: clear-touch.has-hover ? Themes.current.hover-color : transparent;
+
+            clear-touch := TouchArea {
+                mouse-cursor: MouseCursor.pointer;
+                clicked => { root.text = ""; }
+
+                Path {
+                    stroke: Themes.current.secondary-text;
+                    stroke-width: 1.5px;
+                    fill: transparent;
+                    width: 8px;
+                    height: 8px;
+                    commands: "M 0 0 L 8 8 M 8 0 L 0 8";
+                    x: 4px;
+                    y: 4px;
+                }
+            }
+        }
+    }
+}
+
+export component ComponentLibrary inherits VerticalBox {
+    in-out property <string> search-query: "";
+    property <[string]> all-component-ids: [
+        "flex-container",
+        "grid-container",
+        "stack-container",
+        "div",
+        "text",
+        "label",
+        "image",
+        "button",
+        "input",
+        "textarea",
+        "checkbox"
+    ];
+    property <[string]> all-component-names: [
+        "Flex Container",
+        "Grid Container",
+        "Stack Container",
+        "Div",
+        "Text",
+        "Label",
+        "Image",
+        "Button",
+        "Input",
+        "Textarea",
+        "Checkbox"
+    ];
+    property <[string]> all-component-descriptions: [
+        "Flex layout container; children are arranged by flex rules without absolute positioning",
+        "Grid layout container with configurable rows and columns, children follow grid placement",
+        "Free-form absolute container responsive behavior is configured manually",
+        "Generic container element",
+        "Editable text element with wrap and absolute positioning",
+        "Single-line heading text element with absolute positioning",
+        "Image container; shows No image until source is provided",
+        "Clickable button element",
+        "Single-line input field with click-to-focus and placeholder support",
+        "Multi-line text input area with wrapping support",
+        "Checkbox control with box and check state"
+    ];
+    property <[string]> all-component-icons: [
+        "flex",
+        "grid",
+        "stack",
+        "div",
+        "text",
+        "label",
+        "image",
+        "button",
+        "input",
+        "textarea",
+        "checkbox"
+    ];
+    property <bool> search-active: root.search-query != "";
+    property <bool> has-search-results: root.search-query != ""
+        && StringSearch.contains-any(root.all-component-names, root.search-query);
+
+    callback component-drag-started(string, string, string);
+    callback component-selected(string);
+
+    VerticalBox {
+        padding: 0;
+        padding-top: 14px;
+        spacing: 0;
+
+        HorizontalBox {
+            height: 30px;
+            padding: 10px;
+
+            Text {
+                height: 24px;
+                text: I18n.t("COMPONENTS LIBRARY");
+                font-size: 14px;
+                font-weight: 600;
+                color: Themes.current.secondary-text;
+                horizontal-stretch: 1;
+                vertical-alignment: TextVerticalAlignment.center;
+                overflow: elide;
+            }
+        }
+
+        Separator-H {}
+
+        Rectangle {
+            height: 44px;
+            background: transparent;
+
+            SearchInput {
+                y: 6px;
+                width: parent.width - 15px;
+                text <=> root.search-query;
+            }
+        }
+    }
+
+    Flickable {
+        horizontal-stretch: 1;
+        vertical-stretch: 1;
+
+        viewport-width: self.width;
+        viewport-height: groups-container.preferred-height;
+
+        groups-container := VerticalBox {
+            padding: 8px;
+            spacing: 8px;
+            alignment: LayoutAlignment.start;
+
+            if root.search-active && root.has-search-results: LibraryComponentGroup {
+                group-title: "Search Results";
+                component-ids: root.all-component-ids;
+                component-names: root.all-component-names;
+                component-descriptions: root.all-component-descriptions;
+                component-icons: root.all-component-icons;
+                search-filter: root.search-query;
+                show-count-badge: false;
+
+                component-drag-started(id, name, icon) => { root.component-drag-started(id, name, icon); }
+                component-selected(id) => { root.component-selected(id); }
+            }
+
+            if root.search-active && !root.has-search-results: Rectangle {
+                border-radius: 6px;
+                background: Themes.current.secondary-bg;
+                height: 64px;
+
+                Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: I18n.t("No matching components");
+                    color: Themes.current.secondary-text;
+                    font-size: 12px;
+                    horizontal-alignment: TextHorizontalAlignment.center;
+                    vertical-alignment: TextVerticalAlignment.center;
+                }
+            }
+
+            if !root.search-active: LibraryComponentGroup {
+                group-title: I18n.t("LAYOUTS");
+                component-ids: ["flex-container", "grid-container", "stack-container"];
+                component-names: ["Flex Container", "Grid Container", "Stack Container"];
+                component-descriptions: [
+                    "Flex layout container; children are arranged by flex rules without absolute positioning",
+                    "Grid layout container with configurable rows and columns, children follow grid placement",
+                    "Free-form absolute container responsive behavior is configured manually"
+                ];
+                component-icons: ["flex", "grid", "stack"];
+                search-filter: root.search-query;
+
+                component-drag-started(id, name, icon) => { root.component-drag-started(id, name, icon); }
+                component-selected(id) => { root.component-selected(id); }
+            }
+
+            if !root.search-active: LibraryComponentGroup {
+                group-title: I18n.t("BASIC ELEMENTS");
+                component-ids: ["div", "text", "label", "image", "button"];
+                component-names: ["Div", "Text", "Label", "Image", "Button"];
+                component-descriptions: [
+                    "Generic container element",
+                    "Editable text element with wrap and absolute positioning",
+                    "Single-line heading text element with absolute positioning",
+                    "Image container; shows No image until source is provided",
+                    "Clickable button element"
+                ];
+                component-icons: ["div", "text", "label", "image", "button"];
+                search-filter: root.search-query;
+
+                component-drag-started(id, name, icon) => { root.component-drag-started(id, name, icon); }
+                component-selected(id) => { root.component-selected(id); }
+            }
+
+            if !root.search-active: LibraryComponentGroup {
+                group-title: I18n.t("FORM ELEMENTS");
+                component-ids: ["input", "textarea", "checkbox"];
+                component-names: ["Input", "Textarea", "Checkbox"];
+                component-descriptions: [
+                    "Single-line input field with click-to-focus and placeholder support",
+                    "Multi-line text input area with wrapping support",
+                    "Checkbox control with box and check state"
+                ];
+                component-icons: ["input", "textarea", "checkbox"];
+                search-filter: root.search-query;
+
+                component-drag-started(id, name, icon) => { root.component-drag-started(id, name, icon); }
+                component-selected(id) => { root.component-selected(id); }
+            }
+        }
+    }
+}

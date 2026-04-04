@@ -1,0 +1,420 @@
+import { HorizontalBox, VerticalBox } from "std-widgets.slint";
+import { I18n } from "../components/I18n.slint";
+import { Themes, Separator-H } from "../components/Themes.slint";
+
+component CanvasContextMenuActionRow inherits Rectangle {
+    in property <string> title: "";
+    in property <string> hotkey: "";
+    callback selected();
+
+    height: 26px;
+    horizontal-stretch: 1;
+    border-radius: Themes.border-radius;
+    background: row-touch.has-hover ? Themes.current.hover-color : transparent;
+    clip: true;
+
+    animate background { duration: 100ms; }
+
+    row-touch := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.selected(); }
+    }
+
+    hotkey-text := Text {
+        text: root.hotkey;
+        font-size: 12px;
+        color: Themes.current.secondary-text;
+        x: parent.width - self.preferred-width - 10px;
+        y: (parent.height - self.height) / 2;
+        width: self.preferred-width;
+        horizontal-alignment: TextHorizontalAlignment.right;
+        vertical-alignment: TextVerticalAlignment.center;
+    }
+
+    title-text := Text {
+        text: root.title;
+        font-size: 12px;
+        color: Themes.current.primary-text;
+        x: 10px;
+        y: (parent.height - self.height) / 2;
+        width: Math.max(0px, hotkey-text.x - self.x - 20px);
+        horizontal-alignment: TextHorizontalAlignment.left;
+        vertical-alignment: TextVerticalAlignment.center;
+        overflow: elide;
+    }
+}
+
+component CanvasContextMenuNumberAdjust inherits Rectangle {
+    in property <string> title: "";
+    in property <float> value: 0;
+    in property <float> min: 0;
+    in property <float> max: 999;
+    in property <float> step: 1;
+    callback value-changed(float);
+
+    property <string> editing-text: "";
+
+    function sync-editing-text() {
+        root.editing-text = (round(root.value * 10) / 10) + "";
+    }
+
+    function commit-value() {
+        if root.editing-text == "" || root.editing-text == "-" || root.editing-text == "." || root.editing-text == "-." {
+            root.sync-editing-text();
+            return;
+        }
+
+        let parsed = root.editing-text.to-float();
+        if parsed != parsed {
+            root.sync-editing-text();
+            return;
+        }
+
+        let next = Math.max(root.min, Math.min(root.max, parsed));
+        root.value-changed(next);
+        root.editing-text = (round(next * 10) / 10) + "";
+    }
+
+    changed value => { root.sync-editing-text(); }
+    init => { root.sync-editing-text(); }
+
+    height: 52px;
+    horizontal-stretch: 1;
+    background: transparent;
+
+    VerticalBox {
+        padding: 0;
+        spacing: 4px;
+
+        Text {
+            text: root.title;
+            font-size: 12px;
+            color: Themes.current.secondary-text;
+        }
+
+        HorizontalBox {
+            spacing: 6px;
+
+            Rectangle {
+                width: 24px;
+                height: 24px;
+                border-radius: 4px;
+                background: minus-touch.has-hover ? Themes.current.hover-color : Themes.current.primary-bg;
+                border-width: 1px;
+                border-color: Themes.current.border-color;
+
+                minus-touch := TouchArea {
+                    mouse-cursor: MouseCursor.pointer;
+                    clicked => {
+                        root.value-changed(Math.max(root.min, root.value - root.step));
+                    }
+                }
+
+                Text {
+                    text: "-";
+                    color: Themes.current.primary-text;
+                    horizontal-alignment: TextHorizontalAlignment.center;
+                    vertical-alignment: TextVerticalAlignment.center;
+                }
+            }
+
+            Rectangle {
+                horizontal-stretch: 1;
+                height: 24px;
+                border-radius: 4px;
+                background: Themes.current.primary-bg;
+                border-width: 1px;
+                border-color: Themes.current.border-color;
+
+                value-input := TextInput {
+                    x: 8px;
+                    y: 2px;
+                    width: parent.width - 16px;
+                    height: parent.height - 4px;
+                    text <=> root.editing-text;
+                    input-type: InputType.number;
+                    single-line: true;
+                    color: Themes.current.primary-text;
+                    font-size: 12px;
+                    page-height: 24px;
+                    selection-background-color: Themes.current.active-color;
+                    selection-foreground-color: Themes.on-accent-text;
+                    accepted => { root.commit-value(); }
+                    changed has-focus => {
+                        if !self.has-focus {
+                            root.commit-value();
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                width: 24px;
+                height: 24px;
+                border-radius: 4px;
+                background: plus-touch.has-hover ? Themes.current.hover-color : Themes.current.primary-bg;
+                border-width: 1px;
+                border-color: Themes.current.border-color;
+
+                plus-touch := TouchArea {
+                    mouse-cursor: MouseCursor.pointer;
+                    clicked => {
+                        root.value-changed(Math.min(root.max, root.value + root.step));
+                    }
+                }
+
+                Text {
+                    text: "+";
+                    color: Themes.current.primary-text;
+                    horizontal-alignment: TextHorizontalAlignment.center;
+                    vertical-alignment: TextVerticalAlignment.center;
+                }
+            }
+        }
+    }
+}
+
+component CanvasContextMenuSurface inherits Rectangle {
+    background: Themes.current.secondary-bg;
+    border-radius: Themes.border-radius;
+    border-width: 1px;
+    border-color: Themes.current.border-color;
+    drop-shadow-blur: Themes.shadow-size;
+    drop-shadow-color: Themes.shadow-color;
+}
+
+export component ContextMenuClickEmptyCanvas inherits CanvasContextMenuSurface {
+    callback paste-requested();
+    callback toggle-ui-requested();
+    callback toggle-comments-requested();
+    callback dismiss-requested();
+
+    VerticalBox {
+        alignment: LayoutAlignment.stretch;
+        horizontal-stretch: 1;
+        padding: 6px;
+        spacing: 5px;
+        vertical-stretch: 1;
+
+        CanvasContextMenuActionRow {
+            title: I18n.t("Paste here");
+            hotkey: "Ctrl+V";
+            selected => { root.paste-requested(); }
+        }
+
+        Separator-H {}
+
+        CanvasContextMenuActionRow {
+            title: I18n.t("Show/Hide UI");
+            hotkey: "Ctrl+/";
+            selected => { root.toggle-ui-requested(); }
+        }
+
+        CanvasContextMenuActionRow {
+            title: I18n.t("Show/Hide Comments");
+            hotkey: "Shift+C";
+            selected => { root.toggle-comments-requested(); }
+        }
+
+        Separator-H {}
+
+        CanvasContextMenuActionRow {
+            title: I18n.t("Cancel");
+            selected => { root.dismiss-requested(); }
+        }
+    }
+}
+
+export component ContextMenuClickSelectedObject inherits CanvasContextMenuSurface {
+    callback copy-requested();
+    callback paste-requested();
+    callback paste-replace-requested();
+    callback group-requested();
+    callback ungroup-requested();
+    callback flip-vertical-requested();
+    callback flip-horizontal-requested();
+    callback go-to-blueprint-requested();
+    callback dismiss-requested();
+
+    VerticalBox {
+        alignment: LayoutAlignment.stretch;
+        horizontal-stretch: 1;
+        padding: 6px;
+        spacing: 5px;
+        vertical-stretch: 1;
+
+        CanvasContextMenuActionRow {
+            title: I18n.t("Copy");
+            hotkey: "Ctrl+C";
+            selected => { root.copy-requested(); }
+        }
+
+        CanvasContextMenuActionRow {
+            title: I18n.t("Paste here");
+            hotkey: "Ctrl+V";
+            selected => { root.paste-requested(); }
+        }
+
+        CanvasContextMenuActionRow {
+            title: I18n.t("Paste to replace");
+            hotkey: "Ctrl+R";
+            selected => { root.paste-replace-requested(); }
+        }
+
+        Separator-H {}
+
+        CanvasContextMenuActionRow {
+            title: I18n.t("Group section");
+            hotkey: "Ctrl+G";
+            selected => { root.group-requested(); }
+        }
+
+        CanvasContextMenuActionRow {
+            title: I18n.t("Ungroup section");
+            hotkey: "Shift+G";
+            selected => { root.ungroup-requested(); }
+        }
+
+        Separator-H {}
+
+        CanvasContextMenuActionRow {
+            title: I18n.t("Flip vertical");
+            hotkey: "Shift+V";
+            selected => { root.flip-vertical-requested(); }
+        }
+
+        CanvasContextMenuActionRow {
+            title: I18n.t("Flip horizontal");
+            hotkey: "Shift+H";
+            selected => { root.flip-horizontal-requested(); }
+        }
+
+        Separator-H {}
+
+        CanvasContextMenuActionRow {
+            title: I18n.t("Go to Blueprint");
+            hotkey: "Blueprint";
+            selected => { root.go-to-blueprint-requested(); }
+        }
+
+        Separator-H {}
+
+        CanvasContextMenuActionRow {
+            title: I18n.t("Cancel");
+            selected => { root.dismiss-requested(); }
+        }
+    }
+}
+
+export component ContextMenuClickOutsideCanvas inherits CanvasContextMenuSurface {
+    callback create-comment-requested();
+    callback toggle-ui-requested();
+    callback toggle-comments-requested();
+    callback dismiss-requested();
+
+    VerticalBox {
+        alignment: LayoutAlignment.stretch;
+        horizontal-stretch: 1;
+        padding: 6px;
+        spacing: 5px;
+        vertical-stretch: 1;
+
+        CanvasContextMenuActionRow {
+            title: I18n.t("Create Comment");
+            hotkey: "Ctrl+M";
+            selected => { root.create-comment-requested(); }
+        }
+
+        Separator-H {}
+
+        CanvasContextMenuActionRow {
+            title: I18n.t("Show/Hide UI");
+            hotkey: "Ctrl+/";
+            selected => { root.toggle-ui-requested(); }
+        }
+
+        CanvasContextMenuActionRow {
+            title: I18n.t("Show/Hide Comments");
+            hotkey: "Shift+C";
+            selected => { root.toggle-comments-requested(); }
+        }
+
+        Separator-H {}
+
+        CanvasContextMenuActionRow {
+            title: I18n.t("Cancel");
+            selected => { root.dismiss-requested(); }
+        }
+    }
+}
+
+export component ContextMenuClickComment inherits CanvasContextMenuSurface {
+    in property <bool> has-image: false;
+    in-out property <float> title-font-size: 16;
+    in-out property <float> body-font-size: 13;
+
+    callback paste-image-requested();
+    callback delete-image-requested();
+    callback delete-comment-requested();
+    callback title-font-size-requested(float);
+    callback body-font-size-requested(float);
+    callback dismiss-requested();
+
+    VerticalBox {
+        alignment: LayoutAlignment.stretch;
+        horizontal-stretch: 1;
+        padding: 6px;
+        spacing: 5px;
+        vertical-stretch: 1;
+
+        CanvasContextMenuActionRow {
+            title: I18n.t("Paste Image from Clipboard");
+            hotkey: "Clipboard";
+            selected => { root.paste-image-requested(); }
+        }
+
+        if root.has-image: CanvasContextMenuActionRow {
+            title: I18n.t("Delete Image");
+            selected => { root.delete-image-requested(); }
+        }
+
+        CanvasContextMenuActionRow {
+            title: I18n.t("Delete Comment");
+            hotkey: "Del";
+            selected => { root.delete-comment-requested(); }
+        }
+
+        Separator-H {}
+
+        CanvasContextMenuNumberAdjust {
+            title: I18n.t("Title size");
+            value: root.title-font-size;
+            min: 10;
+            max: 36;
+            step: 1;
+            value-changed(next) => {
+                root.title-font-size = next;
+                root.title-font-size-requested(next);
+            }
+        }
+
+        CanvasContextMenuNumberAdjust {
+            title: I18n.t("Body size");
+            value: root.body-font-size;
+            min: 10;
+            max: 30;
+            step: 1;
+            value-changed(next) => {
+                root.body-font-size = next;
+                root.body-font-size-requested(next);
+            }
+        }
+
+        Separator-H {}
+
+        CanvasContextMenuActionRow {
+            title: I18n.t("Cancel");
+            selected => { root.dismiss-requested(); }
+        }
+    }
+}

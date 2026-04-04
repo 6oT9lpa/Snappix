@@ -1,0 +1,21 @@
+import { I18n } from "../../components/I18n.slint";
+import { Themes } from "../../components/Themes.slint";
+
+export component HistoryPreviewOverlay inherits Rectangle {
+    width: 240px;
+    height: 30px;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: Themes.selection-border;
+    background: Themes.selection-panel-bg;
+
+    Text {
+        x: 14px;
+        width: parent.width - 28px;
+        height: parent.height;
+        text: I18n.t("History preview mode");
+        color: Themes.selection-text;
+        font-size: 11px;
+        vertical-alignment: TextVerticalAlignment.center;
+    }
+}

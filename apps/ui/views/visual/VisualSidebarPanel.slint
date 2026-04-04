@@ -1,0 +1,247 @@
+import { Themes } from "../../components/Themes.slint";
+import { ComponentExplorer } from "../../editor/ComponentExplorer.slint";
+import { ComponentLibrary } from "../../editor/ComponentLibrary.slint";
+import { PropertiesPanel } from "../../editor/PropertiesPanel.slint";
+import { CanvasBounds, DragState, ProjectPageInfo, SelectionInfo, TimelineEntry } from "../../models/EditorModels.slint";
+
+export component VisualSidebarPanel inherits Rectangle {
+    in-out property <int> active-content: 0;
+    in property <[SelectionInfo]> outline-elements: [];
+    in property <[TimelineEntry]> timeline-events: [];
+    in property <int> active-timeline-index: -1;
+    in property <[ProjectPageInfo]> project-page-items: [];
+    in property <int> active-project-page-index: 0;
+    in property <string> selected-element-id: "";
+    in property <string> project-name: "";
+
+    in property <string> selected-element-type: "";
+    in property <CanvasBounds> selected-element-bounds: { position: { x: 0px, y: 0px }, size: { width: 100px, height: 100px } };
+    in property <float> selected-element-rotation: 0;
+    in property <string> selected-element-text: "";
+    in property <bool> selected-element-checked: false;
+    in property <string> selected-element-container-mode: "absolute";
+    in property <bool> selected-element-allow-absolute-children: false;
+    in property <float> selected-element-layout-padding: 8;
+    in property <float> selected-element-layout-spacing: 8;
+    in property <float> selected-element-layout-margin: 0;
+    in property <float> selected-element-layout-order: 0;
+    in property <string> selected-element-stack-alignment: "stretch";
+    in property <string> selected-element-flex-direction: "column";
+    in property <string> selected-element-flex-wrap: "nowrap";
+    in property <string> selected-element-justify-items: "stretch";
+    in property <string> selected-element-justify-content: "flex-start";
+    in property <string> selected-element-align-items: "stretch";
+    in property <string> selected-element-align-content: "stretch";
+    in property <string> selected-element-place-items: "stretch stretch";
+    in property <string> selected-element-flex-flow: "column nowrap";
+    in property <string> selected-element-grid-template-columns: "1fr 1fr";
+    in property <string> selected-element-grid-template-rows: "auto auto";
+    in property <string> selected-element-grid-template-areas: "";
+    in property <string> selected-element-checkbox-box-side: "left";
+    in property <string> selected-element-checkbox-check-color: "#f5f5f5";
+    in property <string> selected-element-checkbox-box-color: "#151515";
+    in property <string> selected-element-checkbox-box-border-color: "#4a4a4a";
+    in property <float> selected-element-checkbox-box-border-width: 1;
+    in property <bool> selected-element-checkbox-space-between: false;
+    in property <string> selected-element-background: "#ffffff";
+    in property <string> selected-element-border-color: "#4a4a4a";
+    in property <float> selected-element-border-width: 0;
+    in property <float> selected-element-border-radius: 6;
+    in property <float> selected-element-font-size: 14;
+    in property <string> selected-element-font-family: "Sans";
+    in property <string> selected-element-text-wrap: "wrap";
+    in property <string> selected-element-text-color: "#f5f5f5";
+    in property <string> selected-element-placeholder: "";
+    in property <string> selected-element-background-image: "";
+    in property <string> selected-element-image-source: "";
+    in property <string> selected-element-image-source-display: "";
+    in property <bool> selected-element-inherit-text-style: true;
+
+    in-out property <string> dragging-component-id: "";
+    in-out property <string> dragging-component-name: "";
+    in-out property <string> dragging-component-icon: "";
+    in-out property <DragState> drag-state: DragState.None;
+
+    callback element-select-requested(string, bool, bool);
+    callback element-updated(string, float, float, float, float, float);
+    callback element-text-edited(string, string);
+    callback element-style-updated(string, string, string, float, float, float, string, string, string, string, string, string, bool, bool, string, string, string, string, float, bool);
+    callback element-container-settings-updated(string, string, bool, float, float, float, float, string, string, string, string, string, string, string, string, string, string, string, string);
+    callback browse-image-source-requested(string);
+    callback toggle-outline-node(string);
+    callback reparent-element(string, string);
+    callback rename-element(string, string);
+    callback cut-requested();
+    callback copy-requested();
+    callback open-project-page(int);
+    callback rename-project-page(int, string);
+    callback delete-element(string);
+    callback delete-project-page(int);
+    callback timeline-entry-selected(int);
+
+    function clear-library-drag() {
+        root.drag-state = DragState.None;
+        root.dragging-component-id = "";
+        root.dragging-component-name = "";
+        root.dragging-component-icon = "";
+    }
+
+    width: 320px;
+    background: Themes.current.secondary-bg;
+    z: 120;
+
+    if root.active-content == 1: ComponentExplorer {
+        width: parent.width;
+        height: parent.height;
+        elements: root.outline-elements;
+        project-pages: root.project-page-items;
+        timeline-events: root.timeline-events;
+        active-timeline-index: root.active-timeline-index;
+        active-page-index: root.active-project-page-index;
+        selected-element-id: root.selected-element-id;
+        project-name: root.project-name;
+
+        element-select-requested(id, additive, deep-select) => {
+            root.element-select-requested(id, additive, deep-select);
+        }
+        toggle-outline-node(id) => { root.toggle-outline-node(id); }
+        reparent-element(child-id, parent-id) => { root.reparent-element(child-id, parent-id); }
+        rename-element(id, new-name) => { root.rename-element(id, new-name); }
+        cut-requested => { root.cut-requested(); }
+        copy-requested => { root.copy-requested(); }
+        project-page-selected(page-index) => { root.open-project-page(page-index); }
+        project-page-renamed(page-index, page-name) => { root.rename-project-page(page-index, page-name); }
+        delete-element(id) => { root.delete-element(id); }
+        delete-project-page(page-index) => { root.delete-project-page(page-index); }
+        timeline-entry-selected(index) => { root.timeline-entry-selected(index); }
+    }
+
+    if root.active-content == 2: ComponentLibrary {
+        width: parent.width;
+        height: parent.height;
+
+        component-drag-started(component-id, component-name, icon) => {
+            root.clear-library-drag();
+            root.dragging-component-id = component-id;
+            root.dragging-component-name = component-name;
+            root.dragging-component-icon = icon;
+            root.drag-state = DragState.Dragging;
+        }
+    }
+
+    if root.active-content == 3: PropertiesPanel {
+        width: parent.width;
+        height: parent.height;
+        selected-element-id: root.selected-element-id;
+        selected-element-type: root.selected-element-type;
+        element-bounds: root.selected-element-bounds;
+        element-rotation: root.selected-element-rotation;
+        element-text: root.selected-element-text;
+        element-checked: root.selected-element-checked;
+        element-container-mode: root.selected-element-container-mode;
+        element-allow-absolute-children: root.selected-element-allow-absolute-children;
+        element-layout-padding: root.selected-element-layout-padding;
+        element-layout-spacing: root.selected-element-layout-spacing;
+        element-layout-margin: root.selected-element-layout-margin;
+        element-layout-order: root.selected-element-layout-order;
+        element-stack-alignment: root.selected-element-stack-alignment;
+        element-flex-direction: root.selected-element-flex-direction;
+        element-flex-wrap: root.selected-element-flex-wrap;
+        element-justify-items: root.selected-element-justify-items;
+        element-justify-content: root.selected-element-justify-content;
+        element-align-items: root.selected-element-align-items;
+        element-align-content: root.selected-element-align-content;
+        element-place-items: root.selected-element-place-items;
+        element-flex-flow: root.selected-element-flex-flow;
+        element-grid-template-columns: root.selected-element-grid-template-columns;
+        element-grid-template-rows: root.selected-element-grid-template-rows;
+        element-grid-template-areas: root.selected-element-grid-template-areas;
+        element-checkbox-box-side: root.selected-element-checkbox-box-side;
+        element-checkbox-check-color: root.selected-element-checkbox-check-color;
+        element-checkbox-box-color: root.selected-element-checkbox-box-color;
+        element-checkbox-box-border-color: root.selected-element-checkbox-box-border-color;
+        element-checkbox-box-border-width: root.selected-element-checkbox-box-border-width;
+        element-checkbox-space-between: root.selected-element-checkbox-space-between;
+        element-background: root.selected-element-background;
+        element-border-color: root.selected-element-border-color;
+        element-border-width: root.selected-element-border-width;
+        element-border-radius: root.selected-element-border-radius;
+        element-font-size: root.selected-element-font-size;
+        element-font-family: root.selected-element-font-family;
+        element-text-wrap: root.selected-element-text-wrap;
+        element-text-color: root.selected-element-text-color;
+        element-placeholder: root.selected-element-placeholder;
+        element-background-image: root.selected-element-background-image;
+        element-image-source: root.selected-element-image-source;
+        element-image-source-display: root.selected-element-image-source-display;
+        element-inherit-text-style: root.selected-element-inherit-text-style;
+
+        bounds-changed(bounds, rotation) => {
+            root.element-updated(
+                root.selected-element-id,
+                bounds.position.x / 1px,
+                bounds.position.y / 1px,
+                bounds.size.width / 1px,
+                bounds.size.height / 1px,
+                rotation
+            );
+        }
+
+        text-changed(text) => {
+            root.element-text-edited(root.selected-element-id, text);
+        }
+
+        style-changed(bg, border, bw, br, fs, tc, ff, tw, ph, bg_image, image_src, inherit_text_style, checked, checkbox_box_side, checkbox_check_color, checkbox_box_color, checkbox_box_border_color, checkbox_box_border_width, checkbox_space_between) => {
+            root.element-style-updated(
+                root.selected-element-id,
+                bg,
+                border,
+                bw,
+                br,
+                fs,
+                tc,
+                ff,
+                tw,
+                ph,
+                bg_image,
+                image_src,
+                inherit_text_style,
+                checked,
+                checkbox_box_side,
+                checkbox_check_color,
+                checkbox_box_color,
+                checkbox_box_border_color,
+                checkbox_box_border_width,
+                checkbox_space_between
+            );
+        }
+
+        container-settings-changed(container_mode, allow_absolute_children, layout_padding, layout_spacing, layout_margin, layout_order, stack_alignment, flex_direction, flex_wrap, justify_items, justify_content, align_items, align_content, place_items, flex_flow, grid_template_columns, grid_template_rows, grid_template_areas) => {
+            root.element-container-settings-updated(
+                root.selected-element-id,
+                container_mode,
+                allow_absolute_children,
+                layout_padding,
+                layout_spacing,
+                layout_margin,
+                layout_order,
+                stack_alignment,
+                flex_direction,
+                flex_wrap,
+                justify_items,
+                justify_content,
+                align_items,
+                align_content,
+                place_items,
+                flex_flow,
+                grid_template_columns,
+                grid_template_rows,
+                grid_template_areas
+            );
+        }
+
+        browse-image-source-requested => {
+            root.browse-image-source-requested(root.selected-element-id);
+        }
+    }
+}

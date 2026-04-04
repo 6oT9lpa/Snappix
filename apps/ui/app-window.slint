@@ -1,0 +1,945 @@
+﻿import { HorizontalBox, VerticalBox } from "std-widgets.slint";
+import { Themes } from "./components/Themes.slint";
+import { I18n } from "./components/I18n.slint";
+import { Toolbar } from "./components/ToolBar.slint";
+import { AuthForm } from "./views/AuthScene.slint";
+import { BlueprintEditorScene } from "./views/BlueprintEditorScene.slint";
+import { VisualEditorScene } from "./views/VisualEditorScene.slint";
+import { ProjectSelectedScene, RecentProjectData } from "./views/ProjectSelectedScene.slint";
+import { NewProjectDialog } from "./dialogs/NewProjectDialog.slint";
+import { NewPageDialog } from "./editor/PageTabs.slint";
+import { SelectionInfo, CanvasBounds, CanvasCommentInfo, EditorDocumentInfo, ProjectPageInfo, HotkeyBinding, TimelineEntry, AppErrorNotification } from "./models/EditorModels.slint";
+export { StringSearch } from "./utils/StringSearch.slint";
+
+component Separator inherits Rectangle {
+    height: 1px;
+    background: Themes.current.divider-color;
+}
+
+export enum AppScene {
+    Auth,
+    BlueprintEditor,
+    VisualEditor,
+    ProjectSelected
+}
+
+export component AppWindow inherits Window {
+    title: "Snappix";
+    icon: @image-url("../resources/icons/icon.png");
+    background: Themes.current.primary-bg;
+    default-font-family: Themes.font-family-regular;
+    min-width: 800px;
+    min-height: 600px;
+    no-frame: true;
+    resize-border-width: 8px;
+    preferred-width: 1200px;
+    preferred-height: 800px;
+
+    in-out property <bool> window-maximized: false;
+    in-out property <AppScene> current-scene: AppScene.Auth;
+    in-out property <string> app-language: "ru";
+    in-out property <string> app-theme-mode: "dark";
+    in-out property <bool> pressed-keys-enabled: true;
+    in-out property <bool> pressed-keys-show-mouse-buttons: true;
+    in-out property <color> theme-custom-primary-bg: #20242B;
+    in-out property <color> theme-custom-secondary-bg: #2B313A;
+    in-out property <color> theme-custom-primary-text: #F5F7FA;
+    in-out property <color> theme-custom-secondary-text: #98A4B3;
+    in-out property <color> theme-custom-disabled-text: #677382;
+    in-out property <color> theme-custom-border-color: #3C4552;
+    in-out property <color> theme-custom-divider-color: #444D5A;
+    in-out property <color> theme-custom-hover-color: #323B47;
+    in-out property <color> theme-custom-active-color: #FFD24D;
+    in-out property <color> theme-custom-button-color: #445066;
+    in-out property <color> theme-custom-tooltip-bg: #1F2630;
+    in-out property <color> theme-custom-overlay-bg: #00000066;
+    in-out property <color> theme-custom-overlay-strong-bg: #00000090;
+    in-out property <color> theme-custom-shadow-color: #00000040;
+    in-out property <float> theme-custom-shadow-size: 10;
+    in-out property <float> theme-custom-border-radius: 6;
+    in-out property <color> theme-custom-error-bg: #FF444420;
+    in-out property <color> theme-custom-error-text: #FF6666;
+    in-out property <color> theme-custom-success-color: #7DD97D;
+    in-out property <color> theme-custom-warning-color: #F5DC78;
+    in-out property <color> theme-custom-selection-border: #4EA1FF;
+    in-out property <color> theme-custom-selection-fill: #4EA1FF33;
+    in-out property <color> theme-custom-selection-panel-bg: #10203ACC;
+    in-out property <color> theme-custom-selection-text: #D9E7FF;
+    in-out property <color> theme-custom-on-accent-text: #000000;
+    in-out property <color> theme-custom-canvas-bg: #0F0F0F;
+    in-out property <color> theme-custom-canvas-grid-color: #2B2B2B;
+    property <length> window-resize-border: 8px;
+    property <length> window-resize-corner: 14px;
+    property <length> window-corner-radius: 8px;
+
+    function apply-theme-mode() {
+        if root.app-theme-mode == "light" {
+            Themes.current = Themes.light;
+            Themes.apply-light-extended();
+        } else if root.app-theme-mode == "custom" {
+            Themes.current = {
+                primary-bg: root.theme-custom-primary-bg,
+                secondary-bg: root.theme-custom-secondary-bg,
+                primary-text: root.theme-custom-primary-text,
+                secondary-text: root.theme-custom-secondary-text,
+                disabled-text: root.theme-custom-disabled-text,
+                border-color: root.theme-custom-border-color,
+                divider-color: root.theme-custom-divider-color,
+                hover-color: root.theme-custom-hover-color,
+                active-color: root.theme-custom-active-color,
+                button-color: root.theme-custom-button-color,
+                tooltip-bg: root.theme-custom-tooltip-bg
+            };
+            Themes.overlay-bg = root.theme-custom-overlay-bg;
+            Themes.overlay-strong-bg = root.theme-custom-overlay-strong-bg;
+            Themes.shadow-color = root.theme-custom-shadow-color;
+            Themes.shadow-size = root.theme-custom-shadow-size * 1px;
+            Themes.border-radius = root.theme-custom-border-radius * 1px;
+            Themes.error-bg = root.theme-custom-error-bg;
+            Themes.error-text = root.theme-custom-error-text;
+            Themes.success-color = root.theme-custom-success-color;
+            Themes.warning-color = root.theme-custom-warning-color;
+            Themes.selection-border = root.theme-custom-selection-border;
+            Themes.selection-fill = root.theme-custom-selection-fill;
+            Themes.selection-panel-bg = root.theme-custom-selection-panel-bg;
+            Themes.selection-text = root.theme-custom-selection-text;
+            Themes.on-accent-text = root.theme-custom-on-accent-text;
+            Themes.canvas-bg = root.theme-custom-canvas-bg;
+            Themes.canvas-grid-color = root.theme-custom-canvas-grid-color;
+        } else {
+            Themes.current = Themes.dark;
+            Themes.apply-dark-extended();
+        }
+    }
+
+    changed app-language => { I18n.language = root.app-language; }
+    changed app-theme-mode => { root.apply-theme-mode(); }
+    changed theme-custom-primary-bg => { if root.app-theme-mode == "custom" { root.apply-theme-mode(); } }
+    changed theme-custom-secondary-bg => { if root.app-theme-mode == "custom" { root.apply-theme-mode(); } }
+    changed theme-custom-primary-text => { if root.app-theme-mode == "custom" { root.apply-theme-mode(); } }
+    changed theme-custom-secondary-text => { if root.app-theme-mode == "custom" { root.apply-theme-mode(); } }
+    changed theme-custom-disabled-text => { if root.app-theme-mode == "custom" { root.apply-theme-mode(); } }
+    changed theme-custom-border-color => { if root.app-theme-mode == "custom" { root.apply-theme-mode(); } }
+    changed theme-custom-divider-color => { if root.app-theme-mode == "custom" { root.apply-theme-mode(); } }
+    changed theme-custom-hover-color => { if root.app-theme-mode == "custom" { root.apply-theme-mode(); } }
+    changed theme-custom-active-color => { if root.app-theme-mode == "custom" { root.apply-theme-mode(); } }
+    changed theme-custom-button-color => { if root.app-theme-mode == "custom" { root.apply-theme-mode(); } }
+    changed theme-custom-tooltip-bg => { if root.app-theme-mode == "custom" { root.apply-theme-mode(); } }
+    changed theme-custom-overlay-bg => { if root.app-theme-mode == "custom" { root.apply-theme-mode(); } }
+    changed theme-custom-overlay-strong-bg => { if root.app-theme-mode == "custom" { root.apply-theme-mode(); } }
+    changed theme-custom-shadow-color => { if root.app-theme-mode == "custom" { root.apply-theme-mode(); } }
+    changed theme-custom-shadow-size => { if root.app-theme-mode == "custom" { root.apply-theme-mode(); } }
+    changed theme-custom-border-radius => { if root.app-theme-mode == "custom" { root.apply-theme-mode(); } }
+    changed theme-custom-error-bg => { if root.app-theme-mode == "custom" { root.apply-theme-mode(); } }
+    changed theme-custom-error-text => { if root.app-theme-mode == "custom" { root.apply-theme-mode(); } }
+    changed theme-custom-success-color => { if root.app-theme-mode == "custom" { root.apply-theme-mode(); } }
+    changed theme-custom-warning-color => { if root.app-theme-mode == "custom" { root.apply-theme-mode(); } }
+    changed theme-custom-selection-border => { if root.app-theme-mode == "custom" { root.apply-theme-mode(); } }
+    changed theme-custom-selection-fill => { if root.app-theme-mode == "custom" { root.apply-theme-mode(); } }
+    changed theme-custom-selection-panel-bg => { if root.app-theme-mode == "custom" { root.apply-theme-mode(); } }
+    changed theme-custom-selection-text => { if root.app-theme-mode == "custom" { root.apply-theme-mode(); } }
+    changed theme-custom-on-accent-text => { if root.app-theme-mode == "custom" { root.apply-theme-mode(); } }
+    changed theme-custom-canvas-bg => { if root.app-theme-mode == "custom" { root.apply-theme-mode(); } }
+    changed theme-custom-canvas-grid-color => { if root.app-theme-mode == "custom" { root.apply-theme-mode(); } }
+
+    init => {
+        I18n.language = root.app-language;
+        root.apply-theme-mode();
+    }
+
+    // Project properties
+    in-out property <string> project-name: "";
+    in-out property <string> project-path: "";
+    in-out property <[EditorDocumentInfo]> editor-documents: [];
+    in-out property <int> active-document-index: 0;
+    in-out property <[ProjectPageInfo]> project-page-items: [];
+    in-out property <int> active-page-index: 0;
+    in-out property <float> zoom-level: 1.0;
+    in-out property <length> page-width: 1920px;
+    in-out property <length> page-height: 1080px;
+
+    // Canvas and selection state
+    in-out property <[SelectionInfo]> canvas-elements: [];
+    in-out property <[CanvasCommentInfo]> canvas-comments: [];
+    in-out property <[SelectionInfo]> outline-elements: [];
+    in-out property <[TimelineEntry]> timeline-events: [];
+    in-out property <int> active-timeline-index: -1;
+    in-out property <bool> history-preview-active: false;
+    in-out property <string> selected-element-id: "";
+    in-out property <string> selected-element-name: "";
+    in-out property <string> selected-element-type: "";
+    in-out property <CanvasBounds> selected-element-bounds: { position: { x: 0px, y: 0px }, size: { width: 100px, height: 100px } };
+    in-out property <float> selected-element-rotation: 0;
+    in-out property <string> selected-element-text: "";
+    in-out property <bool> selected-element-checked: false;
+    in-out property <string> selected-element-container-mode: "absolute";
+    in-out property <bool> selected-element-allow-absolute-children: false;
+    in-out property <float> selected-element-layout-padding: 8;
+    in-out property <float> selected-element-layout-spacing: 8;
+    in-out property <float> selected-element-layout-margin: 0;
+    in-out property <float> selected-element-layout-order: 0;
+    in-out property <string> selected-element-stack-alignment: "stretch";
+    in-out property <string> selected-element-flex-direction: "column";
+    in-out property <string> selected-element-flex-wrap: "nowrap";
+    in-out property <string> selected-element-justify-items: "stretch";
+    in-out property <string> selected-element-justify-content: "flex-start";
+    in-out property <string> selected-element-align-items: "stretch";
+    in-out property <string> selected-element-align-content: "stretch";
+    in-out property <string> selected-element-place-items: "stretch stretch";
+    in-out property <string> selected-element-flex-flow: "column nowrap";
+    in-out property <string> selected-element-grid-template-columns: "1fr 1fr";
+    in-out property <string> selected-element-grid-template-rows: "auto auto";
+    in-out property <string> selected-element-grid-template-areas: "";
+    in-out property <string> selected-element-checkbox-box-side: "left";
+    in-out property <string> selected-element-checkbox-check-color: "#f5f5f5";
+    in-out property <string> selected-element-checkbox-box-color: "#151515";
+    in-out property <string> selected-element-checkbox-box-border-color: "#4a4a4a";
+    in-out property <float> selected-element-checkbox-box-border-width: 1;
+    in-out property <bool> selected-element-checkbox-space-between: false;
+    in-out property <string> selected-element-background: "#ffffff";
+    in-out property <string> selected-element-border-color: "#4a4a4a";
+    in-out property <float> selected-element-border-width: 0;
+    in-out property <float> selected-element-border-radius: 6;
+    in-out property <float> selected-element-font-size: 14;
+    in-out property <string> selected-element-font-family: "Sans";
+    in-out property <string> selected-element-text-wrap: "wrap";
+    in-out property <string> selected-element-text-color: "#f5f5f5";
+    in-out property <string> selected-element-placeholder: "";
+    in-out property <string> selected-element-background-image: "";
+    in-out property <string> selected-element-image-source: "";
+    in-out property <string> selected-element-image-source-display: "";
+    in-out property <bool> selected-element-inherit-text-style: true;
+    in-out property <HotkeyBinding> select-all-hotkey: { key: "a", ctrl: true, shift: false, alt: false };
+    in-out property <HotkeyBinding> undo-hotkey: { key: "z", ctrl: true, shift: false, alt: false };
+    in-out property <HotkeyBinding> redo-hotkey: { key: "z", ctrl: false, shift: true, alt: false };
+    in-out property <HotkeyBinding> cut-hotkey: { key: "x", ctrl: true, shift: false, alt: false };
+    in-out property <HotkeyBinding> copy-hotkey: { key: "c", ctrl: true, shift: false, alt: false };
+    in-out property <HotkeyBinding> paste-hotkey: { key: "v", ctrl: true, shift: false, alt: false };
+    in-out property <HotkeyBinding> paste-replace-hotkey: { key: "r", ctrl: true, shift: false, alt: false };
+    in-out property <HotkeyBinding> delete-hotkey: { key: "delete", ctrl: false, shift: false, alt: false };
+    in-out property <HotkeyBinding> rename-hotkey: { key: "f2", ctrl: false, shift: false, alt: true };
+    in-out property <HotkeyBinding> exit-project-hotkey: { key: "q", ctrl: true, shift: false, alt: false };
+    in-out property <HotkeyBinding> create-menu-hotkey: { key: "w", ctrl: false, shift: false, alt: false };
+    in-out property <HotkeyBinding> create-comment-hotkey: { key: "m", ctrl: true, shift: false, alt: false };
+    in-out property <HotkeyBinding> outline-prev-hotkey: { key: "a", ctrl: false, shift: false, alt: false };
+    in-out property <HotkeyBinding> outline-next-hotkey: { key: "d", ctrl: false, shift: false, alt: false };
+    in-out property <HotkeyBinding> group-hotkey: { key: "g", ctrl: true, shift: false, alt: false };
+    in-out property <HotkeyBinding> ungroup-hotkey: { key: "g", ctrl: false, shift: true, alt: false };
+    in-out property <HotkeyBinding> flip-vertical-hotkey: { key: "v", ctrl: false, shift: true, alt: false };
+    in-out property <HotkeyBinding> flip-horizontal-hotkey: { key: "h", ctrl: false, shift: true, alt: false };
+    in-out property <HotkeyBinding> toggle-ui-hotkey: { key: "/", ctrl: true, shift: false, alt: false };
+    in-out property <HotkeyBinding> toggle-comments-hotkey: { key: "c", ctrl: false, shift: true, alt: false };
+    in-out property <HotkeyBinding> reset-view-hotkey: { key: "0", ctrl: true, shift: false, alt: false };
+    in-out property <HotkeyBinding> explorer-hotkey: { key: "1", ctrl: false, shift: false, alt: false };
+    in-out property <HotkeyBinding> library-hotkey: { key: "2", ctrl: false, shift: false, alt: false };
+
+    in-out property <[RecentProjectData]> recent-projects: [];
+    in-out property <[AppErrorNotification]> app-errors: [];
+
+    in-out property <bool> show-new-project-dialog: false;
+    in-out property <bool> show-new-page-dialog: false;
+    in-out property <string> project-error-message: "";
+
+    // Auth state
+    in-out property <string> email-or-username: "";
+    in-out property <string> password: "";
+    in-out property <string> error-message: "";
+    in-out property <bool> is-loading: false;
+
+    // Callbacks from Rust
+    callback login(string, string);
+    callback authenticated();
+    callback logout();
+
+    callback create-project-internal(string, string, int, int, int, int, int);
+    callback create-page-internal(string, int, int);
+    callback close-document-internal(int);
+    callback select-document-internal(int);
+    callback add-element-internal(string, float, float, float, float, string);
+    callback select-element-internal(string, bool, bool);
+    callback marquee-select-internal(float, float, float, float, bool);
+    callback update-element-geometry-internal(string, float, float, float, float, float);
+    callback preview-element-geometry-internal(string, float, float, float, float, float);
+    callback finish-element-transform-internal(string, bool, float, float, float, float, float);
+    callback update-element-text-internal(string, string);
+    callback update-element-style-internal(string, string, string, float, float, float, string, string, string, string, string, string, bool, bool, string, string, string, string, float, bool);
+    callback update-element-container-settings-internal(string, string, bool, float, float, float, float, string, string, string, string, string, string, string, string, string, string, string, string);
+    callback toggle-outline-node-internal(string);
+    callback reparent-element-internal(string, string);
+    callback rename-element-internal(string, string);
+    callback group-selected-internal();
+    callback ungroup-selected-internal();
+    callback select-all-internal();
+    callback undo-internal();
+    callback redo-internal();
+    callback cut-internal();
+    callback copy-internal();
+    callback paste-internal(float, float);
+    callback paste-replace-internal(float, float);
+    callback flip-vertical-internal();
+    callback flip-horizontal-internal();
+    callback exit-project-internal();
+    callback select-outline-prev-internal();
+    callback select-outline-next-internal();
+    callback timeline-entry-selected-internal(int);
+    callback exit-history-preview-internal();
+    callback open-project-page-internal(int);
+    callback open-page-blueprint-internal(int);
+    callback open-server-blueprint-internal();
+    callback open-selected-element-blueprint-internal(string);
+    callback rename-project-page-internal(int, string);
+    callback delete-element-internal(string);
+    callback delete-project-page-internal(int);
+    callback create-comment-internal(float, float);
+    callback update-comment-content-internal(string, string, string);
+    callback update-comment-position-internal(string, float, float);
+    callback update-comment-size-internal(string, float, float);
+    callback update-comment-font-sizes-internal(string, float, float);
+    callback delete-comment-internal(string);
+    callback paste-comment-image-internal(string);
+    callback clear-comment-image-internal(string);
+    callback browse-image-source-internal(string);
+
+    callback browse-project-path();
+    callback open-project-internal();
+    callback load-project-internal(string);
+    callback remove-recent-project-internal(string, string);
+    callback rename-recent-project-internal(string, string, string);
+    callback relocate-recent-project-internal(string, string);
+    callback dismiss-app-error-internal(string);
+
+    Toolbar {
+        clip: false;
+        is-maximized <=> root.window-maximized;
+        visible: true;
+        z: 9999;
+
+        on-close-window() => { close-window(); }
+        on-minimized-window(enable) => { minimized-window(enable); }
+        on-maximized-window(enable) => { maximized-window(enable); }
+        on-start-window-drag() => { start-window-drag(); }
+
+        Separator {
+            y: 40px;
+            z: 9999;
+        }
+    }
+
+    if !root.window-maximized: Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        background: transparent;
+        border-width: 1px;
+        border-color: Themes.current.border-color;
+        border-radius: root.window-corner-radius;
+        z: 1000;
+    }
+
+    if !root.window-maximized: Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        background: transparent;
+        z: 31000;
+
+        Rectangle {
+            x: 0;
+            y: root.window-resize-corner;
+            width: root.window-resize-border;
+            height: Math.max(0px, root.height - root.window-resize-corner * 2);
+            background: transparent;
+
+            TouchArea {
+                mouse-cursor: MouseCursor.col-resize;
+                pointer-event(ev) => {
+                    if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                        root.start-window-resize("left");
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            x: root.width - root.window-resize-border;
+            y: root.window-resize-corner;
+            width: root.window-resize-border;
+            height: Math.max(0px, root.height - root.window-resize-corner * 2);
+            background: transparent;
+
+            TouchArea {
+                mouse-cursor: MouseCursor.col-resize;
+                pointer-event(ev) => {
+                    if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                        root.start-window-resize("right");
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            x: root.window-resize-corner;
+            y: 0;
+            width: Math.max(0px, root.width - root.window-resize-corner * 2);
+            height: root.window-resize-border;
+            background: transparent;
+
+            TouchArea {
+                mouse-cursor: MouseCursor.row-resize;
+                pointer-event(ev) => {
+                    if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                        root.start-window-resize("top");
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            x: root.window-resize-corner;
+            y: root.height - root.window-resize-border;
+            width: Math.max(0px, root.width - root.window-resize-corner * 2);
+            height: root.window-resize-border;
+            background: transparent;
+
+            TouchArea {
+                mouse-cursor: MouseCursor.row-resize;
+                pointer-event(ev) => {
+                    if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                        root.start-window-resize("bottom");
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            x: 0;
+            y: 0;
+            width: root.window-resize-corner;
+            height: root.window-resize-corner;
+            background: transparent;
+
+            TouchArea {
+                mouse-cursor: MouseCursor.nw-resize;
+                pointer-event(ev) => {
+                    if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                        root.start-window-resize("top-left");
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            x: root.width - root.window-resize-corner;
+            y: 0;
+            width: root.window-resize-corner;
+            height: root.window-resize-corner;
+            background: transparent;
+
+            TouchArea {
+                mouse-cursor: MouseCursor.ne-resize;
+                pointer-event(ev) => {
+                    if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                        root.start-window-resize("top-right");
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            x: 0;
+            y: root.height - root.window-resize-corner;
+            width: root.window-resize-corner;
+            height: root.window-resize-corner;
+            background: transparent;
+
+            TouchArea {
+                mouse-cursor: MouseCursor.sw-resize;
+                pointer-event(ev) => {
+                    if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                        root.start-window-resize("bottom-left");
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            x: root.width - root.window-resize-corner;
+            y: root.height - root.window-resize-corner;
+            width: root.window-resize-corner;
+            height: root.window-resize-corner;
+            background: transparent;
+
+            TouchArea {
+                mouse-cursor: MouseCursor.se-resize;
+                pointer-event(ev) => {
+                    if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                        root.start-window-resize("bottom-right");
+                    }
+                }
+            }
+        }
+    }
+
+    if root.current-scene == AppScene.Auth: VerticalBox {
+        y: 41px;
+        width: root.width;
+        height: root.height - 41px;
+        alignment: LayoutAlignment.center;
+
+        HorizontalBox {
+            alignment: LayoutAlignment.center;
+            AuthForm {
+                email-or-username <=> root.email-or-username;
+                password <=> root.password;
+                error-message <=> root.error-message;
+                is-loading <=> root.is-loading;
+
+                login(email, password) => {
+                    root.login(email, password);
+                }
+            }
+        }
+    }
+
+    if root.current-scene == AppScene.ProjectSelected: ProjectSelectedScene {
+        x: 0;
+        y: 41px;
+        width: root.width;
+        height: root.height - 41px;
+        recent-projects: root.recent-projects;
+
+        create-project => {
+            root.show-new-project-dialog = true;
+        }
+        open-project => {
+            root.open-project-internal();
+        }
+        load-project(path) => {
+            root.load-project-internal(path);
+        }
+        remove-project(path, name) => {
+            root.remove-recent-project-internal(path, name);
+        }
+        rename-project(path, name, new-name) => {
+            root.rename-recent-project-internal(path, name, new-name);
+        }
+        relocate-project(path, name) => {
+            root.relocate-recent-project-internal(path, name);
+        }
+    }
+
+    if root.current-scene == AppScene.BlueprintEditor: BlueprintEditorScene {
+        x: 0;
+        y: 41px;
+        width: root.width;
+        height: root.height - 41px;
+
+        project-name: root.project-name;
+        editor-documents: root.editor-documents;
+        active-document-index: root.active-document-index;
+        project-page-items: root.project-page-items;
+        active-page-index: root.active-page-index;
+        reset-view-hotkey: root.reset-view-hotkey;
+
+        document-selected(idx) => {
+            root.select-document-internal(idx);
+        }
+
+        document-closed(idx) => {
+            root.close-document-internal(idx);
+        }
+
+        new-page-requested => {
+            root.show-new-page-dialog = true;
+        }
+
+        open-project-page(page-index) => {
+            root.open-project-page-internal(page-index);
+        }
+
+        open-page-blueprint(page-index) => {
+            root.open-page-blueprint-internal(page-index);
+        }
+
+        open-server-blueprint => {
+            root.open-server-blueprint-internal();
+        }
+    }
+
+    if root.current-scene == AppScene.VisualEditor: VerticalBox {
+        y: 41px;
+        width: root.width;
+        height: root.height - 41px;
+        padding: 0;
+        spacing: 0;
+
+        VisualEditorScene {
+            width: root.width;
+            height: root.height - 41px;
+
+            project-name: root.project-name;
+            editor-documents: root.editor-documents;
+            active-document-index: root.active-document-index;
+            project-page-items: root.project-page-items;
+            active-page-index: root.active-page-index;
+            zoom-level: root.zoom-level;
+            page-width: root.page-width;
+            page-height: root.page-height;
+
+            canvas-elements: root.canvas-elements;
+            canvas-comments: root.canvas-comments;
+            outline-elements: root.outline-elements;
+            timeline-events: root.timeline-events;
+            active-timeline-index: root.active-timeline-index;
+            history-preview-active: root.history-preview-active;
+            selected-element-id: root.selected-element-id;
+            selected-element-name: root.selected-element-name;
+            selected-element-type: root.selected-element-type;
+            selected-element-bounds: root.selected-element-bounds;
+            selected-element-rotation: root.selected-element-rotation;
+            selected-element-text: root.selected-element-text;
+            selected-element-checked: root.selected-element-checked;
+            selected-element-container-mode: root.selected-element-container-mode;
+            selected-element-allow-absolute-children: root.selected-element-allow-absolute-children;
+            selected-element-layout-padding: root.selected-element-layout-padding;
+            selected-element-layout-spacing: root.selected-element-layout-spacing;
+            selected-element-layout-margin: root.selected-element-layout-margin;
+            selected-element-layout-order: root.selected-element-layout-order;
+            selected-element-stack-alignment: root.selected-element-stack-alignment;
+            selected-element-flex-direction: root.selected-element-flex-direction;
+            selected-element-flex-wrap: root.selected-element-flex-wrap;
+            selected-element-justify-items: root.selected-element-justify-items;
+            selected-element-justify-content: root.selected-element-justify-content;
+            selected-element-align-items: root.selected-element-align-items;
+            selected-element-align-content: root.selected-element-align-content;
+            selected-element-place-items: root.selected-element-place-items;
+            selected-element-flex-flow: root.selected-element-flex-flow;
+            selected-element-grid-template-columns: root.selected-element-grid-template-columns;
+            selected-element-grid-template-rows: root.selected-element-grid-template-rows;
+            selected-element-grid-template-areas: root.selected-element-grid-template-areas;
+            selected-element-checkbox-box-side: root.selected-element-checkbox-box-side;
+            selected-element-checkbox-check-color: root.selected-element-checkbox-check-color;
+            selected-element-checkbox-box-color: root.selected-element-checkbox-box-color;
+            selected-element-checkbox-box-border-color: root.selected-element-checkbox-box-border-color;
+            selected-element-checkbox-box-border-width: root.selected-element-checkbox-box-border-width;
+            selected-element-checkbox-space-between: root.selected-element-checkbox-space-between;
+            selected-element-background: root.selected-element-background;
+            selected-element-border-color: root.selected-element-border-color;
+            selected-element-border-width: root.selected-element-border-width;
+            selected-element-border-radius: root.selected-element-border-radius;
+            selected-element-font-size: root.selected-element-font-size;
+            selected-element-font-family: root.selected-element-font-family;
+            selected-element-text-wrap: root.selected-element-text-wrap;
+            selected-element-text-color: root.selected-element-text-color;
+            selected-element-placeholder: root.selected-element-placeholder;
+            selected-element-background-image: root.selected-element-background-image;
+            selected-element-image-source: root.selected-element-image-source;
+            selected-element-image-source-display: root.selected-element-image-source-display;
+            selected-element-inherit-text-style: root.selected-element-inherit-text-style;
+            select-all-hotkey: root.select-all-hotkey;
+            undo-hotkey: root.undo-hotkey;
+            redo-hotkey: root.redo-hotkey;
+            cut-hotkey: root.cut-hotkey;
+            copy-hotkey: root.copy-hotkey;
+            paste-hotkey: root.paste-hotkey;
+            paste-replace-hotkey: root.paste-replace-hotkey;
+            delete-hotkey: root.delete-hotkey;
+            rename-hotkey: root.rename-hotkey;
+            exit-project-hotkey: root.exit-project-hotkey;
+            create-menu-hotkey: root.create-menu-hotkey;
+            create-comment-hotkey: root.create-comment-hotkey;
+            outline-prev-hotkey: root.outline-prev-hotkey;
+            outline-next-hotkey: root.outline-next-hotkey;
+            group-hotkey: root.group-hotkey;
+            ungroup-hotkey: root.ungroup-hotkey;
+            flip-vertical-hotkey: root.flip-vertical-hotkey;
+            flip-horizontal-hotkey: root.flip-horizontal-hotkey;
+            toggle-ui-hotkey: root.toggle-ui-hotkey;
+            toggle-comments-hotkey: root.toggle-comments-hotkey;
+            reset-view-hotkey: root.reset-view-hotkey;
+            explorer-hotkey: root.explorer-hotkey;
+            library-hotkey: root.library-hotkey;
+            pressed-keys-enabled: root.pressed-keys-enabled;
+            pressed-keys-show-mouse-buttons: root.pressed-keys-show-mouse-buttons;
+
+            new-page-requested => {
+                root.show-new-page-dialog = true;
+            }
+
+            document-selected(idx) => {
+                root.select-document-internal(idx);
+            }
+
+            document-closed(idx) => {
+                root.close-document-internal(idx);
+            }
+
+            element-dropped(element-type, x, y, width, height, parent-id) => {
+                root.add-element-internal(element-type, x, y, width, height, parent-id);
+            }
+
+            element-select-requested(element-id, additive, deep-select) => {
+                root.select-element-internal(element-id, additive, deep-select);
+            }
+            marquee-select-requested(x1, y1, x2, y2, additive) => {
+                root.marquee-select-internal(x1, y1, x2, y2, additive);
+            }
+
+            element-updated(element-id, x, y, w, h, r) => {
+                root.update-element-geometry-internal(element-id, x, y, w, h, r);
+            }
+            transform-previewed(element-id, x, y, w, h, r) => {
+                root.preview-element-geometry-internal(element-id, x, y, w, h, r);
+            }
+            transform-finished(element-id, commit, x, y, w, h, r) => {
+                root.finish-element-transform-internal(element-id, commit, x, y, w, h, r);
+            }
+
+            element-text-edited(element-id, text) => {
+                root.update-element-text-internal(element-id, text);
+            }
+
+            element-style-updated(
+                element-id,
+                bg,
+                border,
+                bw,
+                br,
+                fs,
+                tc,
+                ff,
+                tw,
+                ph,
+                bg_image,
+                image_src,
+                inherit_text_style,
+                checked,
+                checkbox_box_side,
+                checkbox_check_color,
+                checkbox_box_color,
+                checkbox_box_border_color,
+                checkbox_box_border_width,
+                checkbox_space_between
+            ) => {
+                root.update-element-style-internal(
+                    element-id,
+                    bg,
+                    border,
+                    bw,
+                    br,
+                    fs,
+                    tc,
+                    ff,
+                    tw,
+                    ph,
+                    bg_image,
+                    image_src,
+                    inherit_text_style,
+                    checked,
+                    checkbox_box_side,
+                    checkbox_check_color,
+                    checkbox_box_color,
+                    checkbox_box_border_color,
+                    checkbox_box_border_width,
+                    checkbox_space_between
+                );
+            }
+            element-container-settings-updated(element-id, container_mode, allow_absolute_children, layout_padding, layout_spacing, layout_margin, layout_order, stack_alignment, flex_direction, flex_wrap, justify_items, justify_content, align_items, align_content, place_items, flex_flow, grid_template_columns, grid_template_rows, grid_template_areas) => {
+                root.update-element-container-settings-internal(
+                    element-id,
+                    container_mode,
+                    allow_absolute_children,
+                    layout_padding,
+                    layout_spacing,
+                    layout_margin,
+                    layout_order,
+                    stack_alignment,
+                    flex_direction,
+                    flex_wrap,
+                    justify_items,
+                    justify_content,
+                    align_items,
+                    align_content,
+                    place_items,
+                    flex_flow,
+                    grid_template_columns,
+                    grid_template_rows,
+                    grid_template_areas
+                );
+            }
+
+            element-settings-requested(element-id) => {
+                // Handled in scene layer by opening the properties sidebar.
+            }
+
+            browse-image-source-requested(element-id) => {
+                root.browse-image-source-internal(element-id);
+            }
+
+            toggle-outline-node(id) => { root.toggle-outline-node-internal(id); }
+            reparent-element(child-id, parent-id) => { root.reparent-element-internal(child-id, parent-id); }
+            rename-element(id, new-name) => { root.rename-element-internal(id, new-name); }
+            group-selected => { root.group-selected-internal(); }
+            ungroup-selected => { root.ungroup-selected-internal(); }
+            select-all-requested => { root.select-all-internal(); }
+            undo-requested => { root.undo-internal(); }
+            redo-requested => { root.redo-internal(); }
+            cut-requested => { root.cut-internal(); }
+            copy-requested => { root.copy-internal(); }
+            paste-requested(x, y) => { root.paste-internal(x, y); }
+            paste-replace-requested(x, y) => { root.paste-replace-internal(x, y); }
+            flip-vertical-requested => { root.flip-vertical-internal(); }
+            flip-horizontal-requested => { root.flip-horizontal-internal(); }
+            exit-project-requested => { root.exit-project-internal(); }
+            outline-select-prev-requested => { root.select-outline-prev-internal(); }
+            outline-select-next-requested => { root.select-outline-next-internal(); }
+            timeline-entry-selected(index) => { root.timeline-entry-selected-internal(index); }
+            exit-history-preview-requested => { root.exit-history-preview-internal(); }
+            open-project-page(page-index) => { root.open-project-page-internal(page-index); }
+            open-active-page-blueprint-requested => {
+                root.open-page-blueprint-internal(root.active-page-index);
+            }
+            open-selected-element-blueprint(element-id) => {
+                root.open-selected-element-blueprint-internal(element-id);
+            }
+            rename-project-page(page-index, page-name) => {
+                root.rename-project-page-internal(page-index, page-name);
+            }
+            delete-element(id) => { root.delete-element-internal(id); }
+            delete-project-page(page-index) => { root.delete-project-page-internal(page-index); }
+            create-comment-requested(x, y) => { root.create-comment-internal(x, y); }
+            update-comment-content-requested(comment-id, title, body) => {
+                root.update-comment-content-internal(comment-id, title, body);
+            }
+            update-comment-position-requested(comment-id, x, y) => {
+                root.update-comment-position-internal(comment-id, x, y);
+            }
+            update-comment-size-requested(comment-id, width, body-height) => {
+                root.update-comment-size-internal(comment-id, width, body-height);
+            }
+            update-comment-font-sizes-requested(comment-id, title-size, body-size) => {
+                root.update-comment-font-sizes-internal(comment-id, title-size, body-size);
+            }
+            delete-comment-requested(comment-id) => { root.delete-comment-internal(comment-id); }
+            paste-comment-image-requested(comment-id) => {
+                root.paste-comment-image-internal(comment-id);
+            }
+            clear-comment-image-requested(comment-id) => {
+                root.clear-comment-image-internal(comment-id);
+            }
+        }
+    }
+
+    if root.app-errors.length > 0: Rectangle {
+        width: 420px;
+        height: root.app-errors.length * 78px;
+        x: root.width - self.width - 16px;
+        y: root.height - self.height - 16px;
+        background: transparent;
+        z: 20050;
+
+        for app-error[idx] in root.app-errors: Rectangle {
+            width: parent.width;
+            height: 70px;
+            x: 0;
+            y: (root.app-errors.length - idx - 1) * 78px;
+            border-radius: Themes.border-radius;
+            border-width: 1px;
+            border-color: Themes.error-text;
+            background: Themes.error-bg;
+
+            VerticalBox {
+                x: 10px;
+                y: 8px;
+                width: parent.width - 44px;
+                height: parent.height - 16px;
+                spacing: 3px;
+
+                Text {
+                    text: I18n.t(app-error.message);
+                    color: Themes.current.primary-text;
+                    font-size: 12px;
+                    font-weight: 600;
+                    wrap: word-wrap;
+                }
+
+                if app-error.details != "": Text {
+                    text: app-error.details;
+                    color: Themes.current.secondary-text;
+                    font-size: 11px;
+                    wrap: word-wrap;
+                }
+            }
+
+            Rectangle {
+                width: 20px;
+                height: 20px;
+                x: parent.width - self.width - 8px;
+                y: 8px;
+                border-radius: Themes.border-radius;
+                background: dismiss-touch.has-hover ? Themes.current.hover-color : transparent;
+
+                dismiss-touch := TouchArea {
+                    mouse-cursor: MouseCursor.pointer;
+                    clicked => { root.dismiss-app-error-internal(app-error.id); }
+                }
+
+                Text {
+                    text: "x";
+                    color: Themes.current.secondary-text;
+                    horizontal-alignment: TextHorizontalAlignment.center;
+                    vertical-alignment: TextVerticalAlignment.center;
+                }
+            }
+        }
+    }
+
+    NewProjectDialog {
+        show-dialog: root.show-new-project-dialog;
+        width: root.width;
+        height: root.height;
+        project-path <=> root.project-path;
+        error-message <=> root.project-error-message;
+
+        create-project(name, path, platform, dev-mode, page-size, custom-width, custom-height) => {
+            root.create-project-internal(name, path, platform, dev-mode, page-size, custom-width, custom-height);
+        }
+
+        cancel => {
+            root.show-new-project-dialog = false;
+            root.project-error-message = "";
+        }
+
+        browse-path => {
+            root.browse-project-path();
+        }
+    }
+
+    NewPageDialog {
+        show-dialog: root.show-new-page-dialog;
+        width: root.width;
+        height: root.height;
+
+        create-page(name, width, height) => {
+            root.show-new-page-dialog = false;
+            root.create-page-internal(name, width, height);
+        }
+
+        cancel => {
+            root.show-new-page-dialog = false;
+        }
+    }
+
+    callback close-window();
+    callback minimized-window(bool);
+    callback maximized-window(bool);
+    callback start-window-drag();
+    callback start-window-resize(string);
+    callback mouse-down(int, int);
+    callback mouse-move(int, int);
+    callback create-project();
+    callback open-project();
+    callback load-project(string);
+}

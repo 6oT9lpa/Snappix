@@ -1,0 +1,146 @@
+import { HorizontalBox, VerticalBox } from "std-widgets.slint";
+import { Themes } from "./Themes.slint";
+
+export component Toolbar inherits Rectangle {
+    y: 0;
+    clip: false;
+    height: 40px;
+    background: Themes.current.secondary-bg;
+
+    in-out property <bool> is-maximized: false;
+
+    window-drag-area := TouchArea {
+        width: parent.width - 120px;
+        height: parent.height;
+        x: 0;
+        y: 0;
+        mouse-cursor: MouseCursor.alias;
+
+        pointer-event(ev) => {
+            if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                on-start-window-drag();
+            }
+        }
+    }
+
+    HorizontalBox {
+        alignment: LayoutAlignment.space-between;
+        height: parent.height;
+        padding: 0px;
+        spacing: 0px;
+
+        HorizontalBox {
+            alignment: LayoutAlignment.center;
+            height: parent.height;
+            padding: 10px;
+            padding-bottom: 0px;
+            padding-left: 0px;
+            spacing: 0px;
+            width: 100px;
+            Image {
+                source: @image-url("../assets/images/logo.svg");
+                width: 24px;
+                height: 22px;
+            }
+        }
+
+        HorizontalBox {
+            width: 120px;
+            vertical-stretch: 0;
+            height: parent.height;
+            padding: 0px;
+            padding-bottom: 0px;
+            spacing: 0px;
+
+            Rectangle {
+                background: Themes.current.secondary-bg;
+                width: parent.width - 80px;
+
+                btn-minimize := TouchArea {
+                    mouse-cursor: MouseCursor.pointer;
+                    property <bool> hover <=> self.has-hover;
+
+                    touch-minimize := TouchArea {
+                        clicked => { on-minimized-window(true) }
+                    }
+
+                    Image {
+                        source: @image-url("../assets/images/window-controls/minimize-btn.svg");
+                        colorize: Themes.current.secondary-text;
+                        width: 15px;
+                    }
+                }
+
+                states [
+                    hovered when btn-minimize.has-hover : {
+                        background: Themes.current.hover-color;
+                        in { animate background { duration: 150ms; } }
+                    }
+                ]
+            }
+
+            Rectangle {
+                background: Themes.current.secondary-bg;
+                width: parent.width - 80px;
+
+                btn-maximize := TouchArea {
+                    mouse-cursor: MouseCursor.pointer;
+                    property <bool> hover <=> self.has-hover;
+
+                    touch-maximized := TouchArea {
+                        clicked => {
+                            on-maximized-window(!is-maximized);
+                        }
+                    }
+
+                    Image {
+                        source: root.is-maximized
+                            ? @image-url("../assets/images/window-controls/restore-btn.svg")
+                            : @image-url("../assets/images/window-controls/maximize-btn.svg");
+                        colorize: Themes.current.secondary-text;
+                        width: 10px;
+                    }
+                }
+
+                states [
+                    hovered when btn-maximize.has-hover : {
+                        background: Themes.current.hover-color;
+                        in { animate background { duration: 150ms; } }
+                    }
+                ]
+            }
+
+            Rectangle {
+                background: Themes.current.secondary-bg;
+                width: parent.width - 80px;
+
+                btn-close := TouchArea {
+                    mouse-cursor: MouseCursor.pointer;
+                    property <bool> hover <=> self.has-hover;
+
+                    touch-close := TouchArea {
+                        clicked => { on-close-window() }
+                    }
+
+                    Image {
+                        source: @image-url("../assets/images/window-controls/close-btn.svg");
+                        colorize: Themes.current.secondary-text;
+                        width: 10px;
+                    }
+                }
+
+                states [
+                    hovered when btn-close.has-hover : {
+                        background: Themes.current.hover-color;
+                        in { animate background { duration: 150ms; } }
+                    }
+                ]
+            }
+        }
+    }
+
+    callback on-close-window();
+    callback on-minimized-window(bool);
+    callback on-maximized-window(bool);
+    callback on-start-window-drag();
+}

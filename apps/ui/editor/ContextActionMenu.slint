@@ -1,0 +1,116 @@
+import { HorizontalBox, VerticalBox } from "std-widgets.slint";
+import { I18n } from "../components/I18n.slint";
+import { Themes } from "../components/Themes.slint";
+
+component MenuActionRow inherits Rectangle {
+    in property <string> title: "";
+    in property <string> hotkey: "";
+    callback triggered();
+
+    height: 28px;
+    border-radius: 4px;
+    background: row-touch.has-hover ? Themes.current.hover-color : transparent;
+
+    row-touch := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.triggered(); }
+    }
+
+    HorizontalBox {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 6px;
+
+        Text {
+            text: root.title;
+            font-size: 11px;
+            color: Themes.current.primary-text;
+            vertical-alignment: TextVerticalAlignment.center;
+            horizontal-stretch: 1;
+        }
+
+        if root.hotkey != "": Text {
+            text: root.hotkey;
+            font-size: 11px;
+            color: Themes.current.primary-text;
+            vertical-alignment: TextVerticalAlignment.center;
+            horizontal-alignment: TextHorizontalAlignment.right;
+        }
+    }
+}
+
+export component ContextActionMenu inherits Rectangle {
+    in property <length> menu-x: 0px;
+    in property <length> menu-y: 0px;
+    in property <length> menu-width: 208px;
+    in property <length> menu-height: 165px;
+    callback open-timeline-requested();
+    callback cut-requested();
+    callback copy-requested();
+    callback rename-requested();
+    callback delete-requested();
+    callback dismiss-requested();
+
+    background: transparent;
+    z: 250;
+
+    TouchArea {
+        clicked => { root.dismiss-requested(); }
+    }
+
+    Rectangle {
+        x: root.menu-x;
+        y: root.menu-y;
+        width: root.menu-width;
+        height: root.menu-height;
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: Themes.current.border-color;
+        background: Themes.current.primary-bg;
+        z: 251;
+
+        VerticalBox {
+            spacing: 2px;
+            padding: 6px;
+
+            MenuActionRow {
+                title: I18n.t("Open Timeline");
+                triggered => { root.open-timeline-requested(); }
+            }
+
+            Rectangle {
+                height: 1px;
+                background: Themes.current.border-color;
+            }
+
+            MenuActionRow {
+                title: I18n.t("Cut");
+                hotkey: "Ctrl+X";
+                triggered => { root.cut-requested(); }
+            }
+
+            MenuActionRow {
+                title: I18n.t("Copy");
+                hotkey: "Ctrl+C";
+                triggered => { root.copy-requested(); }
+            }
+
+            Rectangle {
+                height: 1px;
+                background: Themes.current.border-color;
+            }
+
+            MenuActionRow {
+                title: I18n.t("Rename");
+                hotkey: "Alt+F2";
+                triggered => { root.rename-requested(); }
+            }
+
+            MenuActionRow {
+                title: I18n.t("Delete");
+                hotkey: "Del";
+                triggered => { root.delete-requested(); }
+            }
+        }
+    }
+}

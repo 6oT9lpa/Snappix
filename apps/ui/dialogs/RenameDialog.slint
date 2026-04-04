@@ -1,0 +1,143 @@
+import { HorizontalBox, VerticalBox } from "std-widgets.slint";
+import { I18n } from "../components/I18n.slint";
+import { Themes } from "../components/Themes.slint";
+
+export component RenameDialog inherits Rectangle {
+    in property <bool> show-dialog: false;
+    in property <string> dialog-title: I18n.t("Rename");
+    in property <string> confirm-label: I18n.t("Rename");
+    in property <string> cancel-label: I18n.t("Cancel");
+    in property <string> error-message: "";
+    in property <length> dialog-width: 280px;
+    in property <bool> confirm-primary: false;
+    in-out property <string> input-text: "";
+
+    callback cancelled();
+    callback confirmed(string);
+    callback input-edited(string);
+
+    background: transparent;
+
+    if root.show-dialog: Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: Themes.overlay-bg;
+        z: 1;
+
+        TouchArea {
+            width: parent.width;
+            height: parent.height;
+            clicked => { root.cancelled(); }
+        }
+
+        Rectangle {
+            z: 2;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: root.dialog-width;
+            height: root.error-message == "" ? 132px : 150px;
+            border-radius: 6px;
+            border-width: 1px;
+            border-color: Themes.current.border-color;
+            background: Themes.current.primary-bg;
+            drop-shadow-color: Themes.shadow-color;
+            drop-shadow-blur: Themes.shadow-size;
+
+            VerticalBox {
+                padding: 10px;
+                spacing: 8px;
+
+                Text {
+                    text: root.dialog-title;
+                    font-size: 12px;
+                    font-weight: 600;
+                    color: Themes.current.primary-text;
+                }
+
+                Rectangle {
+                    height: 32px;
+                    border-radius: 4px;
+                    background: Themes.current.secondary-bg;
+
+                    rename-input := TextInput {
+                        x: 8px;
+                        y: (parent.height - self.height) / 2;
+                        width: parent.width - 16px;
+                        text <=> root.input-text;
+                        font-size: 12px;
+                        color: Themes.current.primary-text;
+                        init => {
+                            self.focus();
+                            self.select-all();
+                        }
+                        edited => { root.input-edited(self.text); }
+                        accepted => { root.confirmed(self.text); }
+                    }
+                }
+
+                if root.error-message != "": Text {
+                    text: root.error-message;
+                    font-size: 11px;
+                    color: Themes.error-text;
+                }
+
+                HorizontalBox {
+                    spacing: 6px;
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        background: transparent;
+                    }
+
+                    Rectangle {
+                        width: 74px;
+                        height: 28px;
+                        border-radius: 4px;
+                        background: cancel-touch.has-hover ? Themes.current.hover-color : Themes.current.secondary-bg;
+
+                        cancel-touch := TouchArea {
+                            mouse-cursor: MouseCursor.pointer;
+                            clicked => { root.cancelled(); }
+                        }
+
+                        Text {
+                            text: root.cancel-label;
+                            width: parent.width;
+                            height: parent.height;
+                            font-size: 11px;
+                            color: Themes.current.primary-text;
+                            horizontal-alignment: TextHorizontalAlignment.center;
+                            vertical-alignment: TextVerticalAlignment.center;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 82px;
+                        height: 28px;
+                        border-radius: 4px;
+                        border-width: root.confirm-primary ? 1px : 0px;
+                        border-color: root.confirm-primary ? Themes.current.button-color : transparent;
+                        background: apply-touch.has-hover
+                            ? Themes.current.hover-color
+                            : (root.confirm-primary ? Themes.current.button-color : Themes.current.secondary-bg);
+
+                        apply-touch := TouchArea {
+                            mouse-cursor: MouseCursor.pointer;
+                            clicked => { root.confirmed(root.input-text); }
+                        }
+
+                        Text {
+                            text: root.confirm-label;
+                            width: parent.width;
+                            height: parent.height;
+                            font-size: 11px;
+                            color: Themes.current.primary-text;
+                            horizontal-alignment: TextHorizontalAlignment.center;
+                            vertical-alignment: TextVerticalAlignment.center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

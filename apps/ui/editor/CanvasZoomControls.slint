@@ -1,0 +1,99 @@
+import { HorizontalBox } from "std-widgets.slint";
+import { Themes } from "../components/Themes.slint";
+import { Tooltip } from "../components/Tooltip.slint";
+
+component ZoomControlButton inherits Rectangle {
+    in property <string> label: "";
+    in property <string> tooltip-text: "";
+    callback clicked();
+
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    background: button-touch.has-hover ? Themes.current.hover-color : Themes.current.primary-bg;
+
+    button-touch := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.clicked(); }
+    }
+
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.label;
+        color: Themes.current.primary-text;
+        font-size: 12px;
+        font-weight: 700;
+        horizontal-alignment: TextHorizontalAlignment.center;
+        vertical-alignment: TextVerticalAlignment.center;
+    }
+
+    Tooltip {
+        x: (parent.width - self.width) / 2;
+        y: -self.height - 6px;
+        text: root.tooltip-text;
+        placement: "bottom";
+        show: button-touch.has-hover;
+    }
+}
+
+export component CanvasZoomControls inherits Rectangle {
+    in property <float> zoom-level: 1.0;
+    callback zoom-out-requested();
+    callback zoom-in-requested();
+    callback reset-view-requested();
+
+    width: 122px;
+    height: 32px;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: Themes.current.border-color;
+    background: Themes.current.secondary-bg;
+
+    HorizontalBox {
+        padding: 4px;
+        spacing: 4px;
+
+        ZoomControlButton {
+            label: "-";
+            tooltip-text: "Zoom Out";
+            clicked => { root.zoom-out-requested(); }
+        }
+
+        reset-button := Rectangle {
+            horizontal-stretch: 1;
+            height: 24px;
+            border-radius: 6px;
+            background: reset-touch.has-hover ? Themes.current.hover-color : Themes.current.primary-bg;
+
+            reset-touch := TouchArea {
+                mouse-cursor: MouseCursor.pointer;
+                clicked => { root.reset-view-requested(); }
+            }
+
+            Text {
+                width: parent.width;
+                height: parent.height;
+                text: round(root.zoom-level * 100) + "%";
+                color: Themes.current.secondary-text;
+                font-size: 11px;
+                horizontal-alignment: TextHorizontalAlignment.center;
+                vertical-alignment: TextVerticalAlignment.center;
+            }
+
+            Tooltip {
+                x: (parent.width - self.width) / 2;
+                y: -self.height - 6px;
+                text: "Reset View (Ctrl+0)";
+                placement: "bottom";
+                show: reset-touch.has-hover;
+            }
+        }
+
+        ZoomControlButton {
+            label: "+";
+            tooltip-text: "Zoom In";
+            clicked => { root.zoom-in-requested(); }
+        }
+    }
+}

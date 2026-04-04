@@ -1,0 +1,3346 @@
+
+import { I18n } from "../components/I18n.slint";
+import { Themes } from "../components/Themes.slint";
+import { CanvasCommentInfo, CanvasState, DragState, SelectionInfo } from "../models/EditorModels.slint";
+import { HorizontalBox } from "std-widgets.slint";
+import { CanvasZoomControls } from "./CanvasZoomControls.slint";
+import {
+    ContextMenuClickComment,
+    ContextMenuClickEmptyCanvas,
+    ContextMenuClickOutsideCanvas,
+    ContextMenuClickSelectedObject,
+} from "./CanvasContextMenus.slint";
+import { ComponentIcon } from "./icons/ComponentIcons.slint";
+
+component ResizeHandle inherits Rectangle {
+    in property <string> mode: "resize-se";
+    in property <string> cursor-kind: mode == "resize-e" || mode == "resize-w" ? "col"
+        : mode == "resize-n" || mode == "resize-s" ? "row"
+        : mode == "resize-ne" || mode == "resize-sw" ? "ne"
+        : "nw";
+    callback pressed(string, float, float, bool);
+    callback moved(float, float);
+    callback released(bool);
+
+    width: 8px;
+    height: 8px;
+    background: Themes.current.active-color;
+    border-radius: 4px;
+
+    handle-touch := TouchArea {
+        mouse-cursor: cursor-kind == "col" ? MouseCursor.col-resize
+            : cursor-kind == "row" ? MouseCursor.row-resize
+            : cursor-kind == "ne" ? MouseCursor.ne-resize
+            : MouseCursor.nw-resize;
+
+        pointer-event(ev) => {
+            if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                root.pressed(root.mode, (root.x + self.mouse-x) / 1px, (root.y + self.mouse-y) / 1px, ev.modifiers.alt);
+            }
+            if ev.kind == PointerEventKind.move {
+                root.moved((root.x + self.mouse-x) / 1px, (root.y + self.mouse-y) / 1px);
+            }
+            if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left {
+                root.released(true);
+            }
+            if ev.kind == PointerEventKind.cancel {
+                root.released(false);
+            }
+        }
+    }
+}
+
+export component Canvas inherits Rectangle {
+    in property <CanvasState> state: {
+        zoom-level: 1.0,
+        offset: { x: 0px, y: 0px },
+        grid-visible: true,
+        grid-size: 20px,
+        snap-to-grid: true,
+        show-rulers: true
+    };
+    in property <[SelectionInfo]> elements: [];
+    in property <[CanvasCommentInfo]> comments: [];
+    in property <DragState> drag-state: DragState.None;
+    in property <string> selected-element-id: "";
+    in property <string> dragging-component-id: "";
+    in property <string> dragging-component-name: "";
+    in property <string> dragging-component-icon: "";
+    in property <length> page-width: 1920px;
+    in property <length> page-height: 1080px;
+    in property <bool> ui-helpers-visible: true;
+    in property <bool> comments-visible: true;
+    out property <bool> comment-editor-active: false;
+
+    callback element-select-requested(string, bool, bool);
+    callback transform-previewed(string, float, float, float, float, float);
+    callback transform-finished(string, bool, float, float, float, float, float);
+    callback element-dropped(string, float, float, float, float, string);
+    callback drag-cancelled();
+    callback element-text-edited(string, string);
+    callback canvas-clicked(length, length);
+    callback marquee-select-requested(float, float, float, float, bool);
+    callback zoom-changed(float);
+    callback element-settings-requested(string);
+    callback go-to-blueprint-requested(string);
+    callback pointer-button-state-changed(string, bool, bool, bool, bool);
+    callback copy-requested();
+    callback paste-requested(float, float);
+    callback paste-replace-requested(float, float);
+    callback group-requested();
+    callback ungroup-requested();
+    callback flip-vertical-requested();
+    callback flip-horizontal-requested();
+    callback set-ui-visibility-requested(bool);
+    callback set-comments-visibility-requested(bool);
+    callback create-comment-requested(float, float);
+    callback update-comment-content-requested(string, string, string);
+    callback update-comment-position-requested(string, float, float);
+    callback update-comment-size-requested(string, float, float);
+    callback update-comment-font-sizes-requested(string, float, float);
+    callback delete-comment-requested(string);
+    callback paste-comment-image-requested(string);
+    callback clear-comment-image-requested(string);
+
+    property <length> canvas-offset-x: 0px;
+    property <length> canvas-offset-y: 0px;
+    property <float> current-zoom: state.zoom-level;
+    property <bool> is-panning: false;
+    property <bool> is-middle-held: false;
+    property <bool> is-primary-held: false;
+    property <length> pan-start-x: 0px;
+    property <length> pan-start-y: 0px;
+    property <string> pan-source: "";
+    property <float> pan-jump-threshold: 360;
+
+    property <string> active-element-id: "";
+    property <string> active-mode: "none";
+    property <bool> active-resize-from-center: false;
+    property <float> pointer-offset-x: 0;
+    property <float> pointer-offset-y: 0;
+    property <float> action-start-canvas-x: 0;
+    property <float> action-start-canvas-y: 0;
+    property <float> start-element-x: 0;
+    property <float> start-element-y: 0;
+    property <float> start-element-w: 0;
+    property <float> start-element-h: 0;
+    property <float> start-element-rotation: 0;
+    property <bool> is-transforming: false;
+    property <float> live-element-x: 0;
+    property <float> live-element-y: 0;
+    property <float> live-element-w: 0;
+    property <float> live-element-h: 0;
+    property <float> live-element-rotation: 0;
+    property <float> start-rotation-pointer-angle: 0;
+    property <length> last-pointer-root-x: 0px;
+    property <length> last-pointer-root-y: 0px;
+    property <float> last-pointer-canvas-x: 0;
+    property <float> last-pointer-canvas-y: 0;
+    out property <float> cursor-canvas-x: last-pointer-canvas-x;
+    out property <float> cursor-canvas-y: last-pointer-canvas-y;
+    property <bool> is-marquee-armed: false;
+    property <bool> is-marquee-selecting: false;
+    property <bool> marquee-additive-selection: false;
+    property <float> marquee-start-canvas-x: 0;
+    property <float> marquee-start-canvas-y: 0;
+    property <float> marquee-current-canvas-x: 0;
+    property <float> marquee-current-canvas-y: 0;
+    property <bool> suppress-next-empty-click: false;
+    property <float> marquee-activation-distance: 4;
+    property <string> selected-comment-id: "";
+    property <string> editing-comment-id: "";
+    property <string> active-comment-id: "";
+    property <string> active-comment-mode: "none";
+    property <string> active-comment-zone: "";
+    property <bool> comment-drag-armed: false;
+    property <string> comment-drag-id: "";
+    property <length> comment-pointer-start-root-x: 0px;
+    property <length> comment-pointer-start-root-y: 0px;
+    property <float> comment-start-x: 0;
+    property <float> comment-start-y: 0;
+    property <float> comment-start-width: 500;
+    property <float> comment-start-body-height: 76;
+    property <float> comment-start-total-height: 140;
+    property <float> comment-live-x: 0;
+    property <float> comment-live-y: 0;
+    property <float> comment-live-width: 500;
+    property <float> comment-live-body-height: 76;
+    property <float> comment-live-total-height: 140;
+    property <float> comment-min-width: 220;
+    property <float> comment-max-width: 720;
+    property <float> comment-min-body-height: 76;
+    property <float> comment-max-body-height: 520;
+    property <float> comment-drag-threshold: 4;
+
+    changed selected-comment-id => {
+        if root.selected-comment-id == "" {
+            root.editing-comment-id = "";
+            root.comment-editor-active = false;
+        } else if root.editing-comment-id != "" && root.editing-comment-id != root.selected-comment-id {
+            root.editing-comment-id = "";
+            root.comment-editor-active = false;
+        }
+    }
+    changed comments-visible => {
+        if !root.comments-visible {
+            root.selected-comment-id = "";
+            root.editing-comment-id = "";
+            root.comment-editor-active = false;
+            if context-menu.menu-kind == "comment" {
+                context-menu.visible-menu = false;
+            }
+        }
+    }
+
+    function start-pan(root-x: length, root-y: length, source: string) {
+        root.is-panning = true;
+        root.is-middle-held = true;
+        root.pan-start-x = root-x;
+        root.pan-start-y = root-y;
+        root.pan-source = source;
+    }
+
+    function update-pan(root-x: length, root-y: length, source: string) {
+        if root.is-panning && root.is-middle-held {
+            if root.pan-source != source {
+                root.pan-source = source;
+                root.pan-start-x = root-x;
+                root.pan-start-y = root-y;
+                return;
+            }
+
+            let dx = root-x - root.pan-start-x;
+            let dy = root-y - root.pan-start-y;
+
+            if Math.abs(dx / 1px) > root.pan-jump-threshold || Math.abs(dy / 1px) > root.pan-jump-threshold {
+                root.pan-start-x = root-x;
+                root.pan-start-y = root-y;
+                return;
+            }
+
+            root.canvas-offset-x = root.canvas-offset-x + dx;
+            root.canvas-offset-y = root.canvas-offset-y + dy;
+            root.pan-start-x = root-x;
+            root.pan-start-y = root-y;
+        }
+    }
+
+    function stop-pan() {
+        root.is-panning = false;
+        root.is-middle-held = false;
+        root.pan-source = "";
+    }
+
+    function remember-pointer(root-x: length, root-y: length, canvas-x: float, canvas-y: float) {
+        root.last-pointer-root-x = root-x;
+        root.last-pointer-root-y = root-y;
+        root.last-pointer-canvas-x = canvas-x;
+        root.last-pointer-canvas-y = canvas-y;
+    }
+
+    function report-pointer-button(
+        kind: PointerEventKind,
+        button: PointerEventButton,
+        ctrl: bool,
+        shift: bool,
+        alt: bool
+    ) {
+        if kind == PointerEventKind.down {
+            if button == PointerEventButton.left {
+                root.pointer-button-state-changed("LBM", true, ctrl, shift, alt);
+            } else if button == PointerEventButton.right {
+                root.pointer-button-state-changed("RBM", true, ctrl, shift, alt);
+            } else if button == PointerEventButton.middle {
+                root.pointer-button-state-changed("MBM", true, ctrl, shift, alt);
+            }
+        } else if kind == PointerEventKind.up {
+            if button == PointerEventButton.left {
+                root.pointer-button-state-changed("LBM", false, ctrl, shift, alt);
+            } else if button == PointerEventButton.right {
+                root.pointer-button-state-changed("RBM", false, ctrl, shift, alt);
+            } else if button == PointerEventButton.middle {
+                root.pointer-button-state-changed("MBM", false, ctrl, shift, alt);
+            }
+        } else if kind == PointerEventKind.cancel {
+            root.pointer-button-state-changed("LBM", false, ctrl, shift, alt);
+            root.pointer-button-state-changed("RBM", false, ctrl, shift, alt);
+            root.pointer-button-state-changed("MBM", false, ctrl, shift, alt);
+        }
+    }
+
+    function begin-freeform-text-edit(element-id: string, initial-text: string) {
+        root.editing-text-element-id = element-id;
+        root.editing-freeform-text = initial-text;
+        root.freeform-text-dirty = false;
+        root.freeform-text-edit-active = true;
+    }
+
+    function begin-input-like-text-edit(element-id: string) {
+        root.editing-text-element-id = element-id;
+        root.freeform-text-edit-active = false;
+        root.freeform-text-dirty = false;
+        root.editing-freeform-text = "";
+    }
+
+    function finish-active-text-edit(commit-freeform: bool) {
+        if root.editing-text-element-id == "" {
+            return;
+        }
+        if root.freeform-text-edit-active && commit-freeform && root.freeform-text-dirty {
+            root.element-text-edited(root.editing-text-element-id, root.editing-freeform-text);
+        }
+        root.editing-text-element-id = "";
+        root.freeform-text-edit-active = false;
+        root.freeform-text-dirty = false;
+        root.editing-freeform-text = "";
+    }
+
+    function handle-outside-canvas-pointer(
+        kind: PointerEventKind,
+        button: PointerEventButton,
+        root-x: length,
+        root-y: length,
+        ctrl: bool,
+        shift: bool,
+        alt: bool
+    ) {
+        root.report-pointer-button(kind, button, ctrl, shift, alt);
+        let canvas-x = ((root-x - root.canvas-offset-x) / 1px) / root.current-zoom;
+        let canvas-y = ((root-y - root.canvas-offset-y) / 1px) / root.current-zoom;
+        root.remember-pointer(root-x, root-y, canvas-x, canvas-y);
+        if kind == PointerEventKind.down {
+            root.cursor-tools-menu-open = false;
+            root.rectangle-tools-menu-open = false;
+        }
+
+        if kind == PointerEventKind.down && button == PointerEventButton.middle {
+            root.start-pan(root-x, root-y, "outside");
+            context-menu.visible-menu = false;
+        }
+        if kind == PointerEventKind.down
+            && button == PointerEventButton.left
+            && root.active-control-tool == "cursor"
+            && root.cursor-subtool == "hand" {
+            root.start-pan(root-x, root-y, "outside");
+        }
+        if kind == PointerEventKind.move {
+            root.update-pan(root-x, root-y, "outside");
+        }
+        if kind == PointerEventKind.up && button == PointerEventButton.middle {
+            root.stop-pan();
+        }
+        if kind == PointerEventKind.down && button == PointerEventButton.left {
+            context-menu.visible-menu = false;
+            root.finish-active-text-edit(true);
+            root.selected-comment-id = "";
+            root.comment-editor-active = false;
+            root.element-select-requested("", false, true);
+        }
+        if kind == PointerEventKind.up
+            && button == PointerEventButton.left
+            && root.active-control-tool == "cursor"
+            && root.cursor-subtool == "hand" {
+            root.stop-pan();
+        }
+        if kind == PointerEventKind.down && button == PointerEventButton.right {
+            root.open-outside-context-menu(root-x, root-y, canvas-x, canvas-y);
+        }
+        if kind == PointerEventKind.cancel {
+            root.stop-pan();
+        }
+    }
+
+    function open-context-menu(
+        kind: string,
+        root-x: length,
+        root-y: length,
+        canvas-x: float,
+        canvas-y: float
+    ) {
+        let page-w = root.page-width / 1px;
+        let page-h = root.page-height / 1px;
+        let clamped-canvas-x = Math.max(0, Math.min(page-w, canvas-x));
+        let clamped-canvas-y = Math.max(0, Math.min(page-h, canvas-y));
+
+        let menu-height = kind == "selected" ? context-menu.selected-menu-height
+            : kind == "outside" ? context-menu.outside-menu-height
+            : kind == "comment"
+                ? (context-menu.comment-target-has-image
+                    ? context-menu.comment-menu-height-with-image
+                    : context-menu.comment-menu-height)
+                : context-menu.empty-menu-height;
+        let max-x = Math.max(0px, root.width - context-menu.width);
+        let max-y = Math.max(0px, root.height - menu-height);
+
+        context-menu.menu-kind = kind;
+        context-menu.visible-menu = true;
+        context-menu.mouse-x = Math.max(0px, Math.min(max-x, root-x));
+        context-menu.mouse-y = Math.max(0px, Math.min(max-y, root-y));
+        context-menu.drop-x = clamped-canvas-x;
+        context-menu.drop-y = clamped-canvas-y;
+        context-menu.raw-drop-x = canvas-x;
+        context-menu.raw-drop-y = canvas-y;
+    }
+
+    function open-empty-context-menu(root-x: length, root-y: length, canvas-x: float, canvas-y: float) {
+        context-menu.comment-target-id = "";
+        context-menu.comment-target-has-image = false;
+        root.open-context-menu("empty", root-x, root-y, canvas-x, canvas-y);
+    }
+
+    function open-outside-context-menu(root-x: length, root-y: length, canvas-x: float, canvas-y: float) {
+        context-menu.comment-target-id = "";
+        context-menu.comment-target-has-image = false;
+        root.open-context-menu("outside", root-x, root-y, canvas-x, canvas-y);
+    }
+
+    function open-selected-context-menu(root-x: length, root-y: length, canvas-x: float, canvas-y: float) {
+        context-menu.comment-target-id = "";
+        context-menu.comment-target-has-image = false;
+        root.open-context-menu("selected", root-x, root-y, canvas-x, canvas-y);
+    }
+
+    function open-comment-context-menu(
+        comment-id: string,
+        root-x: length,
+        root-y: length,
+        canvas-x: float,
+        canvas-y: float,
+        has-image: bool,
+        title-font-size: float,
+        body-font-size: float
+    ) {
+        context-menu.comment-target-id = comment-id;
+        context-menu.comment-target-has-image = has-image;
+        context-menu.comment-target-title-font-size = title-font-size;
+        context-menu.comment-target-body-font-size = body-font-size;
+        root.open-context-menu("comment", root-x, root-y, canvas-x, canvas-y);
+    }
+
+    function comment-create-target-x() -> float {
+        let page-w = root.page-width / 1px;
+        let raw-x = root.last-pointer-canvas-x;
+        if raw-x < 0 || raw-x > page-w {
+            return raw-x;
+        }
+        return page-w + 48;
+    }
+
+    function comment-create-target-y() -> float {
+        let page-h = root.page-height / 1px;
+        let raw-y = root.last-pointer-canvas-y;
+        if raw-y < 0 || raw-y > page-h {
+            return raw-y;
+        }
+        return Math.max(24, Math.min(page-h - 24, raw-y));
+    }
+
+    public function open-context-menu-at-cursor() {
+        let page-w = root.page-width / 1px;
+        let page-h = root.page-height / 1px;
+        let clamped-canvas-x = Math.max(0, Math.min(page-w, root.last-pointer-canvas-x));
+        let clamped-canvas-y = Math.max(0, Math.min(page-h, root.last-pointer-canvas-y));
+        let pointer-outside-page = root.last-pointer-canvas-x < 0
+            || root.last-pointer-canvas-y < 0
+            || root.last-pointer-canvas-x > page-w
+            || root.last-pointer-canvas-y > page-h;
+
+        if root.selected-element-id != "" {
+            root.open-selected-context-menu(
+                root.last-pointer-root-x,
+                root.last-pointer-root-y,
+                clamped-canvas-x,
+                clamped-canvas-y
+            );
+        } else if pointer-outside-page {
+            root.open-outside-context-menu(
+                root.last-pointer-root-x,
+                root.last-pointer-root-y,
+                root.last-pointer-canvas-x,
+                root.last-pointer-canvas-y
+            );
+        } else {
+            root.open-empty-context-menu(
+                root.last-pointer-root-x,
+                root.last-pointer-root-y,
+                clamped-canvas-x,
+                clamped-canvas-y
+            );
+        }
+    }
+
+    public function create-comment-at-cursor() {
+        root.apply-live-comment-position(
+            root.last-pointer-canvas-x,
+            root.last-pointer-canvas-y,
+            500,
+            134
+        );
+        root.create-comment-requested(root.comment-live-x, root.comment-live-y);
+    }
+
+    function close-comment-editor() {
+        root.editing-comment-id = "";
+        root.comment-editor-active = false;
+    }
+
+    function viewport-world-left() -> float {
+        ((0px - root.canvas-offset-x) / 1px) / root.current-zoom
+    }
+
+    function viewport-world-top() -> float {
+        ((0px - root.canvas-offset-y) / 1px) / root.current-zoom
+    }
+
+    function viewport-world-right() -> float {
+        ((root.width - root.canvas-offset-x) / 1px) / root.current-zoom
+    }
+
+    function viewport-world-bottom() -> float {
+        ((root.height - root.canvas-offset-y) / 1px) / root.current-zoom
+    }
+
+    function clamp-float(value: float, min-value: float, max-value: float) -> float {
+        max-value < min-value ? min-value
+            : Math.max(min-value, Math.min(max-value, value))
+    }
+
+    function comment-zone(x: float, y: float, width: float, height: float) -> string {
+        let page-w = root.page-width / 1px;
+        if x >= page-w { "right" }
+        else if x + width <= 0 { "left" }
+        else if y < 0 { "top" }
+        else { "bottom" }
+    }
+
+    function clamp-comment-x(zone: string, x: float, width: float) -> float {
+        let page-w = root.page-width / 1px;
+        let min-x = root.viewport-world-left();
+        let max-x = root.viewport-world-right() - width;
+
+        if zone == "right" {
+            return max-x < page-w ? page-w : root.clamp-float(x, page-w, max-x);
+        }
+        if zone == "left" {
+            let side-max-x = -width;
+            return side-max-x < min-x ? side-max-x : root.clamp-float(x, min-x, side-max-x);
+        }
+        return max-x < min-x ? min-x : root.clamp-float(x, min-x, max-x);
+    }
+
+    function clamp-comment-y(zone: string, y: float, height: float) -> float {
+        let page-h = root.page-height / 1px;
+        let min-y = root.viewport-world-top();
+        let max-y = root.viewport-world-bottom() - height;
+
+        if zone == "top" {
+            let side-max-y = -height;
+            return side-max-y < min-y ? side-max-y : root.clamp-float(y, min-y, side-max-y);
+        }
+        if zone == "bottom" {
+            return max-y < page-h ? page-h : root.clamp-float(y, page-h, max-y);
+        }
+        return max-y < min-y ? min-y : root.clamp-float(y, min-y, max-y);
+    }
+
+    function position-comment-for-zone(zone: string, x: float, y: float, width: float, height: float) {
+        root.comment-live-x = root.clamp-comment-x(zone, x, width);
+        root.comment-live-y = root.clamp-comment-y(zone, y, height);
+    }
+
+    function comment-display-y(
+        x: float,
+        y: float,
+        width: float,
+        total-height: float,
+        image-extra-height: float
+    ) -> float {
+        let base-height = Math.max(0, total-height - image-extra-height);
+        let base-zone = root.comment-zone(x, y, width, base-height);
+        let adjusted-y = base-zone == "top" ? y - image-extra-height : y;
+        return root.clamp-comment-y(base-zone, adjusted-y, total-height);
+    }
+
+    function normalize-comment-shortcut-key(text: string) -> string {
+        let lowered = text.to-lowercase();
+        lowered == "\u{1}" ? "a"
+            : lowered == "\u{3}" ? "c"
+            : lowered == "\u{16}" ? "v"
+            : lowered == "\u{18}" ? "x"
+            : lowered == "\u{444}" ? "a"
+            : lowered == "\u{441}" ? "c"
+            : lowered == "\u{43c}" ? "v"
+            : lowered == "\u{447}" ? "x"
+            : lowered;
+    }
+
+    function begin-comment-interaction(
+        comment-id: string,
+        mode: string,
+        zone: string,
+        pointer-root-x: length,
+        pointer-root-y: length,
+        comment-x: float,
+        comment-y: float,
+        comment-width: float,
+        comment-body-height: float,
+        comment-total-height: float
+    ) {
+        root.finish-active-text-edit(true);
+        root.element-select-requested("", false, true);
+        root.active-comment-id = comment-id;
+        root.active-comment-mode = mode;
+        root.active-comment-zone = zone;
+        root.comment-pointer-start-root-x = pointer-root-x;
+        root.comment-pointer-start-root-y = pointer-root-y;
+        root.comment-start-x = comment-x;
+        root.comment-start-y = comment-y;
+        root.comment-start-width = comment-width;
+        root.comment-start-body-height = comment-body-height;
+        root.comment-start-total-height = comment-total-height;
+        root.comment-live-x = comment-x;
+        root.comment-live-y = comment-y;
+        root.comment-live-width = comment-width;
+        root.comment-live-body-height = comment-body-height;
+        root.comment-live-total-height = comment-total-height;
+        root.selected-comment-id = comment-id;
+        root.close-comment-editor();
+        context-menu.visible-menu = false;
+    }
+
+    function arm-comment-drag(
+        comment-id: string,
+        zone: string,
+        pointer-root-x: length,
+        pointer-root-y: length,
+        comment-x: float,
+        comment-y: float,
+        comment-width: float,
+        comment-body-height: float,
+        comment-total-height: float
+    ) {
+        root.comment-drag-armed = true;
+        root.comment-drag-id = comment-id;
+        root.active-comment-zone = zone;
+        root.comment-pointer-start-root-x = pointer-root-x;
+        root.comment-pointer-start-root-y = pointer-root-y;
+        root.comment-start-x = comment-x;
+        root.comment-start-y = comment-y;
+        root.comment-start-width = comment-width;
+        root.comment-start-body-height = comment-body-height;
+        root.comment-start-total-height = comment-total-height;
+        root.comment-live-x = comment-x;
+        root.comment-live-y = comment-y;
+        root.comment-live-width = comment-width;
+        root.comment-live-body-height = comment-body-height;
+        root.comment-live-total-height = comment-total-height;
+        root.selected-comment-id = comment-id;
+        root.close-comment-editor();
+        context-menu.visible-menu = false;
+    }
+
+    function update-armed-comment-drag(root-x: length, root-y: length) {
+        if !root.comment-drag-armed || root.comment-drag-id == "" || root.active-comment-mode != "none" {
+            return;
+        }
+
+        let dx = Math.abs((root-x - root.comment-pointer-start-root-x) / 1px);
+        let dy = Math.abs((root-y - root.comment-pointer-start-root-y) / 1px);
+        if dx < root.comment-drag-threshold && dy < root.comment-drag-threshold {
+            return;
+        }
+
+        root.begin-comment-interaction(
+            root.comment-drag-id,
+            "move",
+            root.active-comment-zone,
+            root.comment-pointer-start-root-x,
+            root.comment-pointer-start-root-y,
+            root.comment-start-x,
+            root.comment-start-y,
+            root.comment-start-width,
+            root.comment-start-body-height,
+            root.comment-start-total-height
+        );
+        root.comment-drag-armed = false;
+        root.comment-drag-id = "";
+        root.update-active-comment-move(
+            root-x,
+            root-y,
+            root.comment-live-width,
+            root.comment-live-total-height
+        );
+    }
+
+    function clear-comment-drag-arm() {
+        root.comment-drag-armed = false;
+        root.comment-drag-id = "";
+    }
+
+    function apply-live-comment-position(x: float, y: float, width: float, height: float) {
+        let zone = root.comment-zone(x, y, width, height);
+        root.position-comment-for-zone(zone, x, y, width, height);
+    }
+
+    function update-active-comment-move(
+        pointer-root-x: length,
+        pointer-root-y: length,
+        comment-width: float,
+        comment-height: float
+    ) {
+        if root.active-comment-mode != "move" || root.active-comment-id == "" {
+            return;
+        }
+
+        let dx = ((pointer-root-x - root.comment-pointer-start-root-x) / 1px) / root.current-zoom;
+        let dy = ((pointer-root-y - root.comment-pointer-start-root-y) / 1px) / root.current-zoom;
+        root.position-comment-for-zone(
+            root.active-comment-zone,
+            root.comment-start-x + dx,
+            root.comment-start-y + dy,
+            comment-width,
+            comment-height
+        );
+    }
+
+    function update-active-comment-resize(
+        pointer-root-x: length,
+        pointer-root-y: length,
+        total-height: float,
+        body-height: float
+    ) {
+        if root.active-comment-mode == "none" || root.active-comment-id == "" || root.active-comment-mode == "move" {
+            return;
+        }
+
+        let dx = ((pointer-root-x - root.comment-pointer-start-root-x) / 1px) / root.current-zoom;
+        let dy = ((pointer-root-y - root.comment-pointer-start-root-y) / 1px) / root.current-zoom;
+        let zone = root.comment-zone(
+            root.comment-start-x,
+            root.comment-start-y,
+            root.comment-start-width,
+            total-height
+        );
+        let right-edge = root.comment-start-x + root.comment-start-width;
+        let viewport-max-width = root.active-comment-mode == "resize-w"
+            ? right-edge - root.viewport-world-left()
+            : root.viewport-world-right() - root.comment-start-x;
+        let non-body-height = total-height - body-height;
+        let viewport-max-body-height =
+            root.viewport-world-bottom() - root.comment-start-y - non-body-height;
+        let page-limit-width = root.active-comment-mode == "resize-w"
+            ? zone == "right" ? right-edge - (root.page-width / 1px) : root.comment-max-width
+            : zone == "left" ? -root.comment-start-x : root.comment-max-width;
+        let page-limit-body-height = zone == "top"
+            ? -root.comment-start-y - non-body-height
+            : root.comment-max-body-height;
+        let max-width = Math.min(root.comment-max-width, Math.min(viewport-max-width, page-limit-width));
+        let max-body-height = Math.min(
+            root.comment-max-body-height,
+            Math.min(viewport-max-body-height, page-limit-body-height)
+        );
+        let next-width = root.active-comment-mode == "resize-s"
+            ? root.comment-start-width
+            : root.active-comment-mode == "resize-w"
+                ? root.clamp-float(
+                    root.comment-start-width - dx,
+                    root.comment-min-width,
+                    max-width
+                )
+                : root.clamp-float(
+                    root.comment-start-width + dx,
+                    root.comment-min-width,
+                    max-width
+                );
+        let next-body-height = root.active-comment-mode == "resize-e" || root.active-comment-mode == "resize-w"
+            ? body-height
+            : root.clamp-float(
+                root.comment-start-body-height + dy,
+                root.comment-min-body-height,
+                max-body-height
+            );
+
+        root.comment-live-width = next-width;
+        root.comment-live-body-height = next-body-height;
+        root.comment-live-total-height = total-height;
+        root.comment-live-x = root.active-comment-mode == "resize-w"
+            ? right-edge - next-width
+            : root.comment-start-x;
+        root.comment-live-y = root.comment-start-y;
+    }
+
+    function finish-active-comment-interaction(commit: bool) {
+        if root.active-comment-id == "" || root.active-comment-mode == "none" {
+            return;
+        }
+
+        if commit {
+            if root.active-comment-mode == "move"
+                && (Math.abs(root.comment-live-x - root.comment-start-x) > 0.01
+                    || Math.abs(root.comment-live-y - root.comment-start-y) > 0.01) {
+                root.update-comment-position-requested(
+                    root.active-comment-id,
+                    root.comment-live-x,
+                    root.comment-live-y
+                );
+            } else if root.active-comment-mode != "move"
+                && (Math.abs(root.comment-live-width - root.comment-start-width) > 0.01
+                    || Math.abs(root.comment-live-body-height - root.comment-start-body-height) > 0.01) {
+                root.update-comment-size-requested(
+                    root.active-comment-id,
+                    root.comment-live-width,
+                    root.comment-live-body-height
+                );
+            }
+        }
+
+        root.active-comment-id = "";
+        root.active-comment-mode = "none";
+        root.active-comment-zone = "";
+        root.clear-comment-drag-arm();
+    }
+
+    function finish-transform(commit: bool) {
+        if root.is-transforming && root.active-mode != "none" && root.active-element-id != "" {
+            root.transform-finished(
+                root.active-element-id,
+                commit,
+                root.live-element-x,
+                root.live-element-y,
+                root.live-element-w,
+                root.live-element-h,
+                root.live-element-rotation
+            );
+            root.active-mode = "none";
+            root.active-element-id = "";
+            root.active-resize-from-center = false;
+            root.is-transforming = false;
+        }
+        root.is-primary-held = false;
+        root.start-rotation-pointer-angle = 0;
+    }
+
+    function notify-transform-preview(
+        previous-x: float,
+        previous-y: float,
+        previous-w: float,
+        previous-h: float,
+        previous-rotation: float
+    ) {
+        if root.active-element-id == "" {
+            return;
+        }
+
+        let screen-delta = Math.max(
+            Math.max(
+                Math.abs(root.live-element-x - previous-x),
+                Math.abs(root.live-element-y - previous-y)
+            ),
+            Math.max(
+                Math.abs(root.live-element-w - previous-w),
+                Math.abs(root.live-element-h - previous-h)
+            )
+        ) * root.current-zoom;
+        let rotation-delta = Math.abs(root.live-element-rotation - previous-rotation);
+
+        if root.elements.length <= root.runtime-preview-max-elements
+            && (screen-delta >= root.runtime-preview-min-screen-delta
+                || rotation-delta >= root.runtime-preview-min-rotation-delta) {
+            root.transform-previewed(
+                root.active-element-id,
+                root.live-element-x,
+                root.live-element-y,
+                root.live-element-w,
+                root.live-element-h,
+                root.live-element-rotation
+            );
+        }
+    }
+
+    function apply-live-transform(x: float, y: float, w: float, h: float, rotation: float) {
+        let page-w = root.page-width / 1px;
+        let page-h = root.page-height / 1px;
+
+        let safe-w = Math.max(1, Math.min(page-w, w));
+        let safe-h = Math.max(1, Math.min(page-h, h));
+        let safe-rotation = Math.max(-180, Math.min(180, rotation));
+
+        let abs-cos = Math.abs(Math.cos(safe-rotation * 1deg));
+        let abs-sin = Math.abs(Math.sin(safe-rotation * 1deg));
+
+        let bbox-w = safe-w * abs-cos + safe-h * abs-sin;
+        let bbox-h = safe-w * abs-sin + safe-h * abs-cos;
+
+        let scale = Math.min(1, Math.min(page-w / Math.max(1, bbox-w), page-h / Math.max(1, bbox-h)));
+        let final-w = Math.max(1, safe-w * scale);
+        let final-h = Math.max(1, safe-h * scale);
+
+        let final-bbox-w = final-w * abs-cos + final-h * abs-sin;
+        let final-bbox-h = final-w * abs-sin + final-h * abs-cos;
+
+        let min-cx = final-bbox-w / 2;
+        let max-cx = page-w - final-bbox-w / 2;
+        let min-cy = final-bbox-h / 2;
+        let max-cy = page-h - final-bbox-h / 2;
+
+        let cx = x + final-w / 2;
+        let cy = y + final-h / 2;
+
+        let clamped-cx = Math.max(min-cx, Math.min(max-cx, cx));
+        let clamped-cy = Math.max(min-cy, Math.min(max-cy, cy));
+
+        root.live-element-x = clamped-cx - final-w / 2;
+        root.live-element-y = clamped-cy - final-h / 2;
+        root.live-element-w = final-w;
+        root.live-element-h = final-h;
+        root.live-element-rotation = safe-rotation;
+    }
+
+    function dot(ax: float, ay: float, bx: float, by: float) -> float {
+        ax * bx + ay * by
+    }
+
+    function local-to-canvas-x(
+        local-x: float,
+        local-y: float,
+        element-x: float,
+        element-y: float,
+        element-w: float,
+        element-h: float,
+        element-rotation: float
+    ) -> float {
+        let center-x = element-x + element-w / 2;
+        let rel-x = local-x - element-w / 2;
+        let rel-y = local-y - element-h / 2;
+        let cos-r = Math.cos(element-rotation * 1deg);
+        let sin-r = Math.sin(element-rotation * 1deg);
+        center-x + rel-x * cos-r - rel-y * sin-r
+    }
+
+    function local-to-canvas-y(
+        local-x: float,
+        local-y: float,
+        element-x: float,
+        element-y: float,
+        element-w: float,
+        element-h: float,
+        element-rotation: float
+    ) -> float {
+        let center-y = element-y + element-h / 2;
+        let rel-x = local-x - element-w / 2;
+        let rel-y = local-y - element-h / 2;
+        let cos-r = Math.cos(element-rotation * 1deg);
+        let sin-r = Math.sin(element-rotation * 1deg);
+        center-y + rel-x * sin-r + rel-y * cos-r
+    }
+
+    function canvas-to-local-x(
+        canvas-x: float,
+        canvas-y: float,
+        element-x: float,
+        element-y: float,
+        element-w: float,
+        element-h: float,
+        element-rotation: float
+    ) -> float {
+        let center-x = element-x + element-w / 2;
+        let center-y = element-y + element-h / 2;
+        let dx = canvas-x - center-x;
+        let dy = canvas-y - center-y;
+        let cos-r = Math.cos(element-rotation * 1deg);
+        let sin-r = Math.sin(element-rotation * 1deg);
+        let rel-x = dx * cos-r + dy * sin-r;
+        rel-x + element-w / 2
+    }
+
+    function canvas-to-local-y(
+        canvas-x: float,
+        canvas-y: float,
+        element-x: float,
+        element-y: float,
+        element-w: float,
+        element-h: float,
+        element-rotation: float
+    ) -> float {
+        let center-x = element-x + element-w / 2;
+        let center-y = element-y + element-h / 2;
+        let dx = canvas-x - center-x;
+        let dy = canvas-y - center-y;
+        let cos-r = Math.cos(element-rotation * 1deg);
+        let sin-r = Math.sin(element-rotation * 1deg);
+        let rel-y = -dx * sin-r + dy * cos-r;
+        rel-y + element-h / 2
+    }
+
+    function handle-sign-x(mode: string) -> float {
+        if mode == "resize-e" || mode == "resize-ne" || mode == "resize-se" {
+            1.0
+        } else if mode == "resize-w" || mode == "resize-nw" || mode == "resize-sw" {
+            -1.0
+        } else {
+            0.0
+        }
+    }
+
+    function handle-sign-y(mode: string) -> float {
+        if mode == "resize-s" || mode == "resize-se" || mode == "resize-sw" {
+            1.0
+        } else if mode == "resize-n" || mode == "resize-ne" || mode == "resize-nw" {
+            -1.0
+        } else {
+            0.0
+        }
+    }
+
+    function angle-distance-deg(a: float, b: float) -> float {
+        let raw = Math.abs(a - b);
+        raw > 180 ? 360 - raw : raw
+    }
+
+    function resize-cursor-kind(mode: string, element-rotation: float) -> string {
+        let vx = root.handle-sign-x(mode);
+        let vy = root.handle-sign-y(mode);
+        if vx == 0 && vy == 0 {
+            "nw"
+        } else {
+            let cos-r = Math.cos(element-rotation * 1deg);
+            let sin-r = Math.sin(element-rotation * 1deg);
+            let wx = vx * cos-r - vy * sin-r;
+            let wy = vx * sin-r + vy * cos-r;
+            let angle = Math.atan2(wy, wx) / 1deg;
+
+            let d-col = Math.min(root.angle-distance-deg(angle, 0), root.angle-distance-deg(angle, 180));
+            let d-row = Math.min(root.angle-distance-deg(angle, 90), root.angle-distance-deg(angle, -90));
+            let diag = root.resize-cursor-diagonal-angle;
+            // MouseCursor.ne-resize is for the "/" diagonal.
+            let d-ne = Math.min(
+                root.angle-distance-deg(angle, 180 - diag),
+                root.angle-distance-deg(angle, -diag)
+            );
+            // MouseCursor.nw-resize is for the "\" diagonal.
+            let d-nw = Math.min(
+                root.angle-distance-deg(angle, diag),
+                root.angle-distance-deg(angle, diag - 180)
+            );
+
+            d-col <= d-row && d-col <= d-ne && d-col <= d-nw ? "col"
+                : d-row <= d-ne && d-row <= d-nw ? "row"
+                : d-ne <= d-nw ? "ne"
+                : "nw"
+        }
+    }
+
+    function is-near-rotate-edge(local-x: float, local-y: float, element-w: float, element-h: float) -> bool {
+        let min-side = Math.min(element-w, element-h);
+        let zoom-safe = Math.max(0.2, root.current-zoom);
+        // Keep rotate edge hit-test stable in screen pixels across zoom levels.
+        let edge-threshold = Math.max(
+            2,
+            Math.min(min-side / 2, 7 / zoom-safe)
+        );
+        local-x <= edge-threshold
+            || local-y <= edge-threshold
+            || local-x >= element-w - edge-threshold
+            || local-y >= element-h - edge-threshold
+    }
+
+    function begin-transform(
+        element-id: string,
+        mode: string,
+        element-x: float,
+        element-y: float,
+        element-w: float,
+        element-h: float,
+        element-rotation: float,
+        pointer-canvas-x: float,
+        pointer-canvas-y: float,
+        resize-from-center: bool
+    ) {
+        root.active-element-id = element-id;
+        root.active-mode = mode;
+        root.active-resize-from-center = resize-from-center && mode != "move" && mode != "rotate";
+        root.start-element-x = element-x;
+        root.start-element-y = element-y;
+        root.start-element-w = element-w;
+        root.start-element-h = element-h;
+        root.start-element-rotation = element-rotation;
+        root.is-transforming = true;
+        root.is-primary-held = true;
+
+        root.live-element-x = root.start-element-x;
+        root.live-element-y = root.start-element-y;
+        root.live-element-w = root.start-element-w;
+        root.live-element-h = root.start-element-h;
+        root.live-element-rotation = root.start-element-rotation;
+
+        root.pointer-offset-x = pointer-canvas-x - element-x;
+        root.pointer-offset-y = pointer-canvas-y - element-y;
+        root.action-start-canvas-x = pointer-canvas-x;
+        root.action-start-canvas-y = pointer-canvas-y;
+
+        if mode == "rotate" {
+            let center-x = element-x + element-w / 2;
+            let center-y = element-y + element-h / 2;
+            root.action-start-canvas-x = center-x;
+            root.action-start-canvas-y = center-y;
+            root.start-rotation-pointer-angle =
+                Math.atan2(pointer-canvas-y - center-y, pointer-canvas-x - center-x) / 1deg;
+        }
+    }
+
+    function update-active-transform(canvas-x: float, canvas-y: float) {
+        if !(root.is-transforming && root.is-primary-held && root.active-mode != "none" && root.active-element-id != "") {
+            return;
+        }
+
+        let min-size = 24;
+        let dx = canvas-x - root.action-start-canvas-x;
+        let dy = canvas-y - root.action-start-canvas-y;
+        let previous-x = root.live-element-x;
+        let previous-y = root.live-element-y;
+        let previous-w = root.live-element-w;
+        let previous-h = root.live-element-h;
+        let previous-rotation = root.live-element-rotation;
+
+        if root.active-mode == "move" {
+            let nx = canvas-x - root.pointer-offset-x;
+            let ny = canvas-y - root.pointer-offset-y;
+            root.apply-live-transform(
+                nx,
+                ny,
+                root.start-element-w,
+                root.start-element-h,
+                root.start-element-rotation
+            );
+        } else if root.active-mode == "rotate" {
+            let center-x = root.action-start-canvas-x;
+            let center-y = root.action-start-canvas-y;
+            let current-angle = Math.atan2(canvas-y - center-y, canvas-x - center-x) / 1deg;
+            let raw-delta = current-angle - root.start-rotation-pointer-angle;
+            let delta = raw-delta > 180
+                ? raw-delta - 360
+                : raw-delta < -180
+                    ? raw-delta + 360
+                    : raw-delta;
+            let nr = root.start-element-rotation + delta;
+            // Keep rotate preview fully local and stable while dragging.
+            root.live-element-x = root.start-element-x;
+            root.live-element-y = root.start-element-y;
+            root.live-element-w = root.start-element-w;
+            root.live-element-h = root.start-element-h;
+            root.live-element-rotation = nr;
+        } else {
+            let sign-x = root.handle-sign-x(root.active-mode);
+            let sign-y = root.handle-sign-y(root.active-mode);
+            let start-center-x = root.start-element-x + root.start-element-w / 2;
+            let start-center-y = root.start-element-y + root.start-element-h / 2;
+            let axis-x-x = Math.cos(root.start-element-rotation * 1deg);
+            let axis-x-y = Math.sin(root.start-element-rotation * 1deg);
+            let axis-y-x = -axis-x-y;
+            let axis-y-y = axis-x-x;
+            if root.active-resize-from-center {
+                let pointer-delta-x = canvas-x - root.action-start-canvas-x;
+                let pointer-delta-y = canvas-y - root.action-start-canvas-y;
+                let delta-local-x = root.dot(pointer-delta-x, pointer-delta-y, axis-x-x, axis-x-y);
+                let delta-local-y = root.dot(pointer-delta-x, pointer-delta-y, axis-y-x, axis-y-y);
+                let next-w = sign-x == 0
+                    ? root.start-element-w
+                    : Math.max(min-size, root.start-element-w + 2 * sign-x * delta-local-x);
+                let next-h = sign-y == 0
+                    ? root.start-element-h
+                    : Math.max(min-size, root.start-element-h + 2 * sign-y * delta-local-y);
+                root.apply-live-transform(
+                    start-center-x - next-w / 2,
+                    start-center-y - next-h / 2,
+                    next-w,
+                    next-h,
+                    root.start-element-rotation
+                );
+            } else {
+                let anchor-x = start-center-x
+                    - sign-x * (root.start-element-w / 2) * axis-x-x
+                    - sign-y * (root.start-element-h / 2) * axis-y-x;
+                let anchor-y = start-center-y
+                    - sign-x * (root.start-element-w / 2) * axis-x-y
+                    - sign-y * (root.start-element-h / 2) * axis-y-y;
+                let pointer-from-anchor-x = canvas-x - anchor-x;
+                let pointer-from-anchor-y = canvas-y - anchor-y;
+                let next-w = sign-x == 0
+                    ? root.start-element-w
+                    : Math.max(
+                        min-size,
+                        sign-x * root.dot(pointer-from-anchor-x, pointer-from-anchor-y, axis-x-x, axis-x-y)
+                    );
+                let next-h = sign-y == 0
+                    ? root.start-element-h
+                    : Math.max(
+                        min-size,
+                        sign-y * root.dot(pointer-from-anchor-x, pointer-from-anchor-y, axis-y-x, axis-y-y)
+                    );
+                let next-center-x = anchor-x
+                    + sign-x * (next-w / 2) * axis-x-x
+                    + sign-y * (next-h / 2) * axis-y-x;
+                let next-center-y = anchor-y
+                    + sign-x * (next-w / 2) * axis-x-y
+                    + sign-y * (next-h / 2) * axis-y-y;
+                root.apply-live-transform(
+                    next-center-x - next-w / 2,
+                    next-center-y - next-h / 2,
+                    next-w,
+                    next-h,
+                    root.start-element-rotation
+                );
+            }
+        }
+
+        root.notify-transform-preview(
+            previous-x,
+            previous-y,
+            previous-w,
+            previous-h,
+            previous-rotation
+        );
+    }
+
+    function sync-viewport-state(force: bool) {
+        if force || root.elements.length <= root.runtime-preview-max-elements {
+            root.zoom-sync-counter = 0;
+            root.zoom-changed(root.current-zoom);
+            return;
+        }
+
+        root.zoom-sync-counter += 1;
+        if root.zoom-sync-counter >= root.zoom-sync-interval-events {
+            root.zoom-sync-counter = 0;
+            root.zoom-changed(root.current-zoom);
+        }
+    }
+
+    function zoom-at-cursor(cursor-x: length, cursor-y: length, delta-y: length) {
+        let prev-zoom = root.current-zoom;
+        let new-zoom = delta-y < 0px
+            ? Math.max(0.2, Math.min(4.0, prev-zoom / 1.1))
+            : delta-y > 0px
+                ? Math.max(0.2, Math.min(4.0, prev-zoom * 1.1))
+                : prev-zoom;
+
+        if new-zoom != prev-zoom {
+            let world-x = ((cursor-x - root.canvas-offset-x) / 1px) / prev-zoom;
+            let world-y = ((cursor-y - root.canvas-offset-y) / 1px) / prev-zoom;
+            root.canvas-offset-x = ((cursor-x / 1px) - world-x * new-zoom) * 1px;
+            root.canvas-offset-y = ((cursor-y / 1px) - world-y * new-zoom) * 1px;
+            root.current-zoom = new-zoom;
+            root.sync-viewport-state(false);
+        }
+    }
+
+    public function reset-view() {
+        root.current-zoom = 1.0;
+        root.canvas-offset-x = (root.width - root.page-width) / 2;
+        root.canvas-offset-y = (root.height - root.page-height) / 2;
+        root.sync-viewport-state(true);
+    }
+
+    function update-marquee-selection(canvas-x: float, canvas-y: float) {
+        if !root.is-marquee-armed {
+            return;
+        }
+
+        root.marquee-current-canvas-x = canvas-x;
+        root.marquee-current-canvas-y = canvas-y;
+
+        if !root.is-marquee-selecting
+            && (Math.abs(root.marquee-current-canvas-x - root.marquee-start-canvas-x) >= root.marquee-activation-distance
+                || Math.abs(root.marquee-current-canvas-y - root.marquee-start-canvas-y) >= root.marquee-activation-distance) {
+            root.is-marquee-selecting = true;
+            root.suppress-next-empty-click = true;
+        }
+    }
+
+    function finish-marquee-selection(canvas-x: float, canvas-y: float) {
+        if !root.is-marquee-armed {
+            return;
+        }
+
+        root.marquee-current-canvas-x = canvas-x;
+        root.marquee-current-canvas-y = canvas-y;
+
+        if root.is-marquee-selecting {
+            root.marquee-select-requested(
+                root.marquee-start-canvas-x,
+                root.marquee-start-canvas-y,
+                root.marquee-current-canvas-x,
+                root.marquee-current-canvas-y,
+                root.marquee-additive-selection
+            );
+            root.suppress-next-empty-click = true;
+        }
+
+        root.is-marquee-armed = false;
+        root.is-marquee-selecting = false;
+    }
+
+    function apply-control-tool(tool: string) {
+        root.cursor-tools-menu-open = false;
+        root.rectangle-tools-menu-open = false;
+        root.active-control-tool = tool;
+    }
+
+    function update-cursor-tool(next: string) {
+        root.cursor-subtool = next;
+        root.apply-control-tool("cursor");
+    }
+
+    function update-rectangle-tool(component-id: string) {
+        root.rectangle-component-id = component-id;
+        root.rectangle-tools-menu-open = false;
+        root.apply-control-tool("rectangle");
+    }
+
+    property <string> editing-text-element-id: "";
+    property <string> editing-freeform-text: "";
+    property <bool> freeform-text-dirty: false;
+    property <bool> freeform-text-edit-active: false;
+    property <string> active-control-tool: "cursor";
+    property <string> cursor-subtool: "cursor";
+    property <string> rectangle-component-id: "div";
+    property <bool> cursor-tools-menu-open: false;
+    property <bool> rectangle-tools-menu-open: false;
+    property <string> hand-cursor-path: "M14 3.5V11V4.5C14 3.67157 14.6716 3 15.5 3C16.3284 3 17 3.67157 17 4.5V11V7.5C17 6.67157 17.6716 6 18.5 6C19.3284 6 20 6.67157 20 7.5V16C20 19.3137 17.3137 22 14 22H12.8727C11.3483 22 9.88112 21.4198 8.76904 20.3772L3.81045 15.7285C3.09365 15.0565 3.0754 13.9246 3.77016 13.2298C4.44939 12.5506 5.55063 12.5506 6.22985 13.2298L8.00001 15V6.5C8.00001 5.67157 8.67158 5 9.50001 5C10.3284 5 11 5.67157 11 6.5V11V3.5C11 2.67157 11.6716 2 12.5 2C13.3284 2 14 2.67157 14 3.5Z";
+    property <length> drag-preview-x: 0px;
+    property <length> drag-preview-y: 0px;
+    property <bool> suppress-next-click-selection: false;
+    property <length> viewport-cull-padding: 320px;
+    property <int> runtime-preview-max-elements: 120;
+    property <float> runtime-preview-min-screen-delta: 0.8;
+    property <float> runtime-preview-min-rotation-delta: 0.35;
+    property <int> zoom-sync-interval-events: 3;
+    property <int> zoom-sync-counter: 0;
+    // Calibrates diagonal cursor direction to better match OS cursor artwork.
+    property <float> resize-cursor-diagonal-angle: 39;
+
+    function is-element-visible-on-screen(x: length, y: length, w: length, h: length) -> bool {
+        let screen-x = root.canvas-offset-x + x * root.current-zoom;
+        let screen-y = root.canvas-offset-y + y * root.current-zoom;
+        let screen-w = w * root.current-zoom;
+        let screen-h = h * root.current-zoom;
+
+        screen-x + screen-w >= 0px - root.viewport-cull-padding
+            && screen-y + screen-h >= 0px - root.viewport-cull-padding
+            && screen-x <= root.width + root.viewport-cull-padding
+            && screen-y <= root.height + root.viewport-cull-padding
+    }
+
+    background: Themes.current.primary-bg;
+    clip: true;
+
+    viewport := Rectangle {
+        x: canvas-offset-x;
+        y: canvas-offset-y;
+        width: page-width * current-zoom;
+        height: page-height * current-zoom;
+
+        Rectangle {
+            width: parent.width;
+            height: parent.height;
+            background: Themes.canvas-bg;
+            border-width: 1px;
+            border-color: Themes.current.border-color;
+            border-radius: 4px;
+        }
+
+        if root.state.grid-visible: Rectangle {
+            width: parent.width;
+            height: parent.height;
+            background: transparent;
+
+            for i in Math.floor(parent.width / (root.state.grid-size * current-zoom)) + 1 : Rectangle {
+                x: i * root.state.grid-size * current-zoom;
+                y: 0;
+                width: 1px;
+                height: parent.height;
+                background: Themes.canvas-grid-color;
+            }
+
+            for j in Math.floor(parent.height / (root.state.grid-size * current-zoom)) + 1 : Rectangle {
+                x: 0;
+                y: j * root.state.grid-size * current-zoom;
+                width: parent.width;
+                height: 1px;
+                background: Themes.canvas-grid-color;
+            }
+        }
+
+        // Handles click on empty canvas area only (elements are rendered above this touch area).
+        empty-canvas-touch := TouchArea {
+            width: parent.width;
+            height: parent.height;
+            mouse-cursor: root.active-control-tool == "cursor" && root.cursor-subtool == "hand" ? MouseCursor.none
+                : root.active-control-tool == "text" || root.active-control-tool == "rectangle" ? MouseCursor.copy
+                : MouseCursor.default;
+
+            scroll-event(event) => {
+                if event.modifiers.control {
+                    root.zoom-at-cursor(
+                        root.canvas-offset-x + self.mouse-x,
+                        root.canvas-offset-y + self.mouse-y,
+                        event.delta-y
+                    );
+                    return accept;
+                }
+                reject
+            }
+
+            clicked => {
+                if root.suppress-next-empty-click {
+                    root.suppress-next-empty-click = false;
+                    return;
+                }
+                if root.drag-state != DragState.Dragging && root.active-mode == "none" {
+                    context-menu.visible-menu = false;
+                    if root.active-control-tool == "cursor" && root.cursor-subtool == "cursor" {
+                        root.selected-comment-id = "";
+                        root.comment-editor-active = false;
+                        root.canvas-clicked(self.mouse-x, self.mouse-y);
+                        root.finish-active-text-edit(true);
+                    }
+                }
+            }
+
+            pointer-event(ev) => {
+                root.report-pointer-button(
+                    ev.kind,
+                    ev.button,
+                    ev.modifiers.control,
+                    ev.modifiers.shift,
+                    ev.modifiers.alt
+                );
+                let root-x = root.canvas-offset-x + self.mouse-x;
+                let root-y = root.canvas-offset-y + self.mouse-y;
+                let canvas-x = (self.mouse-x / 1px) / root.current-zoom;
+                let canvas-y = (self.mouse-y / 1px) / root.current-zoom;
+                root.remember-pointer(root-x, root-y, canvas-x, canvas-y);
+                if ev.kind == PointerEventKind.down {
+                    root.cursor-tools-menu-open = false;
+                    root.rectangle-tools-menu-open = false;
+                }
+
+                if root.drag-state == DragState.Dragging {
+                    root.drag-preview-x = root-x + 14px;
+                    root.drag-preview-y = root-y + 14px;
+                }
+
+                if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.middle {
+                    root.start-pan(root-x, root-y, "empty");
+                    context-menu.visible-menu = false;
+                }
+
+                if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right {
+                    root.open-empty-context-menu(root-x, root-y, canvas-x, canvas-y);
+                }
+
+                if ev.kind == PointerEventKind.down
+                    && ev.button == PointerEventButton.left
+                    && root.drag-state != DragState.Dragging
+                    && root.active-mode == "none" {
+                    root.finish-active-text-edit(true);
+                    context-menu.visible-menu = false;
+                    root.selected-comment-id = "";
+                    root.comment-editor-active = false;
+                    if root.active-control-tool == "text" {
+                        root.element-dropped("text", canvas-x, canvas-y, 0, 0, "");
+                        root.is-marquee-armed = false;
+                        root.is-marquee-selecting = false;
+                        root.suppress-next-empty-click = true;
+                    } else if root.active-control-tool == "rectangle" {
+                        root.element-dropped(root.rectangle-component-id, canvas-x, canvas-y, 0, 0, "");
+                        root.is-marquee-armed = false;
+                        root.is-marquee-selecting = false;
+                        root.suppress-next-empty-click = true;
+                    } else if root.active-control-tool == "cursor" && root.cursor-subtool == "hand" {
+                        root.start-pan(root-x, root-y, "empty");
+                        root.is-marquee-armed = false;
+                        root.is-marquee-selecting = false;
+                        root.suppress-next-empty-click = true;
+                    } else {
+                        root.is-marquee-armed = true;
+                        root.is-marquee-selecting = false;
+                        root.marquee-additive-selection = ev.modifiers.control;
+                        root.marquee-start-canvas-x = canvas-x;
+                        root.marquee-start-canvas-y = canvas-y;
+                        root.marquee-current-canvas-x = canvas-x;
+                        root.marquee-current-canvas-y = canvas-y;
+                        root.suppress-next-empty-click = false;
+                    }
+                }
+
+                if root.drag-state == DragState.Dragging && ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left {
+                    context-menu.visible-menu = false;
+                    if canvas-x >= 0 && canvas-y >= 0 && canvas-x <= root.page-width / 1px && canvas-y <= root.page-height / 1px {
+                        root.element-dropped(root.dragging-component-id, canvas-x, canvas-y, 0, 0, "");
+                    } else {
+                        root.drag-cancelled();
+                    }
+                }
+
+                if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left {
+                    if root.active-control-tool == "cursor" && root.cursor-subtool == "cursor" {
+                        root.finish-marquee-selection(canvas-x, canvas-y);
+                    } else {
+                        root.is-marquee-armed = false;
+                        root.is-marquee-selecting = false;
+                    }
+                }
+
+                if ev.kind == PointerEventKind.up
+                    && ev.button == PointerEventButton.left
+                    && root.active-control-tool == "cursor"
+                    && root.cursor-subtool == "hand" {
+                    root.stop-pan();
+                }
+
+                if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left && root.is-primary-held {
+                    root.finish-transform(true);
+                }
+
+                if ev.kind == PointerEventKind.cancel {
+                    root.is-marquee-armed = false;
+                    root.is-marquee-selecting = false;
+                    root.finish-transform(false);
+                    root.stop-pan();
+                    if root.drag-state == DragState.Dragging {
+                        root.drag-cancelled();
+                    }
+                }
+
+                if ev.kind == PointerEventKind.move {
+                    root.update-pan(root-x, root-y, "empty");
+                    root.update-active-transform(canvas-x, canvas-y);
+                    if root.active-control-tool == "cursor" && root.cursor-subtool == "cursor" {
+                        root.update-marquee-selection(canvas-x, canvas-y);
+                    }
+                }
+
+                if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.middle {
+                    root.stop-pan();
+                }
+            }
+        }
+
+        for element[idx] in root.elements: element-rect := Rectangle {
+            property <bool> is-selected: element.is-selected || element.element-id == root.selected-element-id;
+            property <bool> is-group-anchor: element.is-group-anchor;
+            property <bool> is-layout-container:
+                element.element-type == "div"
+                || element.element-type == "flex-container"
+                || element.element-type == "grid-container"
+                || element.element-type == "stack-container";
+            property <bool> is-nowrap-text:
+                element.text-wrap == "nowrap"
+                || element.text-wrap == "no-wrap";
+            property <bool> selectable-on-canvas: true;
+            property <bool> is-active-transform: root.is-transforming && root.active-element-id == element.element-id;
+            property <bool> is-group-move-preview:
+                root.is-transforming && root.active-mode == "move" && is-selected && !is-active-transform;
+            property <float> group-move-dx:
+                root.is-transforming && root.active-mode == "move"
+                    ? root.live-element-x - root.start-element-x
+                    : 0;
+            property <float> group-move-dy:
+                root.is-transforming && root.active-mode == "move"
+                    ? root.live-element-y - root.start-element-y
+                    : 0;
+            property <bool> should-render-on-canvas:
+                root.is-element-visible-on-screen(
+                    element.bounds.position.x,
+                    element.bounds.position.y,
+                    element.bounds.size.width,
+                    element.bounds.size.height
+                ) || is-selected || is-active-transform;
+            property <float> display-canvas-x:
+                is-active-transform ? root.live-element-x
+                : is-group-move-preview ? (element.bounds.position.x / 1px) + group-move-dx
+                : element.bounds.position.x / 1px;
+            property <float> display-canvas-y:
+                is-active-transform ? root.live-element-y
+                : is-group-move-preview ? (element.bounds.position.y / 1px) + group-move-dy
+                : element.bounds.position.y / 1px;
+            property <float> display-canvas-w:
+                is-active-transform ? root.live-element-w
+                : element.bounds.size.width / 1px;
+            property <float> display-canvas-h:
+                is-active-transform ? root.live-element-h
+                : element.bounds.size.height / 1px;
+            property <float> display-rotation:
+                is-active-transform ? root.live-element-rotation
+                : element.rotation;
+            property <float> rendered-canvas-x: display-canvas-x;
+            property <float> rendered-canvas-y: display-canvas-y;
+            visible: should-render-on-canvas;
+
+            x: display-canvas-x * root.current-zoom * 1px;
+            y: display-canvas-y * root.current-zoom * 1px;
+            width: display-canvas-w * root.current-zoom * 1px;
+            height: display-canvas-h * root.current-zoom * 1px;
+            border-radius: Math.max(0px, element.border-radius * root.current-zoom * 1px);
+            border-width: is-selected ? 2px
+                : Math.max(0px, element.border-width * root.current-zoom * 1px);
+            border-color: is-group-anchor ? Themes.warning-color
+                : is-selected ? Themes.current.active-color
+                : element.border-color;
+            transform-rotation: display-rotation * 1deg;
+
+            background: element.background;
+
+            if element.background-image-path != "": Image {
+                width: parent.width;
+                height: parent.height;
+                source: element.background-image;
+                image-fit: cover;
+            }
+
+            element-touch := TouchArea {
+                enabled: !(root.active-control-tool == "cursor" && root.cursor-subtool == "hand");
+                mouse-cursor: root.active-control-tool == "cursor" && root.cursor-subtool == "hand" ? MouseCursor.none
+                    : root.active-control-tool == "text" || root.active-control-tool == "rectangle" ? MouseCursor.copy
+                    : is-selected
+                        && root.is-near-rotate-edge(
+                            (self.mouse-x / 1px) / root.current-zoom,
+                            (self.mouse-y / 1px) / root.current-zoom,
+                            element-rect.display-canvas-w,
+                            element-rect.display-canvas-h
+                        ) ? MouseCursor.alias
+                        : is-selected ? MouseCursor.move
+                        : MouseCursor.pointer;
+
+                scroll-event(event) => {
+                    if event.modifiers.control {
+                        let local-canvas-x = (self.mouse-x / 1px) / root.current-zoom;
+                        let local-canvas-y = (self.mouse-y / 1px) / root.current-zoom;
+                        let canvas-x = root.local-to-canvas-x(
+                            local-canvas-x,
+                            local-canvas-y,
+                            element-rect.display-canvas-x,
+                            element-rect.display-canvas-y,
+                            element-rect.display-canvas-w,
+                            element-rect.display-canvas-h,
+                            element-rect.display-rotation
+                        );
+                        let canvas-y = root.local-to-canvas-y(
+                            local-canvas-x,
+                            local-canvas-y,
+                            element-rect.display-canvas-x,
+                            element-rect.display-canvas-y,
+                            element-rect.display-canvas-w,
+                            element-rect.display-canvas-h,
+                            element-rect.display-rotation
+                        );
+                        root.zoom-at-cursor(
+                            root.canvas-offset-x + canvas-x * root.current-zoom * 1px,
+                            root.canvas-offset-y + canvas-y * root.current-zoom * 1px,
+                            event.delta-y
+                        );
+                        return accept;
+                    }
+                    reject
+                }
+
+                clicked => {
+                    context-menu.visible-menu = false;
+                    if root.suppress-next-click-selection {
+                        root.suppress-next-click-selection = false;
+                        return;
+                    }
+                    if !(root.active-control-tool == "cursor" && root.cursor-subtool == "cursor") {
+                        return;
+                    }
+
+                    if selectable-on-canvas {
+                        root.selected-comment-id = "";
+                        root.comment-editor-active = false;
+                        root.element-select-requested(element.element-id, false, false);
+                    }
+
+                    if element.element-type == "input" || element.element-type == "textarea" {
+                        root.begin-input-like-text-edit(element.element-id);
+                    } else {
+                        root.finish-active-text-edit(true);
+                    }
+                }
+
+                double-clicked => {
+                    context-menu.visible-menu = false;
+                    if !(root.active-control-tool == "cursor" && root.cursor-subtool == "cursor") {
+                        return;
+                    }
+                    root.suppress-next-click-selection = true;
+                    root.selected-comment-id = "";
+                    root.comment-editor-active = false;
+                    root.element-select-requested(element.element-id, false, true);
+                    root.element-settings-requested(element.element-id);
+                    if element.element-type == "text" || element.element-type == "label" {
+                        root.begin-freeform-text-edit(element.element-id, element.text-content);
+                    }
+                }
+
+                pointer-event(ev) => {
+                    root.report-pointer-button(
+                        ev.kind,
+                        ev.button,
+                        ev.modifiers.control,
+                        ev.modifiers.shift,
+                        ev.modifiers.alt
+                    );
+                    let local-canvas-x = (self.mouse-x / 1px) / root.current-zoom;
+                    let local-canvas-y = (self.mouse-y / 1px) / root.current-zoom;
+                    let canvas-x = root.local-to-canvas-x(
+                        local-canvas-x,
+                        local-canvas-y,
+                        element-rect.display-canvas-x,
+                        element-rect.display-canvas-y,
+                        element-rect.display-canvas-w,
+                        element-rect.display-canvas-h,
+                        element-rect.display-rotation
+                    );
+                    let canvas-y = root.local-to-canvas-y(
+                        local-canvas-x,
+                        local-canvas-y,
+                        element-rect.display-canvas-x,
+                        element-rect.display-canvas-y,
+                        element-rect.display-canvas-w,
+                        element-rect.display-canvas-h,
+                        element-rect.display-rotation
+                    );
+                    let root-x = root.canvas-offset-x + canvas-x * root.current-zoom * 1px;
+                    let root-y = root.canvas-offset-y + canvas-y * root.current-zoom * 1px;
+                    root.remember-pointer(root-x, root-y, canvas-x, canvas-y);
+                    if ev.kind == PointerEventKind.down {
+                        root.cursor-tools-menu-open = false;
+                        root.rectangle-tools-menu-open = false;
+                    }
+
+                    if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                        context-menu.visible-menu = false;
+                    }
+
+                    if ev.kind == PointerEventKind.down
+                        && ev.button == PointerEventButton.left
+                        && root.active-control-tool == "cursor"
+                        && root.cursor-subtool == "hand" {
+                        root.start-pan(root-x, root-y, "element");
+                    }
+
+                    if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.middle {
+                        root.start-pan(root-x, root-y, "element");
+                        context-menu.visible-menu = false;
+                    }
+
+                    if ev.kind == PointerEventKind.move {
+                        if root.is-primary-held && root.is-transforming {
+                            root.suppress-next-click-selection = true;
+                        }
+                        root.update-pan(root-x, root-y, "element");
+                        root.update-active-transform(canvas-x, canvas-y);
+                    }
+
+                    if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.middle {
+                        root.stop-pan();
+                    }
+
+                    if ev.kind == PointerEventKind.up
+                        && ev.button == PointerEventButton.left
+                        && root.active-control-tool == "cursor"
+                        && root.cursor-subtool == "hand" {
+                        root.stop-pan();
+                    }
+
+                    if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right {
+                        if !is-selected {
+                            root.selected-comment-id = "";
+                            root.comment-editor-active = false;
+                            root.element-select-requested(element.element-id, false, false);
+                        }
+                        root.open-selected-context-menu(root-x, root-y, canvas-x, canvas-y);
+                    }
+
+                    if ev.kind == PointerEventKind.down
+                        && ev.button == PointerEventButton.left
+                        && ev.modifiers.control
+                        && root.active-control-tool == "cursor"
+                        && root.cursor-subtool == "cursor" {
+                        root.suppress-next-click-selection = true;
+                        root.selected-comment-id = "";
+                        root.comment-editor-active = false;
+                        root.element-select-requested(element.element-id, true, true);
+                    }
+
+                    if ev.kind == PointerEventKind.down
+                        && ev.button == PointerEventButton.left
+                        && !ev.modifiers.control
+                        && root.active-control-tool == "cursor"
+                        && root.cursor-subtool == "cursor" {
+                        let local-x = (self.mouse-x / 1px) / root.current-zoom;
+                        let local-y = (self.mouse-y / 1px) / root.current-zoom;
+                        let element-w = element-rect.display-canvas-w;
+                        let element-h = element-rect.display-canvas-h;
+                        let near-edge = root.is-near-rotate-edge(local-x, local-y, element-w, element-h);
+
+                        if is-selected {
+                            if element.element-type != "input" && element.element-type != "textarea" {
+                                root.finish-active-text-edit(true);
+                            }
+                            root.selected-comment-id = "";
+                            root.comment-editor-active = false;
+                            root.begin-transform(
+                                element.element-id,
+                                near-edge ? "rotate" : "move",
+                                element.bounds.position.x / 1px,
+                                element.bounds.position.y / 1px,
+                                element.bounds.size.width / 1px,
+                                element.bounds.size.height / 1px,
+                                element.rotation,
+                                canvas-x,
+                                canvas-y,
+                                false
+                            );
+                        }
+                    }
+
+                    if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left && root.is-primary-held {
+                        root.finish-transform(true);
+                    }
+
+                    if ev.kind == PointerEventKind.cancel {
+                        root.finish-transform(false);
+                        root.stop-pan();
+                    }
+                }
+            }
+
+            if element.element-type == "text": Rectangle {
+                background: transparent;
+
+                if root.editing-text-element-id == element.element-id && root.freeform-text-edit-active: freeform-text-editor := TextInput {
+                    text <=> root.editing-freeform-text;
+                    color: element.text-color;
+                    font-size: element.font-size * root.current-zoom * 1px;
+                    font-family: element.font-family;
+                    width: parent.width - 8px;
+                    height: parent.height - 8px;
+                    x: 4px;
+                    y: 4px;
+                    init => {
+                        self.focus();
+                        self.select-all();
+                    }
+                    edited => {
+                        root.freeform-text-dirty = true;
+                    }
+                    key-pressed(event) => {
+                        if (
+                            (event.text == "\n" || event.text == "enter")
+                            && event.modifiers.shift
+                        ) {
+                            root.finish-active-text-edit(true);
+                            return accept;
+                        }
+                        reject
+                    }
+                }
+
+                if root.editing-text-element-id != element.element-id: Text {
+                    text: element.text-content;
+                    color: element.text-color;
+                    font-size: element.font-size * root.current-zoom * 1px;
+                    font-family: element.font-family;
+                    x: 4px;
+                    y: 4px;
+                    width: parent.width - 8px;
+                    height: parent.height - 8px;
+                    wrap: is-nowrap-text ? no-wrap : word-wrap;
+                }
+            }
+
+            if element.element-type == "label": Rectangle {
+                background: transparent;
+
+                if root.editing-text-element-id == element.element-id && root.freeform-text-edit-active: label-text-editor := TextInput {
+                    text <=> root.editing-freeform-text;
+                    color: element.text-color;
+                    font-size: element.font-size * root.current-zoom * 1px;
+                    font-family: element.font-family;
+                    x: 4px;
+                    y: 4px;
+                    width: parent.width - 8px;
+                    height: parent.height - 8px;
+                    init => {
+                        self.focus();
+                        self.select-all();
+                    }
+                    accepted => { root.finish-active-text-edit(true); }
+                    edited => {
+                        root.freeform-text-dirty = true;
+                    }
+                }
+
+                if root.editing-text-element-id != element.element-id: Text {
+                    text: element.text-content;
+                    color: element.text-color;
+                    font-size: element.font-size * root.current-zoom * 1px;
+                    font-family: element.font-family;
+                    x: 4px;
+                    y: (parent.height - self.height) / 2;
+                    width: parent.width - 8px;
+                    overflow: elide;
+                }
+            }
+
+            if element.element-type == "button": Text {
+                text: element.text-content;
+                color: element.text-color;
+                font-size: element.font-size * root.current-zoom * 1px;
+                font-family: element.font-family;
+                wrap: is-nowrap-text ? no-wrap : word-wrap;
+                horizontal-alignment: TextHorizontalAlignment.center;
+                vertical-alignment: TextVerticalAlignment.center;
+            }
+
+            if (element.element-type == "input" || element.element-type == "textarea") && root.editing-text-element-id == element.element-id: TextInput {
+                property <bool> is-multiline: element.element-type == "textarea";
+                text: element.text-content;
+                color: element.text-color;
+                font-size: element.font-size * root.current-zoom * 1px;
+                font-family: element.font-family;
+                width: parent.width - 12px;
+                x: 6px;
+                y: is-multiline ? 6px : 5px;
+                height: is-multiline ? parent.height - 12px : parent.height - 10px;
+                edited => {
+                    root.element-text-edited(element.element-id, self.text);
+                }
+                accepted => {
+                    if !is-multiline {
+                        root.finish-active-text-edit(false);
+                    }
+                }
+            }
+
+            if element.element-type == "input" && root.editing-text-element-id != element.element-id: Text {
+                text: element.text-content == "" ? (element.placeholder == "" ? I18n.t("Input") : element.placeholder) : element.text-content;
+                color: element.text-content == "" ? Themes.current.secondary-text : element.text-color;
+                font-size: element.font-size * root.current-zoom * 1px;
+                font-family: element.font-family;
+                x: 8px;
+                y: (parent.height - self.height) / 2;
+                overflow: elide;
+            }
+
+            if element.element-type == "textarea" && root.editing-text-element-id != element.element-id: Text {
+                text: element.text-content == "" ? (element.placeholder == "" ? I18n.t("Textarea") : element.placeholder) : element.text-content;
+                color: element.text-content == "" ? Themes.current.secondary-text : element.text-color;
+                font-size: element.font-size * root.current-zoom * 1px;
+                font-family: element.font-family;
+                x: 8px;
+                y: 8px;
+                width: parent.width - 12px;
+                height: parent.height - 12px;
+                wrap: is-nowrap-text ? no-wrap : word-wrap;
+            }
+
+            if element.element-type == "checkbox": Rectangle {
+                background: transparent;
+
+                property <bool> checkbox-box-right: element.checkbox-box-side == "right";
+                property <bool> checkbox-space-between: element.checkbox-space-between;
+                property <length> checkbox-padding: 6px * root.current-zoom;
+                property <length> checkbox-gap: 6px * root.current-zoom;
+                property <length> checkbox-box-size: Math.max(
+                    12px * root.current-zoom,
+                    Math.min(
+                        18px * root.current-zoom,
+                        parent.height - 8px * root.current-zoom
+                    )
+                );
+                property <length> checkbox-box-x: checkbox-box-right
+                    ? parent.width - checkbox-padding - checkbox-box-size
+                    : checkbox-padding;
+                property <length> checkbox-label-x: checkbox-box-right
+                    ? checkbox-padding
+                    : checkbox-box-x + checkbox-box-size + checkbox-gap;
+                property <length> checkbox-label-width: checkbox-box-right
+                    ? Math.max(0px, checkbox-box-x - checkbox-gap - checkbox-padding)
+                    : Math.max(0px, parent.width - checkbox-label-x - checkbox-padding);
+
+                Rectangle {
+                    x: parent.checkbox-box-x;
+                    y: (parent.height - parent.checkbox-box-size) / 2;
+                    width: parent.checkbox-box-size;
+                    height: parent.checkbox-box-size;
+                    border-width: Math.max(0px, element.checkbox-box-border-width * root.current-zoom * 1px);
+                    border-color: element.checkbox-box-border-color;
+                    border-radius: 3px;
+                    background: element.checkbox-box-color;
+
+                    if element.checked: Path {
+                        x: 2px * root.current-zoom;
+                        y: 3px * root.current-zoom;
+                        width: parent.width - 4px * root.current-zoom;
+                        height: parent.height - 7px * root.current-zoom;
+                        stroke: element.checkbox-check-color;
+                        stroke-width: 1.8px;
+                        fill: transparent;
+                        commands: "M 0 4 L 4 8 L 12 0";
+                    }
+                }
+
+                Text {
+                    text: element.text-content == "" ? I18n.t("Checkbox") : element.text-content;
+                    color: element.text-color;
+                    font-size: element.font-size * root.current-zoom * 1px;
+                    font-family: element.font-family;
+                    x: parent.checkbox-label-x;
+                    y: (parent.height - self.height) / 2;
+                    width: parent.checkbox-label-width;
+                    horizontal-alignment: parent.checkbox-space-between
+                        ? (parent.checkbox-box-right
+                            ? TextHorizontalAlignment.left
+                            : TextHorizontalAlignment.right)
+                        : TextHorizontalAlignment.left;
+                    overflow: elide;
+                }
+            }
+
+            if element.element-type == "image": Rectangle {
+                background: transparent;
+
+                if element.image-source-path != "": Image {
+                    width: parent.width;
+                    height: parent.height;
+                    source: element.image-source;
+                    image-fit: contain;
+                }
+
+                if element.image-source-path == "": Text {
+                    text: element.text-content == "" ? "No image" : element.text-content;
+                    color: element.text-color;
+                    font-size: 11 * root.current-zoom * 1px;
+                    horizontal-alignment: TextHorizontalAlignment.center;
+                    vertical-alignment: TextVerticalAlignment.center;
+                }
+            }
+
+            if element.element-type == "div" && element.text-content != "": Path {
+                width: parent.width;
+                height: parent.height;
+                stroke: element.border-color;
+                stroke-width: Math.max(1px, element.border-width * root.current-zoom * 1px);
+                fill: transparent;
+                commands: element.text-content;
+            }
+
+            if is-selected
+                && root.active-control-tool == "cursor"
+                && root.cursor-subtool == "cursor"
+                : Rectangle {
+                background: transparent;
+
+                ResizeHandle {
+                    x: -4px;
+                    y: -4px;
+                    mode: "resize-nw";
+                    cursor-kind: root.resize-cursor-kind(self.mode, element-rect.display-rotation);
+                    pressed(mode, mx, my, from-center) => {
+                        root.begin-transform(
+                            element.element-id,
+                            mode,
+                            element.bounds.position.x / 1px,
+                            element.bounds.position.y / 1px,
+                            element.bounds.size.width / 1px,
+                            element.bounds.size.height / 1px,
+                            element.rotation,
+                            root.local-to-canvas-x(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation),
+                            root.local-to-canvas-y(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation),
+                            from-center
+                        );
+                    }
+                    moved(mx, my) => {
+                        root.update-active-transform(
+                            root.local-to-canvas-x(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation),
+                            root.local-to-canvas-y(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation)
+                        );
+                    }
+                    released(commit) => { root.finish-transform(commit); }
+                }
+
+                ResizeHandle {
+                    x: parent.width / 2 - 4px;
+                    y: -4px;
+                    mode: "resize-n";
+                    cursor-kind: root.resize-cursor-kind(self.mode, element-rect.display-rotation);
+                    pressed(mode, mx, my, from-center) => {
+                        root.begin-transform(
+                            element.element-id,
+                            mode,
+                            element.bounds.position.x / 1px,
+                            element.bounds.position.y / 1px,
+                            element.bounds.size.width / 1px,
+                            element.bounds.size.height / 1px,
+                            element.rotation,
+                            root.local-to-canvas-x(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation),
+                            root.local-to-canvas-y(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation),
+                            from-center
+                        );
+                    }
+                    moved(mx, my) => {
+                        root.update-active-transform(
+                            root.local-to-canvas-x(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation),
+                            root.local-to-canvas-y(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation)
+                        );
+                    }
+                    released(commit) => { root.finish-transform(commit); }
+                }
+
+                ResizeHandle {
+                    x: parent.width - 4px;
+                    y: -4px;
+                    mode: "resize-ne";
+                    cursor-kind: root.resize-cursor-kind(self.mode, element-rect.display-rotation);
+                    pressed(mode, mx, my, from-center) => {
+                        root.begin-transform(
+                            element.element-id,
+                            mode,
+                            element.bounds.position.x / 1px,
+                            element.bounds.position.y / 1px,
+                            element.bounds.size.width / 1px,
+                            element.bounds.size.height / 1px,
+                            element.rotation,
+                            root.local-to-canvas-x(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation),
+                            root.local-to-canvas-y(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation),
+                            from-center
+                        );
+                    }
+                    moved(mx, my) => {
+                        root.update-active-transform(
+                            root.local-to-canvas-x(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation),
+                            root.local-to-canvas-y(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation)
+                        );
+                    }
+                    released(commit) => { root.finish-transform(commit); }
+                }
+
+                ResizeHandle {
+                    x: parent.width - 4px;
+                    y: parent.height / 2 - 4px;
+                    mode: "resize-e";
+                    cursor-kind: root.resize-cursor-kind(self.mode, element-rect.display-rotation);
+                    pressed(mode, mx, my, from-center) => {
+                        root.begin-transform(
+                            element.element-id,
+                            mode,
+                            element.bounds.position.x / 1px,
+                            element.bounds.position.y / 1px,
+                            element.bounds.size.width / 1px,
+                            element.bounds.size.height / 1px,
+                            element.rotation,
+                            root.local-to-canvas-x(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation),
+                            root.local-to-canvas-y(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation),
+                            from-center
+                        );
+                    }
+                    moved(mx, my) => {
+                        root.update-active-transform(
+                            root.local-to-canvas-x(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation),
+                            root.local-to-canvas-y(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation)
+                        );
+                    }
+                    released(commit) => { root.finish-transform(commit); }
+                }
+
+                ResizeHandle {
+                    x: parent.width - 4px;
+                    y: parent.height - 4px;
+                    mode: "resize-se";
+                    cursor-kind: root.resize-cursor-kind(self.mode, element-rect.display-rotation);
+                    pressed(mode, mx, my, from-center) => {
+                        root.begin-transform(
+                            element.element-id,
+                            mode,
+                            element.bounds.position.x / 1px,
+                            element.bounds.position.y / 1px,
+                            element.bounds.size.width / 1px,
+                            element.bounds.size.height / 1px,
+                            element.rotation,
+                            root.local-to-canvas-x(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation),
+                            root.local-to-canvas-y(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation),
+                            from-center
+                        );
+                    }
+                    moved(mx, my) => {
+                        root.update-active-transform(
+                            root.local-to-canvas-x(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation),
+                            root.local-to-canvas-y(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation)
+                        );
+                    }
+                    released(commit) => { root.finish-transform(commit); }
+                }
+
+                ResizeHandle {
+                    x: parent.width / 2 - 4px;
+                    y: parent.height - 4px;
+                    mode: "resize-s";
+                    cursor-kind: root.resize-cursor-kind(self.mode, element-rect.display-rotation);
+                    pressed(mode, mx, my, from-center) => {
+                        root.begin-transform(
+                            element.element-id,
+                            mode,
+                            element.bounds.position.x / 1px,
+                            element.bounds.position.y / 1px,
+                            element.bounds.size.width / 1px,
+                            element.bounds.size.height / 1px,
+                            element.rotation,
+                            root.local-to-canvas-x(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation),
+                            root.local-to-canvas-y(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation),
+                            from-center
+                        );
+                    }
+                    moved(mx, my) => {
+                        root.update-active-transform(
+                            root.local-to-canvas-x(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation),
+                            root.local-to-canvas-y(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation)
+                        );
+                    }
+                    released(commit) => { root.finish-transform(commit); }
+                }
+
+                ResizeHandle {
+                    x: -4px;
+                    y: parent.height - 4px;
+                    mode: "resize-sw";
+                    cursor-kind: root.resize-cursor-kind(self.mode, element-rect.display-rotation);
+                    pressed(mode, mx, my, from-center) => {
+                        root.begin-transform(
+                            element.element-id,
+                            mode,
+                            element.bounds.position.x / 1px,
+                            element.bounds.position.y / 1px,
+                            element.bounds.size.width / 1px,
+                            element.bounds.size.height / 1px,
+                            element.rotation,
+                            root.local-to-canvas-x(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation),
+                            root.local-to-canvas-y(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation),
+                            from-center
+                        );
+                    }
+                    moved(mx, my) => {
+                        root.update-active-transform(
+                            root.local-to-canvas-x(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation),
+                            root.local-to-canvas-y(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation)
+                        );
+                    }
+                    released(commit) => { root.finish-transform(commit); }
+                }
+
+                ResizeHandle {
+                    x: -4px;
+                    y: parent.height / 2 - 4px;
+                    mode: "resize-w";
+                    cursor-kind: root.resize-cursor-kind(self.mode, element-rect.display-rotation);
+                    pressed(mode, mx, my, from-center) => {
+                        root.begin-transform(
+                            element.element-id,
+                            mode,
+                            element.bounds.position.x / 1px,
+                            element.bounds.position.y / 1px,
+                            element.bounds.size.width / 1px,
+                            element.bounds.size.height / 1px,
+                            element.rotation,
+                            root.local-to-canvas-x(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation),
+                            root.local-to-canvas-y(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation),
+                            from-center
+                        );
+                    }
+                    moved(mx, my) => {
+                        root.update-active-transform(
+                            root.local-to-canvas-x(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation),
+                            root.local-to-canvas-y(mx / root.current-zoom, my / root.current-zoom, element-rect.display-canvas-x, element-rect.display-canvas-y, element-rect.display-canvas-w, element-rect.display-canvas-h, element-rect.display-rotation)
+                        );
+                    }
+                    released(commit) => { root.finish-transform(commit); }
+                }
+
+            }
+        }
+
+        if root.is-marquee-selecting: Rectangle {
+            z: 60;
+            x: Math.min(root.marquee-start-canvas-x, root.marquee-current-canvas-x) * root.current-zoom * 1px;
+            y: Math.min(root.marquee-start-canvas-y, root.marquee-current-canvas-y) * root.current-zoom * 1px;
+            width: Math.abs(root.marquee-current-canvas-x - root.marquee-start-canvas-x) * root.current-zoom * 1px;
+            height: Math.abs(root.marquee-current-canvas-y - root.marquee-start-canvas-y) * root.current-zoom * 1px;
+            border-width: 1px;
+            border-color: Themes.selection-border;
+            background: Themes.selection-fill;
+            border-radius: 2px;
+        }
+
+    }
+
+    for comment[idx] in root.comments: comment-card := Rectangle {
+        visible: root.comments-visible && comment-card.is-in-viewport;
+        z: 35;
+
+        property <bool> is-selected: root.selected-comment-id == comment.comment-id;
+        property <bool> is-editing: root.editing-comment-id == comment.comment-id;
+        property <string> draft-title: comment.title;
+        property <string> draft-body: comment.body;
+        property <string> synced-title: comment.title;
+        property <string> synced-body: comment.body;
+        property <bool> body-empty: comment-card.draft-body == "";
+        property <float> source-x-world: root.active-comment-id == comment.comment-id ? root.comment-live-x : comment.position.x / 1px;
+        property <float> source-y-world: root.active-comment-id == comment.comment-id ? root.comment-live-y : comment.position.y / 1px;
+        property <float> display-x-world: source-x-world;
+        property <float> display-width-world: root.active-comment-id == comment.comment-id ? root.comment-live-width : comment.width;
+        property <float> display-body-height-world: root.active-comment-id == comment.comment-id ? root.comment-live-body-height : comment.body-height;
+        property <float> cached-body-height-world: comment.body-height;
+        property <float> last-body-measure-width-world: 0;
+        property <string> last-body-measure-text: "";
+        property <length> scale-padding: 10px * root.current-zoom;
+        property <length> scale-gap: 8px * root.current-zoom;
+        property <length> text-padding: 8px * root.current-zoom;
+        property <length> viewport-overscan: 240px;
+        property <length> content-width: comment-card.display-width-world * root.current-zoom * 1px;
+        property <length> title-height: Math.max(
+            30px * root.current-zoom,
+            comment.title-font-size * root.current-zoom * 1px + 12px * root.current-zoom
+        );
+        property <length> body-width: content-width - scale-padding * 2;
+        property <length> body-base-height: comment-card.display-body-height-world * root.current-zoom * 1px;
+        property <length> measure-text-width: Math.max(1px, body-width - text-padding * 2);
+        property <length> image-display-height: comment.has-image
+            && comment.image-width > 0
+            && comment.image-height > 0
+            ? Math.min(
+                220px * root.current-zoom,
+                (body-width / 1px) * comment.image-height / Math.max(1, comment.image-width) * 1px
+            )
+            : 0px;
+        property <float> image-extra-height-world: comment.has-image
+            ? ((scale-gap + image-display-height) / root.current-zoom / 1px)
+            : 0;
+        property <length> body-height: comment-card.cached-body-height-world * root.current-zoom * 1px;
+        property <float> world-total-height:
+            (
+                scale-padding
+                + title-height
+                + scale-gap
+                + body-height
+                + (comment.has-image ? scale-gap + image-display-height : 0px)
+                + scale-padding
+            ) / root.current-zoom / 1px;
+        property <float> display-y-world: root.comment-display-y(
+            comment-card.source-x-world,
+            comment-card.source-y-world,
+            comment-card.display-width-world,
+            comment-card.world-total-height,
+            comment-card.image-extra-height-world
+        );
+        property <length> screen-x: root.canvas-offset-x + comment-card.display-x-world * root.current-zoom * 1px;
+        property <length> screen-y: root.canvas-offset-y + comment-card.display-y-world * root.current-zoom * 1px;
+        property <bool> is-in-viewport:
+            comment-card.screen-x + comment-card.content-width >= 0px - comment-card.viewport-overscan
+            && comment-card.screen-x <= root.width + comment-card.viewport-overscan
+            && comment-card.screen-y + comment-card.height >= 0px - comment-card.viewport-overscan
+            && comment-card.screen-y <= root.height + comment-card.viewport-overscan;
+        property <bool> should-measure-body:
+            (comment-card.is-editing || comment-card.is-body-in-viewport)
+            && (
+                comment-card.last-body-measure-text != comment-card.draft-body
+                || Math.abs(comment-card.last-body-measure-width-world - comment-card.display-width-world) > 0.01
+            );
+        property <length> measured-body-height: Math.max(
+            body-base-height,
+            body-measure.preferred-height + text-padding * 2
+        );
+        property <float> measured-body-height-world: comment-card.measured-body-height / root.current-zoom / 1px;
+        property <float> world-body-height: comment-card.body-height / root.current-zoom / 1px;
+        property <length> body-screen-y: comment-card.screen-y + scale-padding + title-height + scale-gap;
+        property <bool> is-body-in-viewport:
+            comment-card.body-screen-y + comment-card.body-height >= 0px - comment-card.viewport-overscan
+            && comment-card.body-screen-y <= root.height + comment-card.viewport-overscan;
+        property <bool> should-render-body-content: root.comments-visible && comment-card.is-body-in-viewport;
+        property <length> image-screen-y:
+            comment-card.body-screen-y + comment-card.body-height + scale-gap;
+        property <bool> should-render-image:
+            comment.has-image
+            && root.comments-visible
+            && comment-card.image-screen-y + comment-card.image-display-height >= 0px - comment-card.viewport-overscan
+            && comment-card.image-screen-y <= root.height + comment-card.viewport-overscan;
+        property <bool> editor-focused: title-editor.has-focus || body-editor.has-focus;
+
+        changed synced-title => {
+            if !self.is-editing {
+                self.draft-title = self.synced-title;
+            }
+        }
+        changed synced-body => {
+            if !self.is-editing {
+                self.draft-body = self.synced-body;
+            }
+        }
+        changed measured-body-height-world => {
+            if self.should-measure-body {
+                let next-height = Math.max(
+                    root.comment-min-body-height,
+                    Math.min(root.comment-max-body-height, self.measured-body-height-world)
+                );
+                if Math.abs(self.cached-body-height-world - next-height) > 0.01 {
+                    self.cached-body-height-world = next-height;
+                }
+                self.last-body-measure-width-world = self.display-width-world;
+                self.last-body-measure-text = self.draft-body;
+            }
+        }
+        changed is-editing => {
+            if !self.is-editing {
+                root.comment-editor-active = false;
+                if self.draft-title != self.synced-title || self.draft-body != self.synced-body {
+                    root.update-comment-content-requested(
+                        comment.comment-id,
+                        self.draft-title,
+                        self.draft-body
+                    );
+                }
+                if Math.abs(self.cached-body-height-world - comment.body-height) > 0.01 {
+                    root.update-comment-size-requested(
+                        comment.comment-id,
+                        self.display-width-world,
+                        self.cached-body-height-world
+                    );
+                }
+            }
+        }
+        changed editor-focused => {
+            if self.is-editing {
+                root.comment-editor-active = self.editor-focused;
+            }
+        }
+
+        x: comment-card.screen-x;
+        y: comment-card.screen-y;
+        width: content-width;
+        height: scale-padding + title-height + scale-gap + body-height
+            + (comment.has-image ? scale-gap + image-display-height : 0px)
+            + scale-padding;
+        border-radius: 8px * root.current-zoom;
+        border-width: is-selected ? 2px : 1px;
+        border-color: is-selected ? Themes.current.active-color : Themes.current.border-color;
+        background: Themes.current.secondary-bg;
+        drop-shadow-color: Themes.shadow-color;
+        drop-shadow-blur: Themes.shadow-size;
+
+        card-touch := TouchArea {
+            width: parent.width;
+            height: parent.height;
+            mouse-cursor: MouseCursor.pointer;
+
+            scroll-event(event) => {
+                if event.modifiers.control {
+                    root.zoom-at-cursor(comment-card.x + self.mouse-x, comment-card.y + self.mouse-y, event.delta-y);
+                    return accept;
+                }
+                reject
+            }
+
+            pointer-event(ev) => {
+                let root-x = comment-card.x + self.mouse-x;
+                let root-y = comment-card.y + self.mouse-y;
+                if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left && !comment-card.is-editing {
+                    root.finish-active-text-edit(true);
+                    root.clear-comment-drag-arm();
+                    root.active-comment-id = "";
+                    root.active-comment-mode = "none";
+                    root.active-comment-zone = "";
+                    root.element-select-requested("", false, true);
+                    root.selected-comment-id = comment.comment-id;
+                }
+                if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left {
+                    if !comment-card.is-editing {
+                        root.selected-comment-id = comment.comment-id;
+                        root.editing-comment-id = comment.comment-id;
+                        body-editor.focus();
+                    }
+                }
+                if ev.kind == PointerEventKind.cancel {
+                    root.clear-comment-drag-arm();
+                }
+                if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right {
+                    root.finish-active-text-edit(true);
+                    root.active-comment-id = "";
+                    root.active-comment-mode = "none";
+                    root.active-comment-zone = "";
+                    root.element-select-requested("", false, true);
+                    root.selected-comment-id = comment.comment-id;
+                    root.clear-comment-drag-arm();
+                    root.close-comment-editor();
+                    root.open-comment-context-menu(
+                        comment.comment-id,
+                        comment-card.x + self.mouse-x,
+                        comment-card.y + self.mouse-y,
+                        ((comment-card.x + self.mouse-x) - root.canvas-offset-x) / 1px / root.current-zoom,
+                        ((comment-card.y + self.mouse-y) - root.canvas-offset-y) / 1px / root.current-zoom,
+                        comment.has-image,
+                        comment.title-font-size,
+                        comment.body-font-size
+                    );
+                }
+            }
+        }
+
+        Rectangle {
+            x: scale-padding;
+            y: scale-padding;
+            width: parent.width - scale-padding * 2;
+            height: comment-card.title-height;
+            border-radius: 6px * root.current-zoom;
+            background: is-selected ? Themes.current.hover-color : Themes.current.primary-bg;
+
+            if !comment-card.is-editing: Text {
+                x: 8px * root.current-zoom;
+                y: (parent.height - self.height) / 2;
+                width: parent.width - 16px * root.current-zoom;
+                text: comment.title == "" ? I18n.t("Comment") : comment.title;
+                color: Themes.current.primary-text;
+                font-size: comment.title-font-size * root.current-zoom * 1px;
+                font-weight: 700;
+                overflow: elide;
+            }
+
+            title-editor := TextInput {
+                x: 8px * root.current-zoom;
+                y: (parent.height - self.height) / 2;
+                width: parent.width - 16px * root.current-zoom;
+                height: parent.height;
+                visible: comment-card.is-editing;
+                enabled: comment-card.is-editing;
+                single-line: true;
+                text <=> comment-card.draft-title;
+                color: Themes.current.primary-text;
+                font-size: comment.title-font-size * root.current-zoom * 1px;
+                font-weight: 700;
+                selection-background-color: Themes.current.active-color;
+                selection-foreground-color: Themes.on-accent-text;
+                accepted => { root.close-comment-editor(); }
+                key-pressed(event) => {
+                    if event.modifiers.control && !event.modifiers.shift && !event.modifiers.alt {
+                        let key = root.normalize-comment-shortcut-key(event.text);
+                        if key == "a" {
+                            self.select-all();
+                            return accept;
+                        }
+                        if key == "c" {
+                            self.copy();
+                            return accept;
+                        }
+                        if key == "x" {
+                            self.cut();
+                            return accept;
+                        }
+                        if key == "v" {
+                            self.paste();
+                            return accept;
+                        }
+                    }
+                    reject
+                }
+            }
+        }
+
+        Rectangle {
+            x: scale-padding;
+            y: scale-padding + comment-card.title-height + scale-gap;
+            width: body-width;
+            height: comment-card.body-height;
+            border-radius: 6px * root.current-zoom;
+            background: Themes.current.primary-bg;
+            border-width: 1px;
+            border-color: comment-card.is-selected ? Themes.current.active-color : Themes.current.border-color;
+            clip: true;
+
+            body-preview := Text {
+                x: text-padding;
+                y: text-padding;
+                width: comment-card.measure-text-width;
+                height: parent.height - text-padding * 2;
+                visible: comment-card.should-render-body-content && !comment-card.is-editing;
+                text: comment-card.should-render-body-content
+                    ? (comment-card.body-empty ? " " : comment-card.draft-body)
+                    : "";
+                color: Themes.current.secondary-text;
+                font-size: comment.body-font-size * root.current-zoom * 1px;
+                font-family: Themes.font-family-regular;
+                wrap: word-wrap;
+            }
+
+            body-measure := Text {
+                x: -10000px;
+                y: -10000px;
+                width: comment-card.measure-text-width;
+                visible: comment-card.should-measure-body;
+                text: comment-card.should-measure-body
+                    ? (comment-card.body-empty ? " " : comment-card.draft-body)
+                    : "";
+                color: transparent;
+                font-size: comment.body-font-size * root.current-zoom * 1px;
+                font-family: Themes.font-family-regular;
+                wrap: word-wrap;
+            }
+
+            body-editor := TextInput {
+                x: text-padding;
+                y: text-padding;
+                width: comment-card.measure-text-width;
+                height: parent.height - text-padding * 2;
+                visible: comment-card.is-editing;
+                enabled: comment-card.is-editing;
+                single-line: false;
+                wrap: word-wrap;
+                text <=> comment-card.draft-body;
+                color: Themes.current.primary-text;
+                font-size: comment.body-font-size * root.current-zoom * 1px;
+                font-family: Themes.font-family-regular;
+                selection-background-color: Themes.current.active-color;
+                selection-foreground-color: Themes.on-accent-text;
+                key-pressed(event) => {
+                    if event.modifiers.control && !event.modifiers.shift && !event.modifiers.alt {
+                        let key = root.normalize-comment-shortcut-key(event.text);
+                        if key == "a" {
+                            self.select-all();
+                            return accept;
+                        }
+                        if key == "c" {
+                            self.copy();
+                            return accept;
+                        }
+                        if key == "x" {
+                            self.cut();
+                            return accept;
+                        }
+                        if key == "v" {
+                            self.paste();
+                            return accept;
+                        }
+                    }
+                    reject
+                }
+            }
+        }
+
+        if comment.has-image && comment-card.should-render-image: Rectangle {
+            x: scale-padding;
+            y: scale-padding + comment-card.title-height + scale-gap + comment-card.body-height + scale-gap;
+            width: body-width;
+            height: image-display-height;
+            border-radius: 6px * root.current-zoom;
+            background: Themes.current.primary-bg;
+            clip: true;
+
+            Image {
+                width: parent.width;
+                height: parent.height;
+                source: comment.image;
+                image-fit: contain;
+            }
+
+            TouchArea {
+                width: parent.width;
+                height: parent.height;
+                mouse-cursor: MouseCursor.pointer;
+
+                scroll-event(event) => {
+                    if event.modifiers.control {
+                        root.zoom-at-cursor(comment-card.x + parent.x + self.mouse-x, comment-card.y + parent.y + self.mouse-y, event.delta-y);
+                        return accept;
+                    }
+                    reject
+                }
+
+                pointer-event(ev) => {
+                    let root-x = comment-card.x + parent.x + self.mouse-x;
+                    let root-y = comment-card.y + parent.y + self.mouse-y;
+                    if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left && !comment-card.is-editing {
+                        root.finish-active-text-edit(true);
+                        root.clear-comment-drag-arm();
+                        root.active-comment-id = "";
+                        root.active-comment-mode = "none";
+                        root.active-comment-zone = "";
+                        root.element-select-requested("", false, true);
+                        root.selected-comment-id = comment.comment-id;
+                    }
+                    if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left {
+                        if !comment-card.is-editing {
+                            root.selected-comment-id = comment.comment-id;
+                            root.editing-comment-id = comment.comment-id;
+                            body-editor.focus();
+                        }
+                    }
+                    if ev.kind == PointerEventKind.cancel {
+                        root.clear-comment-drag-arm();
+                    }
+                    if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right {
+                        root.finish-active-text-edit(true);
+                        root.active-comment-id = "";
+                        root.active-comment-mode = "none";
+                        root.active-comment-zone = "";
+                        root.element-select-requested("", false, true);
+                        root.selected-comment-id = comment.comment-id;
+                        root.clear-comment-drag-arm();
+                        root.close-comment-editor();
+                        root.open-comment-context-menu(
+                            comment.comment-id,
+                            comment-card.x + parent.x + self.mouse-x,
+                            comment-card.y + parent.y + self.mouse-y,
+                            ((comment-card.x + parent.x + self.mouse-x) - root.canvas-offset-x) / 1px / root.current-zoom,
+                            ((comment-card.y + parent.y + self.mouse-y) - root.canvas-offset-y) / 1px / root.current-zoom,
+                            comment.has-image,
+                            comment.title-font-size,
+                            comment.body-font-size
+                        );
+                    }
+                }
+            }
+        }
+
+        left-width-resize := Rectangle {
+            visible: !comment-card.is-editing;
+            z: 6;
+            x: 0px;
+            y: 0px;
+            width: 5px;
+            height: parent.height;
+            background: #0000;
+
+            TouchArea {
+                width: parent.width;
+                height: parent.height;
+                mouse-cursor: MouseCursor.col-resize;
+
+                pointer-event(ev) => {
+                    let root-x = comment-card.x + left-width-resize.x + self.mouse-x;
+                    let root-y = comment-card.y + left-width-resize.y + self.mouse-y;
+                    if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                        root.begin-comment-interaction(
+                            comment.comment-id,
+                            "resize-w",
+                            root.comment-zone(
+                                comment-card.source-x-world,
+                                comment-card.source-y-world,
+                                comment-card.display-width-world,
+                                comment-card.world-total-height
+                            ),
+                            root-x,
+                            root-y,
+                            comment-card.source-x-world,
+                            comment-card.source-y-world,
+                            comment-card.display-width-world,
+                            comment-card.world-body-height,
+                            comment-card.world-total-height
+                        );
+                    }
+                    if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right {
+                        root.finish-active-text-edit(true);
+                        root.active-comment-id = "";
+                        root.active-comment-mode = "none";
+                        root.active-comment-zone = "";
+                        root.element-select-requested("", false, true);
+                        root.selected-comment-id = comment.comment-id;
+                        root.clear-comment-drag-arm();
+                        root.close-comment-editor();
+                        root.open-comment-context-menu(
+                            comment.comment-id,
+                            root-x,
+                            root-y,
+                            (root-x - root.canvas-offset-x) / 1px / root.current-zoom,
+                            (root-y - root.canvas-offset-y) / 1px / root.current-zoom,
+                            comment.has-image,
+                            comment.title-font-size,
+                            comment.body-font-size
+                        );
+                    }
+                }
+            }
+        }
+
+        right-width-resize := Rectangle {
+            visible: !comment-card.is-editing;
+            z: 6;
+            x: parent.width - self.width;
+            y: 0px;
+            width: 5px;
+            height: parent.height;
+            background: #0000;
+
+            TouchArea {
+                width: parent.width;
+                height: parent.height;
+                mouse-cursor: MouseCursor.col-resize;
+
+                pointer-event(ev) => {
+                    let root-x = comment-card.x + right-width-resize.x + self.mouse-x;
+                    let root-y = comment-card.y + right-width-resize.y + self.mouse-y;
+                    if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                        root.begin-comment-interaction(
+                            comment.comment-id,
+                            "resize-e",
+                            root.comment-zone(
+                                comment-card.source-x-world,
+                                comment-card.source-y-world,
+                                comment-card.display-width-world,
+                                comment-card.world-total-height
+                            ),
+                            root-x,
+                            root-y,
+                            comment-card.source-x-world,
+                            comment-card.source-y-world,
+                            comment-card.display-width-world,
+                            comment-card.world-body-height,
+                            comment-card.world-total-height
+                        );
+                    }
+                    if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right {
+                        root.finish-active-text-edit(true);
+                        root.active-comment-id = "";
+                        root.active-comment-mode = "none";
+                        root.active-comment-zone = "";
+                        root.element-select-requested("", false, true);
+                        root.selected-comment-id = comment.comment-id;
+                        root.clear-comment-drag-arm();
+                        root.close-comment-editor();
+                        root.open-comment-context-menu(
+                            comment.comment-id,
+                            root-x,
+                            root-y,
+                            (root-x - root.canvas-offset-x) / 1px / root.current-zoom,
+                            (root-y - root.canvas-offset-y) / 1px / root.current-zoom,
+                            comment.has-image,
+                            comment.title-font-size,
+                            comment.body-font-size
+                        );
+                    }
+                }
+            }
+        }
+
+    }
+
+    if root.active-comment-mode != "none": TouchArea {
+        z: 25;
+        width: parent.width;
+        height: parent.height;
+        mouse-cursor: root.active-comment-mode == "move" ? MouseCursor.move : MouseCursor.col-resize;
+
+        pointer-event(ev) => {
+            let root-x = self.mouse-x;
+            let root-y = self.mouse-y;
+
+            if ev.kind == PointerEventKind.move {
+                if root.active-comment-mode == "move" {
+                    root.update-active-comment-move(
+                        root-x,
+                        root-y,
+                        root.comment-live-width,
+                        root.comment-live-total-height
+                    );
+                } else {
+                    root.update-active-comment-resize(
+                        root-x,
+                        root-y,
+                        root.comment-live-total-height,
+                        root.comment-live-body-height
+                    );
+                }
+            }
+
+            if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left {
+                root.finish-active-comment-interaction(true);
+            }
+
+            if ev.kind == PointerEventKind.cancel {
+                root.finish-active-comment-interaction(false);
+            }
+        }
+    }
+
+    if root.active-control-tool == "cursor" && root.cursor-subtool == "hand": Path {
+        z: 4000;
+        width: 20px;
+        height: 20px;
+        x: root.last-pointer-root-x - 8px;
+        y: root.last-pointer-root-y - 5px;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: root.hand-cursor-path;
+        stroke: Themes.current.primary-text;
+        stroke-width: 1.5px;
+        fill: transparent;
+        stroke-line-cap: round;
+        stroke-line-join: round;
+    }
+
+    if viewport.y > 0px: Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: viewport.y;
+        background: transparent;
+        z: 5;
+
+        TouchArea {
+            width: parent.width;
+            height: parent.height;
+            scroll-event(event) => {
+                if event.modifiers.control {
+                    root.zoom-at-cursor(parent.x + self.mouse-x, parent.y + self.mouse-y, event.delta-y);
+                    return accept;
+                }
+                reject
+            }
+            pointer-event(ev) => {
+                let root-x = parent.x + self.mouse-x;
+                let root-y = parent.y + self.mouse-y;
+                root.handle-outside-canvas-pointer(
+                    ev.kind,
+                    ev.button,
+                    root-x,
+                    root-y,
+                    ev.modifiers.control,
+                    ev.modifiers.shift,
+                    ev.modifiers.alt
+                );
+            }
+        }
+    }
+
+    if viewport.x > 0px: Rectangle {
+        x: 0;
+        y: 0;
+        width: viewport.x;
+        height: root.height;
+        background: transparent;
+        z: 5;
+
+        TouchArea {
+            width: parent.width;
+            height: parent.height;
+            scroll-event(event) => {
+                if event.modifiers.control {
+                    root.zoom-at-cursor(parent.x + self.mouse-x, parent.y + self.mouse-y, event.delta-y);
+                    return accept;
+                }
+                reject
+            }
+            pointer-event(ev) => {
+                let root-x = parent.x + self.mouse-x;
+                let root-y = parent.y + self.mouse-y;
+                root.handle-outside-canvas-pointer(
+                    ev.kind,
+                    ev.button,
+                    root-x,
+                    root-y,
+                    ev.modifiers.control,
+                    ev.modifiers.shift,
+                    ev.modifiers.alt
+                );
+            }
+        }
+    }
+
+    if viewport.x + viewport.width < root.width: Rectangle {
+        x: viewport.x + viewport.width;
+        y: 0;
+        width: root.width - self.x;
+        height: root.height;
+        background: transparent;
+        z: 5;
+
+        TouchArea {
+            width: parent.width;
+            height: parent.height;
+            scroll-event(event) => {
+                if event.modifiers.control {
+                    root.zoom-at-cursor(parent.x + self.mouse-x, parent.y + self.mouse-y, event.delta-y);
+                    return accept;
+                }
+                reject
+            }
+            pointer-event(ev) => {
+                let root-x = parent.x + self.mouse-x;
+                let root-y = parent.y + self.mouse-y;
+                root.handle-outside-canvas-pointer(
+                    ev.kind,
+                    ev.button,
+                    root-x,
+                    root-y,
+                    ev.modifiers.control,
+                    ev.modifiers.shift,
+                    ev.modifiers.alt
+                );
+            }
+        }
+    }
+
+    if viewport.y + viewport.height < root.height: Rectangle {
+        x: 0;
+        y: viewport.y + viewport.height;
+        width: root.width;
+        height: root.height - self.y;
+        background: transparent;
+        z: 5;
+
+        TouchArea {
+            width: parent.width;
+            height: parent.height;
+            scroll-event(event) => {
+                if event.modifiers.control {
+                    root.zoom-at-cursor(parent.x + self.mouse-x, parent.y + self.mouse-y, event.delta-y);
+                    return accept;
+                }
+                reject
+            }
+            pointer-event(ev) => {
+                let root-x = parent.x + self.mouse-x;
+                let root-y = parent.y + self.mouse-y;
+                root.handle-outside-canvas-pointer(
+                    ev.kind,
+                    ev.button,
+                    root-x,
+                    root-y,
+                    ev.modifiers.control,
+                    ev.modifiers.shift,
+                    ev.modifiers.alt
+                );
+            }
+        }
+    }
+
+    pan-area := TouchArea {
+        z: 20;
+        enabled: is-panning
+            || drag-state == DragState.Dragging
+            || is-transforming
+            || active-mode != "none";
+        width: parent.width;
+        height: parent.height;
+        mouse-cursor: is-panning ? MouseCursor.grabbing
+            : active-mode == "rotate" ? MouseCursor.alias
+            : active-mode != "none" && active-mode != "move"
+                ? (root.resize-cursor-kind(active-mode, root.start-element-rotation) == "col"
+                    ? MouseCursor.col-resize
+                    : root.resize-cursor-kind(active-mode, root.start-element-rotation) == "row"
+                        ? MouseCursor.row-resize
+                        : root.resize-cursor-kind(active-mode, root.start-element-rotation) == "ne"
+                            ? MouseCursor.ne-resize
+                            : MouseCursor.nw-resize)
+            : active-mode != "none" ? MouseCursor.move
+            : drag-state == DragState.Dragging ? MouseCursor.copy
+            : MouseCursor.default;
+
+        scroll-event(event) => {
+            if event.modifiers.control {
+                root.zoom-at-cursor(self.mouse-x, self.mouse-y, event.delta-y);
+                return accept;
+            }
+            reject
+        }
+
+        pointer-event(ev) => {
+            root.report-pointer-button(
+                ev.kind,
+                ev.button,
+                ev.modifiers.control,
+                ev.modifiers.shift,
+                ev.modifiers.alt
+            );
+
+            let canvas-x = ((self.mouse-x - canvas-offset-x) / 1px) / current-zoom;
+            let canvas-y = ((self.mouse-y - canvas-offset-y) / 1px) / current-zoom;
+            root.remember-pointer(self.mouse-x, self.mouse-y, canvas-x, canvas-y);
+            if ev.kind == PointerEventKind.down {
+                root.cursor-tools-menu-open = false;
+                root.rectangle-tools-menu-open = false;
+            }
+
+            if drag-state == DragState.Dragging {
+                drag-preview-x = self.mouse-x + 14px;
+                drag-preview-y = self.mouse-y + 14px;
+            }
+
+            let root-x = self.mouse-x;
+            let root-y = self.mouse-y;
+            if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.middle {
+                root.start-pan(root-x, root-y, "overlay");
+                context-menu.visible-menu = false;
+            }
+            if ev.kind == PointerEventKind.move {
+                root.update-pan(root-x, root-y, "overlay");
+                root.update-active-transform(canvas-x, canvas-y);
+            }
+            if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.middle {
+                root.stop-pan();
+            }
+
+            if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left && root.is-primary-held {
+                root.finish-transform(true);
+            }
+
+            if ev.kind == PointerEventKind.cancel {
+                root.finish-transform(false);
+                if drag-state == DragState.Dragging {
+                    root.drag-cancelled();
+                }
+            }
+
+            if drag-state == DragState.Dragging && ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left {
+                context-menu.visible-menu = false;
+                if canvas-x >= 0 && canvas-y >= 0 && canvas-x <= page-width / 1px && canvas-y <= page-height / 1px {
+                    root.element-dropped(dragging-component-id, canvas-x, canvas-y, 0, 0, "");
+                } else {
+                    root.drag-cancelled();
+                }
+            }
+        }
+    }
+
+    if drag-state == DragState.Dragging: Rectangle {
+        x: canvas-offset-x;
+        y: canvas-offset-y;
+        width: page-width * current-zoom;
+        height: page-height * current-zoom;
+        border-width: 2px;
+        border-color: Themes.selection-border;
+        border-radius: 6px;
+        background: Themes.selection-fill;
+    }
+
+    if drag-state == DragState.Dragging: Rectangle {
+        x: drag-preview-x;
+        y: drag-preview-y;
+        width: drag-label.preferred-width + 26px;
+        height: 28px;
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: Themes.selection-border;
+        background: Themes.selection-panel-bg;
+
+        HorizontalBox {
+            padding-left: 10px;
+            padding-right: 10px;
+            spacing: 6px;
+
+            Rectangle {
+                width: 6px;
+                height: 6px;
+                border-radius: 3px;
+                background: Themes.selection-border;
+                y: 11px;
+            }
+
+            drag-label := Text {
+                text: dragging-component-name == "" ? dragging-component-id : dragging-component-name;
+                font-size: 11px;
+                color: Themes.selection-text;
+                vertical-alignment: TextVerticalAlignment.center;
+            }
+        }
+
+    }
+
+    context-menu := Rectangle {
+        z: 50;
+        in-out property <length> mouse-x: 0px;
+        in-out property <length> mouse-y: 0px;
+        in-out property <bool> visible-menu: false;
+        in-out property <string> menu-kind: "empty";
+        in-out property <float> drop-x: 0;
+        in-out property <float> drop-y: 0;
+        in-out property <float> raw-drop-x: 0;
+        in-out property <float> raw-drop-y: 0;
+        in-out property <string> comment-target-id: "";
+        in-out property <bool> comment-target-has-image: false;
+        in-out property <float> comment-target-title-font-size: 16;
+        in-out property <float> comment-target-body-font-size: 13;
+        property <length> empty-menu-height: 145px;
+        property <length> outside-menu-height: 145px;
+        property <length> selected-menu-height: 310px;
+        property <length> comment-menu-height: 230px;
+        property <length> comment-menu-height-with-image: 333px;
+
+        visible: visible-menu;
+        opacity: visible-menu ? 1.0 : 0.0;
+
+        x: mouse-x;
+        y: mouse-y;
+        width: 280px;
+        height: menu-kind == "selected" ? selected-menu-height
+            : menu-kind == "outside" ? outside-menu-height
+            : menu-kind == "comment"
+                ? (comment-target-has-image ? comment-menu-height-with-image : comment-menu-height)
+                : empty-menu-height;
+
+        ContextMenuClickEmptyCanvas {
+            visible: context-menu.menu-kind == "empty";
+            width: parent.width;
+            height: parent.height;
+            paste-requested => {
+                root.paste-requested(context-menu.drop-x, context-menu.drop-y);
+                context-menu.visible-menu = false;
+            }
+            toggle-ui-requested => {
+                root.set-ui-visibility-requested(!root.ui-helpers-visible);
+                context-menu.visible-menu = false;
+            }
+            toggle-comments-requested => {
+                root.set-comments-visibility-requested(!root.comments-visible);
+                context-menu.visible-menu = false;
+            }
+            dismiss-requested => { context-menu.visible-menu = false; }
+        }
+
+        ContextMenuClickSelectedObject {
+            visible: context-menu.menu-kind == "selected";
+            width: parent.width;
+            height: parent.height;
+            copy-requested => {
+                root.copy-requested();
+                context-menu.visible-menu = false;
+            }
+            paste-requested => {
+                root.paste-requested(context-menu.drop-x, context-menu.drop-y);
+                context-menu.visible-menu = false;
+            }
+            paste-replace-requested => {
+                root.paste-replace-requested(context-menu.drop-x, context-menu.drop-y);
+                context-menu.visible-menu = false;
+            }
+            group-requested => {
+                root.group-requested();
+                context-menu.visible-menu = false;
+            }
+            ungroup-requested => {
+                root.ungroup-requested();
+                context-menu.visible-menu = false;
+            }
+            flip-vertical-requested => {
+                root.flip-vertical-requested();
+                context-menu.visible-menu = false;
+            }
+            flip-horizontal-requested => {
+                root.flip-horizontal-requested();
+                context-menu.visible-menu = false;
+            }
+            go-to-blueprint-requested => {
+                root.go-to-blueprint-requested(root.selected-element-id);
+                context-menu.visible-menu = false;
+            }
+            dismiss-requested => { context-menu.visible-menu = false; }
+        }
+
+        ContextMenuClickOutsideCanvas {
+            visible: context-menu.menu-kind == "outside";
+            width: parent.width;
+            height: parent.height;
+            create-comment-requested => {
+                root.create-comment-requested(
+                    context-menu.raw-drop-x,
+                    context-menu.raw-drop-y
+                );
+                context-menu.visible-menu = false;
+            }
+            toggle-ui-requested => {
+                root.set-ui-visibility-requested(!root.ui-helpers-visible);
+                context-menu.visible-menu = false;
+            }
+            toggle-comments-requested => {
+                root.set-comments-visibility-requested(!root.comments-visible);
+                context-menu.visible-menu = false;
+            }
+            dismiss-requested => { context-menu.visible-menu = false; }
+        }
+
+        ContextMenuClickComment {
+            visible: context-menu.menu-kind == "comment";
+            width: parent.width;
+            height: parent.height;
+            has-image: context-menu.comment-target-has-image;
+            title-font-size <=> context-menu.comment-target-title-font-size;
+            body-font-size <=> context-menu.comment-target-body-font-size;
+            paste-image-requested => {
+                root.paste-comment-image-requested(context-menu.comment-target-id);
+                context-menu.visible-menu = false;
+            }
+            delete-image-requested => {
+                root.clear-comment-image-requested(context-menu.comment-target-id);
+                context-menu.visible-menu = false;
+            }
+            delete-comment-requested => {
+                root.delete-comment-requested(context-menu.comment-target-id);
+                context-menu.visible-menu = false;
+            }
+            title-font-size-requested(next) => {
+                root.update-comment-font-sizes-requested(
+                    context-menu.comment-target-id,
+                    next,
+                    context-menu.comment-target-body-font-size
+                );
+            }
+            body-font-size-requested(next) => {
+                root.update-comment-font-sizes-requested(
+                    context-menu.comment-target-id,
+                    context-menu.comment-target-title-font-size,
+                    next
+                );
+            }
+            dismiss-requested => { context-menu.visible-menu = false; }
+        }
+
+        animate opacity { duration: 100ms; }
+    }
+
+    if !root.comments-visible: Rectangle {
+        z: 245;
+        width: comments-hidden-label.preferred-width + 18px;
+        height: 24px;
+        x: parent.width - self.width - 12px;
+        y: 12px;
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: Themes.current.border-color;
+        background: Themes.current.secondary-bg;
+
+        comments-hidden-label := Text {
+            x: 9px;
+            width: parent.width - 18px;
+            height: parent.height;
+            text: I18n.t("Comments hidden");
+            color: Themes.current.secondary-text;
+            font-size: 11px;
+            vertical-alignment: TextVerticalAlignment.center;
+            horizontal-alignment: TextHorizontalAlignment.center;
+        }
+    }
+
+    if root.ui-helpers-visible: CanvasZoomControls {
+        z: 40;
+        x: 10px;
+        y: parent.height - self.height - 10px;
+        zoom-level: root.current-zoom;
+        zoom-out-requested => {
+            root.zoom-at-cursor(root.width / 2, root.height / 2, -1px);
+            root.sync-viewport-state(true);
+        }
+        zoom-in-requested => {
+            root.zoom-at-cursor(root.width / 2, root.height / 2, 1px);
+            root.sync-viewport-state(true);
+        }
+        reset-view-requested => { root.reset-view(); }
+    }
+}

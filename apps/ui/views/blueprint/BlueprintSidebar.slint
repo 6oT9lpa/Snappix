@@ -1,0 +1,150 @@
+import { HorizontalBox, VerticalBox } from "std-widgets.slint";
+import { I18n } from "../../components/I18n.slint";
+import { Themes, Separator-H } from "../../components/Themes.slint";
+import { Tooltip } from "../../components/Tooltip.slint";
+import { ProjectPageInfo } from "../../models/EditorModels.slint";
+
+export component BlueprintSidebar inherits Rectangle {
+    in property <string> project-name: "";
+    in property <[ProjectPageInfo]> project-page-items: [];
+
+    callback open-project-page(int);
+    callback open-page-blueprint(int);
+    callback open-server-blueprint();
+
+    width: 280px;
+    background: Themes.current.secondary-bg;
+
+    VerticalBox {
+        padding: 14px;
+        spacing: 10px;
+
+        Text {
+            text: root.project-name == "" ? I18n.t("Editor Blueprint") : root.project-name + " / Blueprint";
+            font-size: 15px;
+            font-weight: 700;
+            color: Themes.current.primary-text;
+            font-family: Themes.font-family-display;
+        }
+
+        Rectangle {
+            height: 36px;
+            border-radius: 6px;
+            background: server-touch.has-hover ? Themes.current.hover-color : Themes.on-accent-color;
+
+            server-touch := TouchArea {
+                mouse-cursor: MouseCursor.pointer;
+                clicked => { root.open-server-blueprint(); }
+            }
+
+            Text {
+                text: I18n.t("Open Server Blueprint");
+                color: server-touch.has-hover ? Themes.current.primary-text : Themes.on-accent-text;
+                horizontal-alignment: TextHorizontalAlignment.center;
+                vertical-alignment: TextVerticalAlignment.center;
+                font-size: 12px;
+                font-weight: 700;
+            }
+
+            Tooltip {
+                x: parent.width + 6px;
+                y: (parent.height - self.height) / 2;
+                text: "Open shared project blueprint";
+                placement: "left";
+                show: server-touch.has-hover;
+            }
+        }
+
+        Separator-H {}
+
+        Text {
+            text: I18n.t("Pages");
+            font-size: 12px;
+            color: Themes.current.secondary-text;
+            font-weight: 600;
+        }
+
+        for page in root.project-page-items: Rectangle {
+            height: 68px;
+            border-radius: 6px;
+            background: page.is-active ? Themes.current.hover-color : transparent;
+
+            VerticalBox {
+                padding: 8px;
+                spacing: 6px;
+
+                Text {
+                    text: page.page-name;
+                    font-size: 13px;
+                    color: Themes.current.primary-text;
+                    font-weight: page.is-active ? 700 : 500;
+                }
+
+                HorizontalBox {
+                    spacing: 6px;
+
+                    Rectangle {
+                        height: 24px;
+                        horizontal-stretch: 1;
+                        border-radius: 4px;
+                        background: ui-touch.has-hover ? Themes.current.hover-color : Themes.current.primary-bg;
+
+                        ui-touch := TouchArea {
+                            mouse-cursor: MouseCursor.pointer;
+                            clicked => { root.open-project-page(page.page-index); }
+                        }
+
+                        Text {
+                            text: I18n.t("Open UI");
+                            color: Themes.current.primary-text;
+                            font-size: 11px;
+                            horizontal-alignment: TextHorizontalAlignment.center;
+                            vertical-alignment: TextVerticalAlignment.center;
+                        }
+
+                        Tooltip {
+                            x: (parent.width - self.width) / 2;
+                            y: parent.height + 6px;
+                            text: "Open page UI document";
+                            placement: "top";
+                            show: ui-touch.has-hover;
+                        }
+                    }
+
+                    Rectangle {
+                        height: 24px;
+                        horizontal-stretch: 1;
+                        border-radius: 4px;
+                        background: bp-touch.has-hover ? Themes.current.hover-color : Themes.current.primary-bg;
+
+                        bp-touch := TouchArea {
+                            mouse-cursor: MouseCursor.pointer;
+                            clicked => { root.open-page-blueprint(page.page-index); }
+                        }
+
+                        Text {
+                            text: I18n.t("Open .blp");
+                            color: Themes.current.primary-text;
+                            font-size: 11px;
+                            horizontal-alignment: TextHorizontalAlignment.center;
+                            vertical-alignment: TextVerticalAlignment.center;
+                        }
+
+                        Tooltip {
+                            x: (parent.width - self.width) / 2;
+                            y: parent.height + 6px;
+                            text: "Open page blueprint";
+                            placement: "top";
+                            show: bp-touch.has-hover;
+                        }
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            vertical-stretch: 1;
+            background: transparent;
+        }
+    }
+}

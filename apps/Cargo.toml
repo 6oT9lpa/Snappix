@@ -1,0 +1,60 @@
+[package]
+name = "slint-rust"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+autobins = false
+
+[[bin]]
+name = "snappix"
+path = "src/main.rs"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+slint = { version = "1.14.1", features = ["backend-winit", "renderer-skia", "raw-window-handle-06", "unstable-winit-030"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+raw-window-handle = "0.6.2"
+winit = "0.30.12"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.8", features = ["v4", "serde"] }
+dirs = "5.0"
+zip = "2.2"
+rfd = "0.15"
+arboard = "3.6"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+# Workspace crates
+shared = { path = "../crates/shared" }
+core-ui-graphs = { path = "../crates/core-ui-graphs" }
+core-blueprint = { path = "../crates/core-blueprint" }
+project-manager = { path = "../crates/project-manager" }
+
+[build-dependencies]
+slint-build = "1.14.1"
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = ["winuser", "windef", "dwmapi"] }
+winreg = "0.52"
+
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"
+
+[dev-dependencies]
+tempfile = "3.10"
+
+[package.metadata.bundle]
+name = "Snappix"
+identifier = "com.snappix.app"
+icon = [
+    "resources/icons/icon.png",
+    "resources/icons/32x25.png",
+    "resources/icons/128x100.png",
+    "resources/icons/icon.icns",
+    "resources/icons/icon.ico",
+]
+file_associations = [
+    { ext = "spx", name = "Snappix Project", description = "Snappix Project File", role = "Editor", mime_type = "application/x-snappix-project", icon = "resources/icons/icon.png" },
+]
+

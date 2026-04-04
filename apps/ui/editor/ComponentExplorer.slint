@@ -1,0 +1,856 @@
+﻿import { HorizontalBox, VerticalBox } from "std-widgets.slint";
+import { I18n } from "../components/I18n.slint";
+import { Themes } from "../components/Themes.slint";
+import { RenameDialog } from "../dialogs/RenameDialog.slint";
+import { SelectionInfo, ProjectPageInfo, TimelineEntry } from "../models/EditorModels.slint";
+import { ContextActionMenu } from "./ContextActionMenu.slint";
+
+component OutlineArrow inherits Rectangle {
+    in property <bool> expanded: true;
+    callback toggled();
+
+    width: 14px;
+    height: 18px;
+    background: transparent;
+
+    TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.toggled(); }
+
+        Path {
+            x: 3px;
+            y: 4px;
+            stroke: Themes.current.secondary-text;
+            stroke-width: 1.4px;
+            transform-rotation: root.expanded ? 90deg : 0deg;
+            fill: transparent;
+            width: 8px;
+            height: 10px;
+            commands: "M 0 0 L 5 5 L 0 10";
+            animate transform-rotation { duration: 120ms; }
+        }
+    }
+}
+
+component MenuCheckMark inherits Rectangle {
+    in property <bool> checked: false;
+
+    width: 14px;
+    height: 14px;
+    background: transparent;
+
+    Path {
+        visible: root.checked;
+        x: 2px;
+        y: 3px;
+        width: 10px;
+        height: 8px;
+        stroke: Themes.current.primary-text;
+        stroke-width: 1.7px;
+        stroke-line-cap: round;
+        stroke-line-join: round;
+        fill: transparent;
+        commands: "M 0 4 L 3 7 L 8 0";
+    }
+}
+
+export component ComponentExplorer inherits Rectangle {
+    background: transparent;
+
+    in property <[SelectionInfo]> elements: [];
+    in property <[ProjectPageInfo]> project-pages: [
+        {
+            page-index: 1,
+            page-name: "main",
+            is-open: true,
+            is-active: true
+        },
+        {
+            page-index: 2,
+            page-name: "secondary",
+            is-open: false,
+            is-active: false
+        }
+    ];
+    in property <[TimelineEntry]> timeline-events: [
+        {
+            index: 1,
+            title: "changes",
+            timestamp: "12.02.1000 12:11",
+            details: "insert",
+            action-kind: "Create"
+        },
+        {
+            index: 2,
+            title: "changes",
+            timestamp: "12.02.1000 12:11",
+            details: "delete",
+            action-kind: "Delete"
+        }
+    ];
+    in property <int> active-timeline-index: -1;
+    in property <int> active-page-index: 0;
+    in property <string> selected-element-id: "";
+    in property <string> project-name: "";
+
+    callback element-select-requested(string, bool, bool);
+    callback toggle-outline-node(string);
+    callback reparent-element(string, string);
+    callback rename-element(string, string);
+    callback cut-requested();
+    callback copy-requested();
+    callback project-page-selected(int);
+    callback project-page-renamed(int, string);
+    callback delete-element(string);
+    callback delete-project-page(int);
+    callback timeline-entry-selected(int);
+
+    in-out property <int> active-button: 3;
+    in-out property <bool> show-dropdown-explorer: false;
+    property <bool> visible-timeline: true;
+    property <bool> visible-outline: true;
+
+    property <bool> rename-dialog-open: false;
+    property <string> rename-target-kind: "";
+    property <int> rename-target-page-index: -1;
+    property <string> rename-target-element-id: "";
+    property <string> rename-initial-name: "";
+    property <string> dragging-outline-id: "";
+    property <string> suppress-click-element-id: "";
+    property <string> context-menu-kind: "";
+    property <string> context-menu-element-id: "";
+    property <int> context-menu-page-index: -1;
+    property <string> context-menu-page-name: "";
+    property <string> context-menu-element-name: "";
+    property <length> context-menu-x: 0px;
+    property <length> context-menu-y: 0px;
+    property <length> context-menu-width: 208px;
+    property <length> context-menu-height: 190px;
+
+    function clamp-context-menu-x(raw-x: length) -> length {
+        let margin = 6px;
+        let max-x = root.width - root.context-menu-width - margin;
+        if max-x <= margin {
+            return margin;
+        }
+        if raw-x < margin {
+            return margin;
+        }
+        if raw-x > max-x {
+            return max-x;
+        }
+        return raw-x;
+    }
+
+    function clamp-context-menu-y(raw-y: length) -> length {
+        let margin = 6px;
+        let max-y = root.height - root.context-menu-height - margin;
+        if max-y <= margin {
+            return margin;
+        }
+        if raw-y < margin {
+            return margin;
+        }
+        if raw-y > max-y {
+            return max-y;
+        }
+        return raw-y;
+    }
+
+    function open-rename-dialog_for_page(page-index: int, page-name: string) {
+        root.rename-target-kind = "page";
+        root.rename-target-page-index = page-index;
+        root.rename-target-element-id = "";
+        root.rename-initial-name = page-name;
+        root.rename-dialog-open = true;
+    }
+
+    function open-rename-dialog_for_outline(element-id: string, element-name: string) {
+        root.rename-target-kind = "outline";
+        root.rename-target-element-id = element-id;
+        root.rename-target-page-index = -1;
+        root.rename-initial-name = element-name;
+        root.rename-dialog-open = true;
+    }
+
+    function close-rename-dialog() {
+        root.rename-dialog-open = false;
+        root.rename-target-kind = "";
+        root.rename-target-page-index = -1;
+        root.rename-target-element-id = "";
+    }
+
+    function commit-rename(new-name: string) {
+        if new-name == "" {
+            root.close-rename-dialog();
+            return;
+        }
+        let kind = root.rename-target-kind;
+        let page-index = root.rename-target-page-index;
+        let element-id = root.rename-target-element-id;
+        root.close-rename-dialog();
+        if kind == "page" && page-index >= 0 {
+            root.project-page-renamed(page-index, new-name);
+        } else if kind == "outline" && element-id != "" {
+            root.rename-element(element-id, new-name);
+        }
+    }
+
+    function set-active-button(id: int) {
+        root.active-button = id;
+    }
+
+    function close-context-menu() {
+        root.context-menu-kind = "";
+        root.context-menu-element-id = "";
+        root.context-menu-page-index = -1;
+        root.context-menu-page-name = "";
+        root.context-menu-element-name = "";
+    }
+
+    function open-context-menu_for_page(page-index: int, page-name: string, anchor-x: length, anchor-y: length) {
+        root.context-menu-kind = "page";
+        root.context-menu-page-index = page-index;
+        root.context-menu-page-name = page-name;
+        root.context-menu-element-id = "";
+        root.context-menu-element-name = "";
+        root.context-menu-x = root.clamp-context-menu-x(anchor-x);
+        root.context-menu-y = root.clamp-context-menu-y(anchor-y + 2px);
+    }
+
+    function open-context-menu_for_outline(element-id: string, element-name: string, anchor-x: length, anchor-y: length) {
+        root.context-menu-kind = "outline";
+        root.context-menu-element-id = element-id;
+        root.context-menu-element-name = element-name;
+        root.context-menu-page-index = -1;
+        root.context-menu-page-name = "";
+        root.context-menu-x = root.clamp-context-menu-x(anchor-x);
+        root.context-menu-y = root.clamp-context-menu-y(anchor-y + 2px);
+    }
+
+    main-layout := VerticalBox {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        padding-top: 10px;
+
+        header-row := HorizontalBox {
+            spacing: 0;
+            horizontal-stretch: 1;
+            padding-left: 16px;
+            height: 28px;
+
+            Text {
+                height: 24px;
+                text: I18n.t("EXPLORER");
+                font-size: 14px;
+                font-weight: 600;
+                color: Themes.current.secondary-text;
+                horizontal-stretch: 1;
+                vertical-alignment: TextVerticalAlignment.center;
+                overflow: elide;
+            }
+
+            menu-action := Rectangle {
+                height: 24px;
+                width: 30px;
+                border-radius: 4px;
+                background: btn-action.has-hover || root.show-dropdown-explorer
+                    ? Themes.current.hover-color
+                    : transparent;
+
+                btn-action := TouchArea {
+                    mouse-cursor: MouseCursor.pointer;
+                    clicked => { root.show-dropdown-explorer = !root.show-dropdown-explorer; }
+                }
+
+                Text {
+                    text: "...";
+                    font-size: 16px;
+                    font-weight: 700;
+                    height: 24px;
+                    horizontal-alignment: TextHorizontalAlignment.center;
+                    color: Themes.current.secondary-text;
+                }
+            }
+        }
+
+        VerticalBox {
+            padding: 0;
+            spacing: 2px;
+
+            TouchArea {
+                height: 30px;
+                mouse-cursor: MouseCursor.pointer;
+                clicked => { if active-button != 1 { set-active-button(1); } else { set-active-button(0); } }
+
+                HorizontalBox {
+                    padding-left: 10px;
+
+                    Path {
+                        stroke: Themes.current.secondary-text;
+                        stroke-width: 1.5px;
+                        transform-rotation: active-button == 1 ? 90deg : 0deg;
+                        fill: transparent;
+                        width: 10px;
+                        height: 12px;
+                        commands: "M 0 0 L 6 6 L 0 12";
+                        animate transform-rotation { duration: 150ms; }
+                    }
+
+                    Text {
+                        text: root.project-name != "" ? root.project-name : I18n.t("PROJECT");
+                        font-size: 12px;
+                        color: Themes.current.secondary-text;
+                        font-weight: 700;
+                    }
+                }
+            }
+
+            if active-button == 1: project-section := Rectangle {
+                background: transparent;
+
+                project-flickable := Flickable {
+                    width: parent.width;
+                    viewport-width: self.width;
+                    viewport-height: project-list.preferred-height;
+
+                    project-list := VerticalBox {
+                        padding-left: 16px;
+                        padding-right: 8px;
+                        spacing: 4px;
+
+                        if root.project-pages.length == 0: Rectangle {
+                            height: 30px;
+                            background: transparent;
+
+                            Text {
+                                text: I18n.t("No pages");
+                                font-size: 12px;
+                                color: Themes.current.disabled-text;
+                                vertical-alignment: TextVerticalAlignment.center;
+                            }
+                        }
+
+                        for page in root.project-pages: page-row := Rectangle {
+                            height: 28px;
+                            border-radius: 4px;
+                            background: root.context-menu-kind == "page"
+                                    && root.context-menu-page-index == page.page-index
+                                ? Themes.warning-color
+                                : page.is-active
+                                ? Themes.current.active-color
+                                : (page-touch.has-hover ? Themes.current.hover-color : Themes.current.secondary-bg);
+
+                            page-touch := TouchArea {
+                                mouse-cursor: MouseCursor.pointer;
+                                clicked => {
+                                    root.close-context-menu();
+                                    root.project-page-selected(page.page-index);
+                                }
+                                double-clicked => {
+                                    root.close-context-menu();
+                                    root.open-rename-dialog_for_page(page.page-index, page.page-name);
+                                }
+                                pointer-event(ev) => {
+                                    if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right {
+                                        root.open-context-menu_for_page(
+                                            page.page-index,
+                                            page.page-name,
+                                            project-section.x
+                                                + project-flickable.x
+                                                + page-row.x
+                                                + 8px
+                                                - project-flickable.viewport-x,
+                                            project-section.y
+                                                + project-flickable.y
+                                                + page-row.y
+                                                + page-row.height
+                                                - project-flickable.viewport-y
+                                        );
+                                    }
+                                }
+                            }
+
+                            HorizontalBox {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                spacing: 6px;
+
+                                Rectangle {
+                                    width: 8px;
+                                    height: 8px;
+                                    border-radius: 4px;
+                                    y: 10px;
+                                    background: page.is-open ? Themes.success-color : Themes.current.disabled-text;
+                                }
+
+                                Text {
+                                    text: page.page-name;
+                                    font-size: 12px;
+                                    color: page.is-active
+                                            || (root.context-menu-kind == "page"
+                                            && root.context-menu-page-index == page.page-index)
+                                        ? Themes.on-accent-text
+                                        : Themes.current.primary-text;
+                                    vertical-alignment: TextVerticalAlignment.center;
+                                    horizontal-stretch: 1;
+                                }
+                            }
+
+                        }
+                    }
+                }
+            }
+        }
+
+        if visible-timeline: VerticalBox {
+            padding: 0;
+            spacing: 2px;
+
+            TouchArea {
+                height: 30px;
+                mouse-cursor: MouseCursor.pointer;
+                clicked => { if active-button != 2 { set-active-button(2); } else { set-active-button(0); } }
+
+                HorizontalBox {
+                    padding-left: 10px;
+
+                    Path {
+                        stroke: Themes.current.secondary-text;
+                        stroke-width: 1.5px;
+                        transform-rotation: active-button == 2 ? 90deg : 0deg;
+                        fill: transparent;
+                        width: 10px;
+                        height: 12px;
+                        commands: "M 0 0 L 6 6 L 0 12";
+                        animate transform-rotation { duration: 150ms; }
+                    }
+
+                    Text {
+                        text: I18n.t("TIMELINE");
+                        font-size: 12px;
+                        color: Themes.current.secondary-text;
+                        font-weight: 700;
+                    }
+                }
+            }
+
+            if active-button == 2: Rectangle {
+                background: transparent;
+
+                Flickable {
+                    width: parent.width;
+                    viewport-width: self.width;
+                    viewport-height: timeline-list.preferred-height;
+
+                    timeline-list := VerticalBox {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        spacing: 6px;
+
+                        if root.timeline-events.length == 0: Rectangle {
+                            height: 30px;
+                            background: transparent;
+
+                            Text {
+                                text: I18n.t("Timeline is empty");
+                                font-size: 12px;
+                                color: Themes.current.disabled-text;
+                                vertical-alignment: TextVerticalAlignment.center;
+                            }
+                        }
+
+                        for change in root.timeline-events: Rectangle {
+                            height: 52px;
+                            border-radius: 5px;
+                            border-width: 1px;
+                            border-color: change.index == root.active-timeline-index
+                                ? Themes.selection-border
+                                : Themes.current.border-color;
+                            background: change.index == root.active-timeline-index
+                                ? Themes.selection-fill
+                                : (timeline-item-touch.has-hover ? Themes.current.hover-color : Themes.current.secondary-bg);
+
+                            timeline-item-touch := TouchArea {
+                                mouse-cursor: MouseCursor.pointer;
+                                clicked => { root.timeline-entry-selected(change.index); }
+                            }
+
+                            VerticalBox {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                padding-top: 6px;
+                                spacing: 0px;
+
+                                HorizontalBox {
+                                    spacing: 4px;
+
+                                    Text {
+                                        text: change.title;
+                                        horizontal-stretch: 1;
+                                        font-size: 11px;
+                                        color: Themes.current.primary-text;
+                                        font-weight: 600;
+                                    }
+
+                                    Text {
+                                        text: change.timestamp;
+                                        font-size: 10px;
+                                        color: Themes.current.secondary-text;
+                                        horizontal-alignment: TextHorizontalAlignment.right;
+                                    }
+                                }
+
+                                Text {
+                                    text: change.details;
+                                    font-size: 10px;
+                                    color: Themes.current.secondary-text;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if visible-outline: VerticalBox {
+            padding: 0;
+            spacing: 2px;
+
+            TouchArea {
+                height: 30px;
+                mouse-cursor: MouseCursor.pointer;
+                clicked => { if active-button != 3 { set-active-button(3); } else { set-active-button(0); } }
+
+                HorizontalBox {
+                    padding-left: 10px;
+
+                    Path {
+                        stroke: Themes.current.secondary-text;
+                        stroke-width: 1.5px;
+                        transform-rotation: active-button == 3 ? 90deg : 0deg;
+                        fill: transparent;
+                        width: 10px;
+                        height: 12px;
+                        commands: "M 0 0 L 6 6 L 0 12";
+                        animate transform-rotation { duration: 150ms; }
+                    }
+
+                    Text {
+                        text: I18n.t("OUTLINE");
+                        font-size: 12px;
+                        color: Themes.current.secondary-text;
+                        font-weight: 700;
+                    }
+                }
+            }
+
+            if active-button == 3: outline-section := Rectangle {
+                background: transparent;
+
+                outline-flickable := Flickable {
+                    width: parent.width;
+                    viewport-width: self.width;
+                    viewport-height: list.preferred-height;
+
+                    list := VerticalBox {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        spacing: 4px;
+
+                        if root.elements.length == 0: Rectangle {
+                            height: 30px;
+                            background: transparent;
+
+                            Text {
+                                text: I18n.t("Outline is empty");
+                                font-size: 12px;
+                                color: Themes.current.disabled-text;
+                                vertical-alignment: TextVerticalAlignment.center;
+                            }
+                        }
+
+                        for element in root.elements: outline-row := Rectangle {
+                            height: 28px;
+                            border-radius: 4px;
+                            background: root.context-menu-kind == "outline"
+                                    && root.context-menu-element-id == element.element-id
+                                ? Themes.warning-color
+                                : element.element-id == root.selected-element-id
+                                ? Themes.current.active-color
+                                : (item-touch.has-hover ? Themes.current.hover-color : Themes.current.secondary-bg);
+
+                            item-touch := TouchArea {
+                                mouse-cursor: MouseCursor.pointer;
+                                clicked => {
+                                    root.close-context-menu();
+                                    if root.suppress-click-element-id == element.element-id {
+                                        root.suppress-click-element-id = "";
+                                        return;
+                                    }
+                                    root.element-select-requested(element.element-id, false, false);
+                                }
+                                double-clicked => {
+                                    root.close-context-menu();
+                                    root.suppress-click-element-id = element.element-id;
+                                    root.element-select-requested(element.element-id, false, true);
+                                    root.open-rename-dialog_for_outline(
+                                        element.element-id,
+                                        element.element-name
+                                    );
+                                }
+                                pointer-event(ev) => {
+                                    if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                                        root.close-context-menu();
+                                        root.element-select-requested(element.element-id, false, false);
+                                        root.dragging-outline-id = element.element-id;
+                                    }
+                                    if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right {
+                                        root.close-context-menu();
+                                        root.element-select-requested(element.element-id, false, false);
+                                        root.open-context-menu_for_outline(
+                                            element.element-id,
+                                            element.element-name,
+                                            outline-section.x
+                                                + outline-flickable.x
+                                                + outline-row.x
+                                                + 8px
+                                                - outline-flickable.viewport-x,
+                                            outline-section.y
+                                                + outline-flickable.y
+                                                + outline-row.y
+                                                + outline-row.height
+                                                - outline-flickable.viewport-y
+                                        );
+                                    }
+                                    if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left {
+                                        if root.dragging-outline-id != "" && root.dragging-outline-id != element.element-id {
+                                            root.reparent-element(root.dragging-outline-id, element.element-id);
+                                        }
+                                        root.dragging-outline-id = "";
+                                    }
+                                    if ev.kind == PointerEventKind.cancel {
+                                        root.dragging-outline-id = "";
+                                    }
+                                }
+                            }
+
+                            HorizontalBox {
+                                padding-left: 6px;
+                                padding-right: 8px;
+                                spacing: 4px;
+
+                                Rectangle {
+                                    width: 8px + element.depth * 14px;
+                                    background: transparent;
+                                }
+
+                                if element.has-children: OutlineArrow {
+                                    y: (parent.height - self.height) / 2;
+                                    expanded: element.is-outline-expanded;
+                                    toggled => { root.toggle-outline-node(element.element-id); }
+                                }
+
+                                if !element.has-children: Rectangle {
+                                    width: 14px;
+                                    height: 18px;
+                                    y: (parent.height - self.height) / 2;
+                                    background: transparent;
+                                }
+
+                                Text {
+                                    text: element.element-name;
+                                    font-size: 12px;
+                                    color: element.element-id == root.selected-element-id
+                                            || (root.context-menu-kind == "outline"
+                                            && root.context-menu-element-id == element.element-id)
+                                        ? Themes.on-accent-text
+                                        : Themes.current.primary-text;
+                                    vertical-alignment: TextVerticalAlignment.center;
+                                    horizontal-stretch: 1;
+                                }
+
+                                Text {
+                                    text: element.element-type;
+                                    font-size: 10px;
+                                    color: element.element-id == root.selected-element-id
+                                            || (root.context-menu-kind == "outline"
+                                            && root.context-menu-element-id == element.element-id)
+                                        ? Themes.on-accent-text
+                                        : Themes.current.secondary-text;
+                                    vertical-alignment: TextVerticalAlignment.center;
+                                }
+                            }
+
+                        }
+                    }
+                }
+            }
+        }
+
+        if active-button == 0 || (active-button == 2 && !visible-timeline) || (active-button == 3 && !visible-outline): Rectangle {
+            vertical-stretch: 1;
+            background: transparent;
+        }
+    }
+
+    if root.context-menu-kind != "": ContextActionMenu {
+        width: parent.width;
+        height: parent.height;
+        menu-x: root.context-menu-x;
+        menu-y: root.context-menu-y;
+        menu-width: root.context-menu-width;
+        menu-height: root.context-menu-height;
+        dismiss-requested => { root.close-context-menu(); }
+        open-timeline-requested => {
+            root.visible-timeline = true;
+            root.set-active-button(2);
+            root.close-context-menu();
+        }
+        cut-requested => {
+            if root.context-menu-kind == "outline" && root.context-menu-element-id != "" {
+                root.element-select-requested(root.context-menu-element-id, false, false);
+            }
+            root.cut-requested();
+            root.close-context-menu();
+        }
+        copy-requested => {
+            if root.context-menu-kind == "outline" && root.context-menu-element-id != "" {
+                root.element-select-requested(root.context-menu-element-id, false, false);
+            }
+            root.copy-requested();
+            root.close-context-menu();
+        }
+        rename-requested => {
+            let menu-kind = root.context-menu-kind;
+            let page-index = root.context-menu-page-index;
+            let page-name = root.context-menu-page-name;
+            let element-id = root.context-menu-element-id;
+            let element-name = root.context-menu-element-name;
+            root.close-context-menu();
+            if menu-kind == "page" && page-index >= 0 {
+                root.open-rename-dialog_for_page(page-index, page-name);
+            } else if menu-kind == "outline" && element-id != "" {
+                root.open-rename-dialog_for_outline(element-id, element-name);
+            }
+        }
+        delete-requested => {
+            let menu-kind = root.context-menu-kind;
+            let page-index = root.context-menu-page-index;
+            let element-id = root.context-menu-element-id;
+            root.close-context-menu();
+            if menu-kind == "page" && page-index >= 0 {
+                root.delete-project-page(page-index);
+            } else if menu-kind == "outline" && element-id != "" {
+                root.delete-element(element-id);
+            }
+        }
+    }
+
+    RenameDialog {
+        z: 320;
+        width: parent.width;
+        height: parent.height;
+        show-dialog: root.rename-dialog-open;
+        dialog-title: root.rename-target-kind == "page" ? I18n.t("Rename page") : I18n.t("Rename element");
+        confirm-label: I18n.t("Rename");
+        input-text <=> root.rename-initial-name;
+        cancelled => { root.close-rename-dialog(); }
+        confirmed(new-name) => { root.commit-rename(new-name); }
+    }
+
+    if show-dropdown-explorer: Rectangle {
+        clip: false;
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        background: transparent;
+        z: 200;
+
+        blocker := TouchArea {
+            clicked => { root.show-dropdown-explorer = false; }
+        }
+
+        Rectangle {
+            x: header-row.x + menu-action.x;
+            y: header-row.y + menu-action.y + menu-action.height + 4px;
+            width: 160px;
+            height: 88px;
+            border-radius: 5px;
+            background: Themes.current.primary-bg;
+            border-width: 1px;
+            border-color: Themes.current.border-color;
+            z: 201;
+
+            VerticalBox {
+                padding: 8px;
+                spacing: 6px;
+
+                Rectangle {
+                    height: 30px;
+                    border-radius: 4px;
+                    background: timeline-touch.has-hover ? Themes.current.hover-color : transparent;
+
+                    timeline-touch := TouchArea {
+                        mouse-cursor: MouseCursor.pointer;
+                        clicked => {
+                            root.visible-timeline = !root.visible-timeline;
+                            if !root.visible-timeline && root.active-button == 2 {
+                                root.active-button = 0;
+                            }
+                        }
+                    }
+
+                    MenuCheckMark {
+                        x: 8px;
+                        y: 8px;
+                        checked: root.visible-timeline;
+                    }
+
+                    Text {
+                        text: I18n.t("Timeline");
+                        font-size: 12px;
+                        color: Themes.current.primary-text;
+                        x: 28px;
+                        height: parent.height;
+                        vertical-alignment: TextVerticalAlignment.center;
+                    }
+                }
+
+                Rectangle {
+                    height: 30px;
+                    border-radius: 4px;
+                    background: outline-touch.has-hover ? Themes.current.hover-color : transparent;
+
+                    outline-touch := TouchArea {
+                        mouse-cursor: MouseCursor.pointer;
+                        clicked => {
+                            root.visible-outline = !root.visible-outline;
+                            if !root.visible-outline && root.active-button == 3 {
+                                root.active-button = 0;
+                            }
+                        }
+                    }
+
+                    MenuCheckMark {
+                        x: 8px;
+                        y: 8px;
+                        checked: root.visible-outline;
+                    }
+
+                    Text {
+                        text: I18n.t("Outline");
+                        font-size: 12px;
+                        color: Themes.current.primary-text;
+                        x: 28px;
+                        height: parent.height;
+                        vertical-alignment: TextVerticalAlignment.center;
+                    }
+                }
+            }
+        }
+    }
+}

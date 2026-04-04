@@ -1,0 +1,1117 @@
+use slint::{Color, Image, SharedString, VecModel};
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
+use std::rc::Rc;
+use uuid::Uuid;
+
+use crate::app::project::{CanvasElementData, Project};
+use crate::config;
+use crate::editor_runtime::history::HistoryManager;
+use crate::{
+    AppWindow, CanvasBounds, CanvasCommentInfo, CanvasPosition, CanvasSize, EditorDocumentInfo,
+    ProjectPageInfo, RecentProjectData, SelectionInfo, TimelineEntry,
+};
+
+#[derive(Clone)]
+struct ResolvedTextStyle {
+    font_size: f32,
+    text_color: Color,
+    font_family: String,
+    text_wrap: String,
+}
+
+pub fn load_recent_projects(ui: &AppWindow) {
+    let storage = config::RecentProjectsStorage::load();
+    set_recent_projects(ui, &storage);
+}
+
+pub fn set_recent_projects(ui: &AppWindow, storage: &config::RecentProjectsStorage) {
+    let recent: Vec<RecentProjectData> = storage
+        .get_all()
+        .iter()
+        .map(|project| RecentProjectData {
+            name: SharedString::from(&project.name),
+            path: SharedString::from(&project.path),
+            date: SharedString::from(format_date(&project.last_opened)),
+        })
+        .collect();
+
+    ui.set_recent_projects(Rc::new(VecModel::from(recent)).into());
+}
+
+pub fn sync_editor_models(ui: &AppWindow, project: &Project) {
+    let page_names = project.page_names();
+    let page_count = page_names.len();
+    if page_count == 0 {
+        ui.set_editor_documents(Rc::new(VecModel::from(Vec::<EditorDocumentInfo>::new())).into());
+        ui.set_project_page_items(Rc::new(VecModel::from(Vec::<ProjectPageInfo>::new())).into());
+        ui.set_active_document_index(0);
+        return;
+    }
+
+    let documents: Vec<EditorDocumentInfo> = project
+        .open_documents()
+        .iter()
+        .filter_map(|document| {
+            let label = project.document_label(document)?;
+            let kind = match project.document_kind(document)? {
+                crate::app::project::EditorDocumentKind::PageUi => "page_ui",
+                crate::app::project::EditorDocumentKind::PageBlueprint => "page_blueprint",
+                crate::app::project::EditorDocumentKind::ServerBlueprint => "server_blueprint",
+            };
+
+            Some(EditorDocumentInfo {
+                document_id: SharedString::from(match document {
+                    project_manager::EditorDocumentRef::PageUi { page_id } => page_id.to_string(),
+                    project_manager::EditorDocumentRef::PageBlueprint { document_id }
+                    | project_manager::EditorDocumentRef::ServerBlueprint { document_id } => {
+                        document_id.to_string()
+                    }
+                }),
+                label: SharedString::from(label),
+                kind: SharedString::from(kind),
+                linked_page_index: project
+                    .linked_page_index_for_document(document)
+                    .map(|index| index as i32)
+                    .unwrap_or(-1),
+                is_active: project.active_document() == Some(document),
+                is_dirty: false,
+            })
+        })
+        .collect();
+    ui.set_editor_documents(Rc::new(VecModel::from(documents.clone())).into());
+
+    let active_tab_idx = documents
+        .iter()
+        .position(|document| document.is_active)
+        .unwrap_or(0);
+    ui.set_active_document_index(active_tab_idx as i32);
+
+    let open_set: HashSet<usize> = project
+        .open_documents()
+        .iter()
+        .filter_map(|document| project.linked_page_index_for_document(document))
+        .collect();
+    let page_items: Vec<ProjectPageInfo> = page_names
+        .iter()
+        .enumerate()
+        .map(|(idx, name)| ProjectPageInfo {
+            page_index: idx as i32,
+            page_name: SharedString::from(name.clone()),
+            is_open: open_set.contains(&idx),
+            is_active: idx == project.active_page_index(),
+        })
+        .collect();
+    ui.set_project_page_items(Rc::new(VecModel::from(page_items)).into());
+
+    let (width, height) = project.active_page_size();
+    ui.set_page_width(width as f32);
+    ui.set_page_height(height as f32);
+}
+
+pub fn sync_canvas(
+    ui: &AppWindow,
+    project: &Project,
+    selected_ids: &[Uuid],
+    collapsed_outline_nodes: &HashSet<Uuid>,
+) {
+    let elements = project.active_page_elements();
+    sync_canvas_view(ui, project, selected_ids, Some(&elements));
+    sync_canvas_comments(ui, project);
+    sync_outline_view(
+        ui,
+        project,
+        selected_ids,
+        collapsed_outline_nodes,
+        Some(&elements),
+    );
+}
+
+pub fn sync_canvas_comments(ui: &AppWindow, project: &Project) {
+    let comments: Vec<CanvasCommentInfo> = project
+        .active_page_comments()
+        .into_iter()
+        .map(|comment| {
+            let (image, image_width, image_height, has_image) = comment
+                .image
+                .as_ref()
+                .map(|image| {
+                    let has_image = !image.path.trim().is_empty();
+                    let loaded = if has_image {
+                        load_image_from_project_path(project, &image.path)
+                    } else {
+                        Image::default()
+                    };
+                    (
+                        loaded,
+                        image.width as i32,
+                        image.height as i32,
+                        has_image,
+                    )
+                })
+                .unwrap_or_else(|| (Image::default(), 0, 0, false));
+
+            CanvasCommentInfo {
+                comment_id: SharedString::from(comment.id.to_string()),
+                position: CanvasPosition {
+                    x: comment.x,
+                    y: comment.y,
+                },
+                width: comment.width,
+                body_height: comment.body_height,
+                title: SharedString::from(comment.title),
+                body: SharedString::from(comment.body),
+                title_font_size: comment.title_font_size,
+                body_font_size: comment.body_font_size,
+                has_image,
+                image,
+                image_width,
+                image_height,
+            }
+        })
+        .collect();
+
+    ui.set_canvas_comments(Rc::new(VecModel::from(comments)).into());
+}
+
+pub fn sync_canvas_view(
+    ui: &AppWindow,
+    project: &Project,
+    selected_ids: &[Uuid],
+    elements_override: Option<&[CanvasElementData]>,
+) {
+    let owned_elements;
+    let elements = if let Some(elements) = elements_override {
+        elements
+    } else {
+        owned_elements = project.active_page_elements();
+        &owned_elements
+    };
+
+    let element_map: HashMap<Uuid, CanvasElementData> = elements
+        .iter()
+        .cloned()
+        .map(|element| (element.id, element))
+        .collect();
+    let parent_map = build_parent_map(elements);
+    let children_map = build_children_map(elements, &parent_map);
+    let resolved_text_styles = resolve_text_styles(&element_map, &parent_map);
+    let (selected_list, selected_set, group_anchor) =
+        build_selection_state(selected_ids, &element_map);
+
+    let canvas_infos: Vec<SelectionInfo> = elements
+        .iter()
+        .map(|element| {
+            let has_children = children_map
+                .get(&element.id)
+                .map(|children| !children.is_empty())
+                .unwrap_or(false);
+            to_selection_info(
+                project,
+                element,
+                &selected_set,
+                group_anchor,
+                0,
+                has_children,
+                true,
+                resolved_text_styles.get(&element.id),
+            )
+        })
+        .collect();
+    ui.set_canvas_elements(Rc::new(VecModel::from(canvas_infos)).into());
+
+    let selected_primary_id = selected_list.first().copied();
+    let selected_primary = selected_primary_id.and_then(|id| element_map.get(&id).cloned());
+    let selected_style = selected_primary_id.and_then(|id| resolved_text_styles.get(&id));
+    set_selected_element(ui, project, selected_primary.as_ref(), selected_style);
+}
+
+pub fn sync_outline_view(
+    ui: &AppWindow,
+    project: &Project,
+    selected_ids: &[Uuid],
+    collapsed_outline_nodes: &HashSet<Uuid>,
+    elements_override: Option<&[CanvasElementData]>,
+) {
+    let owned_elements;
+    let elements = if let Some(elements) = elements_override {
+        elements
+    } else {
+        owned_elements = project.active_page_elements();
+        &owned_elements
+    };
+
+    let element_map: HashMap<Uuid, CanvasElementData> = elements
+        .iter()
+        .cloned()
+        .map(|element| (element.id, element))
+        .collect();
+    let parent_map = build_parent_map(elements);
+    let children_map = build_children_map(elements, &parent_map);
+    let resolved_text_styles = resolve_text_styles(&element_map, &parent_map);
+    let (_selected_list, selected_set, group_anchor) =
+        build_selection_state(selected_ids, &element_map);
+
+    let order: HashMap<Uuid, usize> = elements
+        .iter()
+        .enumerate()
+        .map(|(idx, element)| (element.id, idx))
+        .collect();
+    let mut top_level: Vec<Uuid> = elements
+        .iter()
+        .filter(|element| {
+            parent_map
+                .get(&element.id)
+                .and_then(|parent| *parent)
+                .is_none()
+        })
+        .map(|element| element.id)
+        .collect();
+    top_level.sort_by_key(|id| order.get(id).copied().unwrap_or(usize::MAX));
+
+    let mut outline_infos = Vec::new();
+    let mut visited = HashSet::new();
+    for top_id in top_level {
+        push_outline(
+            project,
+            top_id,
+            0,
+            &element_map,
+            &children_map,
+            collapsed_outline_nodes,
+            &selected_set,
+            group_anchor,
+            &resolved_text_styles,
+            &mut outline_infos,
+            &mut visited,
+        );
+    }
+    ui.set_outline_elements(Rc::new(VecModel::from(outline_infos)).into());
+}
+
+pub fn sync_timeline(ui: &AppWindow, history: &HistoryManager) {
+    let timeline_entries: Vec<TimelineEntry> = history
+        .timeline_entries()
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| TimelineEntry {
+            index: index as i32,
+            title: SharedString::from(entry.title.clone()),
+            details: SharedString::from(entry.details.clone()),
+            timestamp: SharedString::from(entry.timestamp.clone()),
+            action_kind: SharedString::from(entry.action_kind.as_tag()),
+        })
+        .collect();
+
+    ui.set_timeline_events(Rc::new(VecModel::from(timeline_entries)).into());
+    ui.set_active_timeline_index(
+        history
+            .active_timeline_index()
+            .map(|idx| idx as i32)
+            .unwrap_or(-1),
+    );
+    ui.set_history_preview_active(history.is_preview_active());
+}
+
+pub fn visible_outline_order(
+    project: &Project,
+    collapsed_outline_nodes: &HashSet<Uuid>,
+) -> Vec<Uuid> {
+    let elements = project.active_page_elements();
+    let parent_map = build_parent_map(&elements);
+    let children_map = build_children_map(&elements, &parent_map);
+    let order: HashMap<Uuid, usize> = elements
+        .iter()
+        .enumerate()
+        .map(|(idx, element)| (element.id, idx))
+        .collect();
+    let mut top_level: Vec<Uuid> = elements
+        .iter()
+        .filter(|element| {
+            parent_map
+                .get(&element.id)
+                .and_then(|parent| *parent)
+                .is_none()
+        })
+        .map(|element| element.id)
+        .collect();
+    top_level.sort_by_key(|id| order.get(id).copied().unwrap_or(usize::MAX));
+
+    let mut visible = Vec::new();
+    let mut visited = HashSet::new();
+    for top_id in top_level {
+        push_outline_ids(
+            top_id,
+            &children_map,
+            collapsed_outline_nodes,
+            &mut visible,
+            &mut visited,
+        );
+    }
+    visible
+}
+
+fn format_date(rfc3339_date: &str) -> String {
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(rfc3339_date) {
+        dt.format("%d.%m.%Y %H:%M").to_string()
+    } else {
+        rfc3339_date.to_string()
+    }
+}
+
+fn default_bounds() -> CanvasBounds {
+    CanvasBounds {
+        position: CanvasPosition { x: 0.0, y: 0.0 },
+        size: CanvasSize {
+            width: 100.0,
+            height: 100.0,
+        },
+    }
+}
+
+fn property_map(value: &serde_json::Value) -> Option<&serde_json::Map<String, serde_json::Value>> {
+    value.as_object()
+}
+
+fn prop_str(
+    props: Option<&serde_json::Map<String, serde_json::Value>>,
+    key: &str,
+    default: &str,
+) -> String {
+    props
+        .and_then(|map| map.get(key))
+        .and_then(|value| value.as_str())
+        .unwrap_or(default)
+        .to_string()
+}
+
+fn prop_f32(
+    props: Option<&serde_json::Map<String, serde_json::Value>>,
+    key: &str,
+    default: f32,
+) -> f32 {
+    props
+        .and_then(|map| map.get(key))
+        .and_then(|value| value.as_f64())
+        .map(|value| value as f32)
+        .unwrap_or(default)
+}
+
+fn prop_bool(
+    props: Option<&serde_json::Map<String, serde_json::Value>>,
+    key: &str,
+    default: bool,
+) -> bool {
+    props
+        .and_then(|map| map.get(key))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(default)
+}
+
+fn normalize_wrap_mode(value: &str) -> String {
+    let lower = value.trim().to_ascii_lowercase();
+    if lower == "nowrap" || lower == "no-wrap" {
+        "nowrap".to_string()
+    } else {
+        "wrap".to_string()
+    }
+}
+
+fn selected_container_mode(
+    element_type: &str,
+    props: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> String {
+    match element_type {
+        "stack-container" | "stack" => "stack".to_string(),
+        "flex-container" | "flex" => "flex".to_string(),
+        "grid-container" | "grid" => "grid".to_string(),
+        "div" => prop_str(props, "container_mode", "absolute"),
+        _ => "absolute".to_string(),
+    }
+}
+
+fn parse_hex_color(value: &str) -> Option<Color> {
+    if value.trim().eq_ignore_ascii_case("transparent") {
+        return Some(Color::from_argb_u8(0, 0, 0, 0));
+    }
+    let hex = value.trim().strip_prefix('#')?;
+    if !hex.is_ascii() || !hex.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return None;
+    }
+    let parse_pair = |s: &str| u8::from_str_radix(s, 16).ok();
+
+    match hex.len() {
+        3 => {
+            let r = parse_pair(&hex[0..1].repeat(2))?;
+            let g = parse_pair(&hex[1..2].repeat(2))?;
+            let b = parse_pair(&hex[2..3].repeat(2))?;
+            Some(Color::from_rgb_u8(r, g, b))
+        }
+        4 => {
+            let r = parse_pair(&hex[0..1].repeat(2))?;
+            let g = parse_pair(&hex[1..2].repeat(2))?;
+            let b = parse_pair(&hex[2..3].repeat(2))?;
+            let a = parse_pair(&hex[3..4].repeat(2))?;
+            Some(Color::from_argb_u8(a, r, g, b))
+        }
+        6 => {
+            let r = parse_pair(&hex[0..2])?;
+            let g = parse_pair(&hex[2..4])?;
+            let b = parse_pair(&hex[4..6])?;
+            Some(Color::from_rgb_u8(r, g, b))
+        }
+        8 => {
+            let r = parse_pair(&hex[0..2])?;
+            let g = parse_pair(&hex[2..4])?;
+            let b = parse_pair(&hex[4..6])?;
+            let a = parse_pair(&hex[6..8])?;
+            Some(Color::from_argb_u8(a, r, g, b))
+        }
+        _ => None,
+    }
+}
+
+fn prop_color(
+    props: Option<&serde_json::Map<String, serde_json::Value>>,
+    key: &str,
+    default: Color,
+) -> Color {
+    let raw = props
+        .and_then(|map| map.get(key))
+        .and_then(|value| value.as_str());
+    raw.and_then(parse_hex_color).unwrap_or(default)
+}
+
+fn prop_image_path(
+    props: Option<&serde_json::Map<String, serde_json::Value>>,
+    key: &str,
+) -> String {
+    prop_str(props, key, "")
+}
+
+fn resolve_project_image_path(project: &Project, path: &str) -> Option<std::path::PathBuf> {
+    let normalized = path.trim().replace('\\', "/");
+    if normalized.is_empty() {
+        return None;
+    }
+
+    if !normalized.starts_with("assets/") {
+        return None;
+    }
+
+    let raw = Path::new(&normalized);
+    if raw.is_absolute() {
+        return None;
+    }
+    for component in raw.components() {
+        if matches!(component, std::path::Component::ParentDir) {
+            return None;
+        }
+    }
+
+    Some(project.assets_root_dir().join(raw))
+}
+
+fn load_image_from_project_path(project: &Project, path: &str) -> Image {
+    resolve_project_image_path(project, path)
+        .and_then(|resolved| Image::load_from_path(&resolved).ok())
+        .unwrap_or_default()
+}
+
+fn asset_display_name(path: &str) -> String {
+    if path.trim().is_empty() {
+        return String::new();
+    }
+
+    Path::new(path)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or(path)
+        .to_string()
+}
+
+
+fn prop_uuid(
+    props: Option<&serde_json::Map<String, serde_json::Value>>,
+    key: &str,
+) -> Option<Uuid> {
+    props
+        .and_then(|map| map.get(key))
+        .and_then(|value| value.as_str())
+        .and_then(|text| Uuid::parse_str(text).ok())
+}
+
+fn resolve_text_styles(
+    element_map: &HashMap<Uuid, CanvasElementData>,
+    parent_map: &HashMap<Uuid, Option<Uuid>>,
+) -> HashMap<Uuid, ResolvedTextStyle> {
+    let mut resolved = HashMap::new();
+    let mut visiting = HashSet::new();
+
+    for id in element_map.keys().copied() {
+        let _ = resolve_text_style_for(id, element_map, parent_map, &mut resolved, &mut visiting);
+    }
+
+    resolved
+}
+
+fn resolve_text_style_for(
+    element_id: Uuid,
+    element_map: &HashMap<Uuid, CanvasElementData>,
+    parent_map: &HashMap<Uuid, Option<Uuid>>,
+    resolved: &mut HashMap<Uuid, ResolvedTextStyle>,
+    visiting: &mut HashSet<Uuid>,
+) -> ResolvedTextStyle {
+    if let Some(existing) = resolved.get(&element_id) {
+        return existing.clone();
+    }
+
+    if !visiting.insert(element_id) {
+        return ResolvedTextStyle {
+            font_size: 14.0,
+            text_color: Color::from_rgb_u8(245, 245, 245),
+            font_family: "Sans".to_string(),
+            text_wrap: "wrap".to_string(),
+        };
+    }
+
+    let parent_style = parent_map
+        .get(&element_id)
+        .and_then(|parent| *parent)
+        .and_then(|parent_id| {
+            element_map.get(&parent_id).map(|_| {
+                resolve_text_style_for(parent_id, element_map, parent_map, resolved, visiting)
+            })
+        });
+
+    let element = element_map.get(&element_id);
+    let props = element.and_then(|value| property_map(&value.properties));
+    let inherit_text_style = prop_bool(props, "inherit_text_style", true);
+
+    let default_size = 14.0;
+    let default_color = Color::from_rgb_u8(245, 245, 245);
+    let default_family = "Sans".to_string();
+    let default_wrap = "wrap".to_string();
+
+    let own_style = ResolvedTextStyle {
+        font_size: prop_f32(props, "font_size", default_size),
+        text_color: prop_color(props, "text_color", default_color),
+        font_family: prop_str(props, "font_family", &default_family),
+        text_wrap: normalize_wrap_mode(&prop_str(props, "text_wrap", &default_wrap)),
+    };
+
+    let final_style = if inherit_text_style {
+        parent_style.unwrap_or(own_style)
+    } else {
+        own_style
+    };
+
+    visiting.remove(&element_id);
+    resolved.insert(element_id, final_style.clone());
+    final_style
+}
+
+fn to_selection_info(
+    project: &Project,
+    element: &CanvasElementData,
+    selected_ids: &HashSet<Uuid>,
+    group_anchor: Option<Uuid>,
+    depth: i32,
+    has_children: bool,
+    is_outline_expanded: bool,
+    resolved_text_style: Option<&ResolvedTextStyle>,
+) -> SelectionInfo {
+    let props = property_map(&element.properties);
+    let is_selected = selected_ids.contains(&element.id);
+    let element_name = prop_str(
+        props,
+        "name",
+        &prop_str(props, "display_name", &element.element_type.to_string()),
+    );
+    let resolved_font_size = resolved_text_style
+        .map(|style| style.font_size)
+        .unwrap_or(14.0);
+    let resolved_text_color = resolved_text_style
+        .map(|style| style.text_color)
+        .unwrap_or_else(|| Color::from_rgb_u8(245, 245, 245));
+    let resolved_font_family = resolved_text_style
+        .map(|style| style.font_family.clone())
+        .unwrap_or_else(|| "Sans".to_string());
+    let resolved_text_wrap = resolved_text_style
+        .map(|style| style.text_wrap.clone())
+        .unwrap_or_else(|| "wrap".to_string());
+    let bg_image_path = prop_image_path(props, "background_image");
+    let image_source_path = prop_image_path(props, "image_src");
+    let text_content = prop_str(props, "text", "");
+
+    SelectionInfo {
+        element_id: SharedString::from(element.id.to_string()),
+        element_name: SharedString::from(element_name),
+        element_type: SharedString::from(element.element_type.clone()),
+        parent_id: SharedString::from(prop_str(props, "parent_id", "")),
+        depth,
+        has_children,
+        is_outline_expanded,
+        bounds: CanvasBounds {
+            position: CanvasPosition {
+                x: element.x,
+                y: element.y,
+            },
+            size: CanvasSize {
+                width: element.width,
+                height: element.height,
+            },
+        },
+        rotation: element.rotation,
+        text_content: SharedString::from(text_content),
+        placeholder: SharedString::from(prop_str(props, "placeholder", "")),
+        checked: prop_bool(props, "checked", false),
+        container_mode: SharedString::from(selected_container_mode(
+            element.element_type.as_str(),
+            props,
+        )),
+        allow_absolute_children: prop_bool(props, "allow_absolute_children", false),
+        layout_padding: prop_f32(props, "layout_padding", 8.0),
+        layout_spacing: prop_f32(props, "layout_spacing", 8.0),
+        layout_margin: prop_f32(props, "layout_margin", 0.0),
+        layout_order: prop_f32(props, "layout_order", 0.0),
+        stack_alignment: SharedString::from(prop_str(props, "stack_alignment", "stretch")),
+        flex_direction: SharedString::from(prop_str(props, "flex_direction", "column")),
+        flex_wrap: SharedString::from(prop_str(props, "flex_wrap", "nowrap")),
+        justify_items: SharedString::from(prop_str(props, "justify_items", "stretch")),
+        justify_content: SharedString::from(prop_str(props, "justify_content", "flex-start")),
+        align_items: SharedString::from(prop_str(props, "align_items", "stretch")),
+        align_content: SharedString::from(prop_str(props, "align_content", "stretch")),
+        place_items: SharedString::from(prop_str(props, "place_items", "stretch stretch")),
+        flex_flow: SharedString::from(prop_str(props, "flex_flow", "column nowrap")),
+        grid_template_columns: SharedString::from({
+            let explicit = prop_str(props, "grid_template_columns", "");
+            if explicit.trim().is_empty() {
+                prop_str(props, "grid_columns", "1fr 1fr")
+            } else {
+                explicit
+            }
+        }),
+        grid_template_rows: SharedString::from({
+            let explicit = prop_str(props, "grid_template_rows", "");
+            if explicit.trim().is_empty() {
+                prop_str(props, "grid_rows", "auto auto")
+            } else {
+                explicit
+            }
+        }),
+        grid_template_areas: SharedString::from(prop_str(props, "grid_template_areas", "")),
+        checkbox_box_side: SharedString::from(prop_str(props, "checkbox_box_side", "left")),
+        checkbox_check_color: prop_color(props, "checkbox_check_color", Color::from_rgb_u8(245, 245, 245)),
+        checkbox_box_color: prop_color(props, "checkbox_box_color", Color::from_rgb_u8(21, 21, 21)),
+        checkbox_box_border_color: prop_color(
+            props,
+            "checkbox_box_border_color",
+            Color::from_rgb_u8(74, 74, 74),
+        ),
+        checkbox_box_border_width: prop_f32(props, "checkbox_box_border_width", 1.0),
+        checkbox_space_between: prop_bool(props, "checkbox_space_between", false),
+        background: prop_color(props, "background", Color::from_rgb_u8(255, 255, 255)),
+        background_image_path: SharedString::from(bg_image_path.clone()),
+        background_image: load_image_from_project_path(project, &bg_image_path),
+        border_color: prop_color(props, "border_color", Color::from_rgb_u8(74, 74, 74)),
+        border_width: prop_f32(props, "border_width", 0.0),
+        border_radius: prop_f32(props, "border_radius", 6.0),
+        font_size: resolved_font_size,
+        font_family: SharedString::from(resolved_font_family),
+        text_wrap: SharedString::from(resolved_text_wrap),
+        inherit_text_style: prop_bool(props, "inherit_text_style", true),
+        image_source_path: SharedString::from(image_source_path.clone()),
+        image_source: load_image_from_project_path(project, &image_source_path),
+        text_color: resolved_text_color,
+        is_selected,
+        is_group_anchor: group_anchor.map(|id| id == element.id).unwrap_or(false),
+        is_hovered: false,
+    }
+}
+
+fn set_selected_defaults(ui: &AppWindow) {
+    ui.set_selected_element_id(SharedString::from(""));
+    ui.set_selected_element_name(SharedString::from(""));
+    ui.set_selected_element_type(SharedString::from(""));
+    ui.set_selected_element_bounds(default_bounds());
+    ui.set_selected_element_rotation(0.0);
+    ui.set_selected_element_text(SharedString::from(""));
+    ui.set_selected_element_checked(false);
+    ui.set_selected_element_container_mode(SharedString::from("absolute"));
+    ui.set_selected_element_allow_absolute_children(false);
+    ui.set_selected_element_layout_padding(8.0);
+    ui.set_selected_element_layout_spacing(8.0);
+    ui.set_selected_element_layout_margin(0.0);
+    ui.set_selected_element_layout_order(0.0);
+    ui.set_selected_element_stack_alignment(SharedString::from("stretch"));
+    ui.set_selected_element_flex_direction(SharedString::from("column"));
+    ui.set_selected_element_flex_wrap(SharedString::from("nowrap"));
+    ui.set_selected_element_justify_items(SharedString::from("stretch"));
+    ui.set_selected_element_justify_content(SharedString::from("flex-start"));
+    ui.set_selected_element_align_items(SharedString::from("stretch"));
+    ui.set_selected_element_align_content(SharedString::from("stretch"));
+    ui.set_selected_element_place_items(SharedString::from("stretch stretch"));
+    ui.set_selected_element_flex_flow(SharedString::from("column nowrap"));
+    ui.set_selected_element_grid_template_columns(SharedString::from("1fr 1fr"));
+    ui.set_selected_element_grid_template_rows(SharedString::from("auto auto"));
+    ui.set_selected_element_grid_template_areas(SharedString::from(""));
+    ui.set_selected_element_checkbox_box_side(SharedString::from("left"));
+    ui.set_selected_element_checkbox_check_color(SharedString::from("#f5f5f5"));
+    ui.set_selected_element_checkbox_box_color(SharedString::from("#151515"));
+    ui.set_selected_element_checkbox_box_border_color(SharedString::from("#4a4a4a"));
+    ui.set_selected_element_checkbox_box_border_width(1.0);
+    ui.set_selected_element_checkbox_space_between(false);
+    ui.set_selected_element_background(SharedString::from("#ffffff"));
+    ui.set_selected_element_border_color(SharedString::from("#4a4a4a"));
+    ui.set_selected_element_border_width(0.0);
+    ui.set_selected_element_border_radius(6.0);
+    ui.set_selected_element_font_size(14.0);
+    ui.set_selected_element_font_family(SharedString::from("Sans"));
+    ui.set_selected_element_text_wrap(SharedString::from("wrap"));
+    ui.set_selected_element_text_color(SharedString::from("#f5f5f5"));
+    ui.set_selected_element_placeholder(SharedString::from(""));
+    ui.set_selected_element_background_image(SharedString::from(""));
+    ui.set_selected_element_image_source(SharedString::from(""));
+    ui.set_selected_element_image_source_display(SharedString::from(""));
+    ui.set_selected_element_inherit_text_style(true);
+}
+
+fn set_selected_element(
+    ui: &AppWindow,
+    _project: &Project,
+    element: Option<&CanvasElementData>,
+    resolved_text_style: Option<&ResolvedTextStyle>,
+) {
+    let Some(element) = element else {
+        set_selected_defaults(ui);
+        return;
+    };
+
+    let props = property_map(&element.properties);
+    let selected_name = prop_str(
+        props,
+        "name",
+        &prop_str(props, "display_name", &element.element_type.to_string()),
+    );
+    let resolved_font_size = resolved_text_style
+        .map(|style| style.font_size)
+        .unwrap_or(14.0);
+    let resolved_text_color = resolved_text_style
+        .map(|style| style.text_color)
+        .and_then(|color| {
+            Some(format!(
+                "#{:02x}{:02x}{:02x}",
+                color.red(),
+                color.green(),
+                color.blue()
+            ))
+        })
+        .unwrap_or_else(|| "#f5f5f5".to_string());
+    let resolved_font_family = resolved_text_style
+        .map(|style| style.font_family.clone())
+        .unwrap_or_else(|| "Sans".to_string());
+    let resolved_text_wrap = resolved_text_style
+        .map(|style| style.text_wrap.clone())
+        .unwrap_or_else(|| "wrap".to_string());
+    let selected_background = prop_str(props, "background", "#ffffff");
+    let selected_background = if element.element_type == "text"
+        || element.element_type == "label"
+        || selected_background.eq_ignore_ascii_case("transparent")
+    {
+        "#0000".to_string()
+    } else {
+        selected_background
+    };
+
+    ui.set_selected_element_id(SharedString::from(element.id.to_string()));
+    ui.set_selected_element_name(SharedString::from(selected_name));
+    ui.set_selected_element_type(SharedString::from(element.element_type.clone()));
+    ui.set_selected_element_bounds(CanvasBounds {
+        position: CanvasPosition {
+            x: element.x,
+            y: element.y,
+        },
+        size: CanvasSize {
+            width: element.width,
+            height: element.height,
+        },
+    });
+    ui.set_selected_element_rotation(element.rotation);
+    ui.set_selected_element_text(SharedString::from(prop_str(props, "text", "")));
+    ui.set_selected_element_checked(prop_bool(props, "checked", false));
+    ui.set_selected_element_container_mode(SharedString::from(selected_container_mode(
+        element.element_type.as_str(),
+        props,
+    )));
+    ui.set_selected_element_allow_absolute_children(prop_bool(
+        props,
+        "allow_absolute_children",
+        false,
+    ));
+    ui.set_selected_element_layout_padding(prop_f32(props, "layout_padding", 8.0));
+    ui.set_selected_element_layout_spacing(prop_f32(props, "layout_spacing", 8.0));
+    ui.set_selected_element_layout_margin(prop_f32(props, "layout_margin", 0.0));
+    ui.set_selected_element_layout_order(prop_f32(props, "layout_order", 0.0));
+    ui.set_selected_element_stack_alignment(SharedString::from(prop_str(
+        props,
+        "stack_alignment",
+        "stretch",
+    )));
+    ui.set_selected_element_flex_direction(SharedString::from(prop_str(
+        props,
+        "flex_direction",
+        "column",
+    )));
+    ui.set_selected_element_flex_wrap(SharedString::from(prop_str(
+        props,
+        "flex_wrap",
+        "nowrap",
+    )));
+    ui.set_selected_element_justify_items(SharedString::from(prop_str(
+        props,
+        "justify_items",
+        "stretch",
+    )));
+    ui.set_selected_element_justify_content(SharedString::from(prop_str(
+        props,
+        "justify_content",
+        "flex-start",
+    )));
+    ui.set_selected_element_align_items(SharedString::from(prop_str(
+        props,
+        "align_items",
+        "stretch",
+    )));
+    ui.set_selected_element_align_content(SharedString::from(prop_str(
+        props,
+        "align_content",
+        "stretch",
+    )));
+    ui.set_selected_element_place_items(SharedString::from(prop_str(
+        props,
+        "place_items",
+        "stretch stretch",
+    )));
+    ui.set_selected_element_flex_flow(SharedString::from(prop_str(
+        props,
+        "flex_flow",
+        "column nowrap",
+    )));
+    ui.set_selected_element_grid_template_columns(SharedString::from({
+        let explicit = prop_str(props, "grid_template_columns", "");
+        if explicit.trim().is_empty() {
+            prop_str(props, "grid_columns", "1fr 1fr")
+        } else {
+            explicit
+        }
+    }));
+    ui.set_selected_element_grid_template_rows(SharedString::from({
+        let explicit = prop_str(props, "grid_template_rows", "");
+        if explicit.trim().is_empty() {
+            prop_str(props, "grid_rows", "auto auto")
+        } else {
+            explicit
+        }
+    }));
+    ui.set_selected_element_grid_template_areas(SharedString::from(prop_str(
+        props,
+        "grid_template_areas",
+        "",
+    )));
+    ui.set_selected_element_checkbox_box_side(SharedString::from(prop_str(
+        props,
+        "checkbox_box_side",
+        "left",
+    )));
+    ui.set_selected_element_checkbox_check_color(SharedString::from(prop_str(
+        props,
+        "checkbox_check_color",
+        "#f5f5f5",
+    )));
+    ui.set_selected_element_checkbox_box_color(SharedString::from(prop_str(
+        props,
+        "checkbox_box_color",
+        "#151515",
+    )));
+    ui.set_selected_element_checkbox_box_border_color(SharedString::from(prop_str(
+        props,
+        "checkbox_box_border_color",
+        "#4a4a4a",
+    )));
+    ui.set_selected_element_checkbox_box_border_width(prop_f32(
+        props,
+        "checkbox_box_border_width",
+        1.0,
+    ));
+    ui.set_selected_element_checkbox_space_between(prop_bool(
+        props,
+        "checkbox_space_between",
+        false,
+    ));
+    ui.set_selected_element_background(SharedString::from(selected_background));
+    ui.set_selected_element_border_color(SharedString::from(prop_str(
+        props,
+        "border_color",
+        "#4a4a4a",
+    )));
+    ui.set_selected_element_border_width(prop_f32(props, "border_width", 0.0));
+    ui.set_selected_element_border_radius(prop_f32(props, "border_radius", 6.0));
+    ui.set_selected_element_font_size(resolved_font_size);
+    ui.set_selected_element_font_family(SharedString::from(resolved_font_family));
+    ui.set_selected_element_text_wrap(SharedString::from(resolved_text_wrap));
+    ui.set_selected_element_text_color(SharedString::from(resolved_text_color));
+    ui.set_selected_element_placeholder(SharedString::from(prop_str(props, "placeholder", "")));
+    ui.set_selected_element_background_image(SharedString::from(prop_str(
+        props,
+        "background_image",
+        "",
+    )));
+    let image_source_path = prop_str(props, "image_src", "");
+    ui.set_selected_element_image_source(SharedString::from(image_source_path.clone()));
+    ui.set_selected_element_image_source_display(SharedString::from(asset_display_name(
+        &image_source_path,
+    )));
+    ui.set_selected_element_inherit_text_style(prop_bool(props, "inherit_text_style", true));
+}
+
+fn build_selection_state(
+    selected_ids: &[Uuid],
+    element_map: &HashMap<Uuid, CanvasElementData>,
+) -> (Vec<Uuid>, HashSet<Uuid>, Option<Uuid>) {
+    let mut seen_selected = HashSet::new();
+    let selected_list: Vec<Uuid> = selected_ids
+        .iter()
+        .copied()
+        .filter(|id| element_map.contains_key(id) && seen_selected.insert(*id))
+        .collect();
+    let selected_set: HashSet<Uuid> = selected_list.iter().copied().collect();
+    let group_anchor = (selected_list.len() > 1).then(|| selected_list[0]);
+    (selected_list, selected_set, group_anchor)
+}
+
+fn build_parent_map(elements: &[CanvasElementData]) -> HashMap<Uuid, Option<Uuid>> {
+    let id_set: HashSet<Uuid> = elements.iter().map(|element| element.id).collect();
+    let mut parents = HashMap::new();
+
+    for element in elements {
+        let props = property_map(&element.properties);
+        let parent = prop_uuid(props, "parent_id")
+            .filter(|parent_id| *parent_id != element.id && id_set.contains(parent_id));
+        parents.insert(element.id, parent);
+    }
+
+    parents
+}
+
+fn build_children_map(
+    elements: &[CanvasElementData],
+    parents: &HashMap<Uuid, Option<Uuid>>,
+) -> HashMap<Uuid, Vec<Uuid>> {
+    let order: HashMap<Uuid, usize> = elements
+        .iter()
+        .enumerate()
+        .map(|(idx, element)| (element.id, idx))
+        .collect();
+    let mut children: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
+
+    for element in elements {
+        if let Some(parent_id) = parents.get(&element.id).and_then(|parent| *parent) {
+            children.entry(parent_id).or_default().push(element.id);
+        }
+    }
+
+    for ids in children.values_mut() {
+        ids.sort_by_key(|id| order.get(id).copied().unwrap_or(usize::MAX));
+    }
+
+    children
+}
+
+fn push_outline(
+    project: &Project,
+    element_id: Uuid,
+    depth: i32,
+    element_map: &HashMap<Uuid, CanvasElementData>,
+    children_map: &HashMap<Uuid, Vec<Uuid>>,
+    collapsed_outline_nodes: &HashSet<Uuid>,
+    selected_set: &HashSet<Uuid>,
+    group_anchor: Option<Uuid>,
+    resolved_text_styles: &HashMap<Uuid, ResolvedTextStyle>,
+    out: &mut Vec<SelectionInfo>,
+    visited: &mut HashSet<Uuid>,
+) {
+    if !visited.insert(element_id) {
+        return;
+    }
+    let Some(element) = element_map.get(&element_id) else {
+        return;
+    };
+
+    let has_children = children_map
+        .get(&element_id)
+        .map(|children| !children.is_empty())
+        .unwrap_or(false);
+    let is_outline_expanded = !collapsed_outline_nodes.contains(&element_id);
+    out.push(to_selection_info(
+        project,
+        element,
+        selected_set,
+        group_anchor,
+        depth,
+        has_children,
+        is_outline_expanded,
+        resolved_text_styles.get(&element.id),
+    ));
+
+    if has_children && is_outline_expanded {
+        if let Some(children) = children_map.get(&element_id) {
+            for child_id in children {
+                push_outline(
+                    project,
+                    *child_id,
+                    depth + 1,
+                    element_map,
+                    children_map,
+                    collapsed_outline_nodes,
+                    selected_set,
+                    group_anchor,
+                    resolved_text_styles,
+                    out,
+                    visited,
+                );
+            }
+        }
+    }
+}
+
+fn push_outline_ids(
+    element_id: Uuid,
+    children_map: &HashMap<Uuid, Vec<Uuid>>,
+    collapsed_outline_nodes: &HashSet<Uuid>,
+    out: &mut Vec<Uuid>,
+    visited: &mut HashSet<Uuid>,
+) {
+    if !visited.insert(element_id) {
+        return;
+    }
+
+    out.push(element_id);
+
+    let expanded = !collapsed_outline_nodes.contains(&element_id);
+    if !expanded {
+        return;
+    }
+
+    if let Some(children) = children_map.get(&element_id) {
+        for child_id in children {
+            push_outline_ids(
+                *child_id,
+                children_map,
+                collapsed_outline_nodes,
+                out,
+                visited,
+            );
+        }
+    }
+}

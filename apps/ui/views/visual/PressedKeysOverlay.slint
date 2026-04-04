@@ -1,0 +1,23 @@
+import { Themes } from "../../components/Themes.slint";
+
+export component PressedKeysOverlay inherits Rectangle {
+    in property <string> combo-text: "";
+
+    width: pressed-keys-label.preferred-width + 22px;
+    height: 30px;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: Themes.current.border-color;
+    background: Themes.current.tooltip-bg;
+
+    pressed-keys-label := Text {
+        x: 11px;
+        width: parent.width - 22px;
+        height: parent.height;
+        text: root.combo-text;
+        color: Themes.current.primary-text;
+        font-size: 11px;
+        vertical-alignment: TextVerticalAlignment.center;
+        horizontal-alignment: TextHorizontalAlignment.center;
+    }
+}

@@ -1,0 +1,19 @@
+{
+  "id": "250fe9a6-ee2c-4515-a07d-9215bc402efa",
+  "name": "New Project",
+  "path": "",
+  "platform": "Windows",
+  "dev_mode": "Nodes",
+  "pages": [
+    {
+      "id": "a2d780ea-3431-4a92-bb05-ef1a32a73029",
+      "name": "Main",
+      "width": 1920,
+      "height": 1080,
+      "elements": []
+    }
+  ],
+  "active_page_index": 0,
+  "created_at": "2026-02-24T15:08:25.544468+00:00",
+  "modified_at": "2026-02-24T15:08:25.544468+00:00"
+}

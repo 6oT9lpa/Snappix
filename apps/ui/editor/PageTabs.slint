@@ -1,0 +1,347 @@
+import { HorizontalBox, VerticalBox } from "std-widgets.slint";
+import { Themes, Separator-H } from "../components/Themes.slint";
+import { I18n } from "../components/I18n.slint";
+import { Tooltip } from "../components/Tooltip.slint";
+import { EditorDocumentInfo } from "../models/EditorModels.slint";
+
+export component PageTab inherits Rectangle {
+    in-out property <string> page-name: "Untitled";
+    in-out property <bool> is-active: false;
+    property <length> close-size: 24px;
+    property <length> close-right-padding: 6px;
+    property <length> close-top-offset: 3px;
+    property <bool> close-area-hovered: touch.has-hover
+        && touch.mouse-x >= root.width - root.close-right-padding - root.close-size
+        && touch.mouse-x <= root.width - root.close-right-padding
+        && touch.mouse-y >= root.close-top-offset
+        && touch.mouse-y <= root.close-top-offset + root.close-size;
+
+    callback close-clicked();
+    callback clicked();
+
+    width: 140px;
+    height: 30px;
+    border-radius: 5px;
+
+    HorizontalBox {
+        padding: 0;
+        padding-top: 3px;
+        spacing: 6px;
+
+        Text {
+            text: root.page-name;
+            font-size: 13px;
+            color: Themes.current.secondary-text;
+            overflow: elide;
+            horizontal-stretch: 1;
+            vertical-alignment: TextVerticalAlignment.center;
+        }
+
+        Rectangle {
+            width: root.close-size;
+            height: root.close-size;
+            border-radius: 4px;
+            visible: touch.has-hover;
+            background: root.close-area-hovered
+                ? (is-active ? Themes.on-accent-bg : Themes.current.hover-color)
+                : transparent;
+
+            Text {
+                text: "×";
+                font-size: 24px;
+                font-weight: 500;
+                color: is-active ? Themes.on-accent-color : Themes.current.secondary-text;
+                animate color { duration: 100ms; }
+            }
+            animate background { duration: 100ms; }
+        }
+    }
+
+    Rectangle {
+        height: 2px;
+        width: parent.width + 2px;
+        y: parent.height - 2px;
+        background: is-active ? Themes.on-accent-color : touch.has-hover ? Themes.current.hover-color : transparent;
+        animate background { duration: 100ms; }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: root.close-area-hovered ? MouseCursor.alias : MouseCursor.pointer;
+        clicked => {
+            if root.close-area-hovered {
+                root.close-clicked();
+            } else {
+                root.clicked();
+            }
+        }
+    }
+}
+
+export component PageTabsBar inherits Rectangle {
+    in-out property <[EditorDocumentInfo]> documents: [];
+    in-out property <int> active-document-index: 0;
+    in-out property <bool> show-new-button: true;
+
+    callback document-selected(int);
+    callback document-closed(int);
+    callback new-page-requested();
+
+    height: 36px;
+    background: Themes.current.primary-bg;
+
+    HorizontalBox {
+        padding: 4px;
+        spacing: 3px;
+
+        for document[idx] in root.documents: PageTab {
+            page-name: document.label + (document.is-dirty ? "*" : "");
+            is-active: idx == root.active-document-index;
+
+            clicked => { root.document-selected(idx); }
+            close-clicked => { root.document-closed(idx); }
+        }
+
+        if root.show-new-button: Rectangle {
+            width: 30px;
+            height: 28px;
+            border-radius: 5px;
+            background: new-touch.has-hover ? Themes.current.hover-color : Themes.current.secondary-bg;
+
+            new-touch := TouchArea {
+                mouse-cursor: MouseCursor.pointer;
+                clicked => { root.new-page-requested(); }
+            }
+
+            Text {
+                text: "+";
+                font-size: 18px;
+                color: Themes.current.secondary-text;
+                horizontal-alignment: TextHorizontalAlignment.center;
+                vertical-alignment: TextVerticalAlignment.center;
+            }
+
+            Tooltip {
+                x: (parent.width - self.width) / 2;
+                y: parent.height + 6px;
+                text: I18n.t("Create New Page");
+                placement: "top";
+                show: new-touch.has-hover;
+            }
+        }
+
+        Rectangle { horizontal-stretch: 1; background: transparent; }
+    }
+}
+
+component IntAdjust inherits Rectangle {
+    in property <string> title: "Width";
+    in-out property <int> value: 100;
+    in property <int> min: 1;
+    in property <int> max: 10000;
+    in property <int> step: 10;
+
+    height: 44px;
+    background: Themes.current.secondary-bg;
+    border-radius: 4px;
+
+    HorizontalBox {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 6px;
+
+        Text {
+            text: title;
+            font-size: 14px;
+            color: Themes.current.secondary-text;
+            width: 52px;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+        }
+
+        VerticalBox {
+            alignment: LayoutAlignment.center;
+            padding: 0;
+
+            Rectangle {
+                width: 20px;
+                height: 20px;
+                border-radius: 4px;
+                background: minus-touch.has-hover ? Themes.current.hover-color : Themes.current.primary-bg;
+
+                minus-touch := TouchArea {
+                    mouse-cursor: MouseCursor.pointer;
+                    clicked => { root.value = Math.max(root.min, root.value - root.step); }
+                }
+
+                Text {
+                    height: 16px;
+                    text: "-";
+                    font-size: 14px;
+                    color: Themes.current.primary-text;
+                    font-weight: 600;
+                }
+            }
+        }
+
+        Rectangle {
+            horizontal-stretch: 1;
+            background: transparent;
+
+            Text {
+                text: root.value;
+                font-size: 13px;
+                color: Themes.current.primary-text;
+                horizontal-alignment: TextHorizontalAlignment.center;
+                vertical-alignment: TextVerticalAlignment.center;
+            }
+        }
+
+        VerticalBox {
+            alignment: LayoutAlignment.center;
+            padding: 0;
+
+            Rectangle {
+                width: 18px;
+                height: 18px;
+                border-radius: 4px;
+                background: plus-touch.has-hover ? Themes.current.hover-color : Themes.current.primary-bg;
+
+                plus-touch := TouchArea {
+                    mouse-cursor: MouseCursor.pointer;
+                    clicked => { root.value = Math.min(root.max, root.value + root.step); }
+                }
+
+                Text {
+                    height: 16px;
+                    text: "+";
+                    font-size: 14px;
+                    color: Themes.current.primary-text;
+                    font-weight: 600;
+                }
+            }
+        }
+    }
+}
+
+export component NewPageDialog inherits Rectangle {
+    in-out property <bool> show-dialog: true;
+    in-out property <string> page-name: "name page";
+    in-out property <int> page-width: 1920;
+    in-out property <int> page-height: 1080;
+
+    callback create-page(string, int, int);
+    callback cancel();
+
+    background: transparent;
+
+    if show-dialog: Rectangle {
+        background: Themes.overlay-strong-bg;
+
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 360px;
+            height: 300px;
+            border-radius: 8px;
+            background: Themes.current.primary-bg;
+
+            VerticalBox {
+                padding: 20px;
+                spacing: 12px;
+
+                Text {
+                    text: I18n.t("Create New Page");
+                    font-size: 18px;
+                    font-weight: 600;
+                    color: Themes.current.primary-text;
+                }
+
+                Separator-H {}
+
+                Rectangle {
+                    height: 38px;
+                    background: Themes.current.secondary-bg;
+                    border-radius: 4px;
+
+                    TextInput {
+                        x: 10px;
+                        width: parent.width - 20px;
+                        height: 16px;
+                        text <=> root.page-name;
+                        font-size: 14px;
+                        color: Themes.current.secondary-text;
+                    }
+                }
+
+                IntAdjust {
+                    title: I18n.t("Width");
+                    value <=> root.page-width;
+                    min: 100;
+                    max: 10000;
+                    step: 10;
+                }
+
+                IntAdjust {
+                    title: I18n.t("Height");
+                    value <=> root.page-height;
+                    min: 100;
+                    max: 10000;
+                    step: 10;
+                }
+
+                Rectangle { vertical-stretch: 1; background: transparent; }
+
+                HorizontalBox {
+                    spacing: 8px;
+                    Rectangle { horizontal-stretch: 1; background: transparent; }
+
+                    Rectangle {
+                        width: 86px;
+                        height: 34px;
+                        border-radius: 4px;
+                        background: cancel-btn.has-hover ? Themes.current.hover-color: Themes.current.secondary-bg;
+
+                        cancel-btn := TouchArea {
+                            mouse-cursor: MouseCursor.pointer;
+                            clicked => { root.cancel(); }
+                        }
+
+                        Text {
+                            text: I18n.t("Cancel");
+                            font-size: 13px;
+                            color: Themes.current.primary-text;
+                            horizontal-alignment: TextHorizontalAlignment.center;
+                            vertical-alignment: TextVerticalAlignment.center;
+                        }
+
+                        animate background { duration: 130ms; }
+                    }
+
+                    Rectangle {
+                        width: 86px;
+                        height: 34px;
+                        border-radius: 4px;
+                        background: create-btn.has-hover ? Themes.current.hover-color : Themes.on-accent-color;
+
+                        create-btn := TouchArea {
+                            mouse-cursor: MouseCursor.pointer;
+                            clicked => { root.create-page(root.page-name, root.page-width, root.page-height); }
+                        }
+
+                        Text {
+                            text: I18n.t("Create");
+                            font-size: 13px;
+                            color: create-btn.has-hover ? Themes.current.primary-text : Themes.on-accent-text;
+                            horizontal-alignment: TextHorizontalAlignment.center;
+                            vertical-alignment: TextVerticalAlignment.center;
+
+                            animate color { duration: 130ms; }
+                        }
+
+                        animate background { duration: 130ms; }
+                    }
+                }
+            }
+        }
+    }
+}

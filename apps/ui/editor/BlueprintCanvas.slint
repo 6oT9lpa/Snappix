@@ -1,0 +1,163 @@
+import { Themes } from "../components/Themes.slint";
+import { CanvasZoomControls } from "./CanvasZoomControls.slint";
+
+export component BlueprintCanvas inherits Rectangle {
+    in-out property <float> zoom-level: 1.0;
+    in-out property <length> offset-x: 0px;
+    in-out property <length> offset-y: 0px;
+    in property <bool> grid-visible: true;
+    in property <length> grid-size: 24px;
+    in property <bool> ui-helpers-visible: true;
+
+    property <bool> is-panning: false;
+    property <length> pan-start-x: 0px;
+    property <length> pan-start-y: 0px;
+    property <bool> view-initialized: false;
+    property <float> min-zoom: 0.2;
+    property <float> max-zoom: 4.0;
+
+    function grid-spacing() -> length {
+        root.grid-size * root.zoom-level
+    }
+
+    function grid-origin-x() -> length {
+        let spacing = root.grid-spacing();
+        let safe-spacing = spacing <= 0px ? 1px : spacing;
+        root.offset-x - Math.floor((root.offset-x / 1px) / (safe-spacing / 1px)) * safe-spacing
+    }
+
+    function grid-origin-y() -> length {
+        let spacing = root.grid-spacing();
+        let safe-spacing = spacing <= 0px ? 1px : spacing;
+        root.offset-y - Math.floor((root.offset-y / 1px) / (safe-spacing / 1px)) * safe-spacing
+    }
+
+    function start-pan(pointer-x: length, pointer-y: length) {
+        root.is-panning = true;
+        root.pan-start-x = pointer-x;
+        root.pan-start-y = pointer-y;
+    }
+
+    function update-pan(pointer-x: length, pointer-y: length) {
+        if !root.is-panning {
+            return;
+        }
+
+        let dx = pointer-x - root.pan-start-x;
+        let dy = pointer-y - root.pan-start-y;
+        root.offset-x += dx;
+        root.offset-y += dy;
+        root.pan-start-x = pointer-x;
+        root.pan-start-y = pointer-y;
+    }
+
+    function stop-pan() {
+        root.is-panning = false;
+    }
+
+    function zoom-at-cursor(cursor-x: length, cursor-y: length, delta-y: length) {
+        let prev-zoom = root.zoom-level;
+        let next-zoom = delta-y < 0px
+            ? Math.max(root.min-zoom, Math.min(root.max-zoom, prev-zoom / 1.1))
+            : delta-y > 0px
+                ? Math.max(root.min-zoom, Math.min(root.max-zoom, prev-zoom * 1.1))
+                : prev-zoom;
+
+        if next-zoom == prev-zoom {
+            return;
+        }
+
+        let world-x = ((cursor-x - root.offset-x) / 1px) / prev-zoom;
+        let world-y = ((cursor-y - root.offset-y) / 1px) / prev-zoom;
+        root.offset-x = ((cursor-x / 1px) - world-x * next-zoom) * 1px;
+        root.offset-y = ((cursor-y / 1px) - world-y * next-zoom) * 1px;
+        root.zoom-level = next-zoom;
+    }
+
+    public function reset-view() {
+        root.zoom-level = 1.0;
+        root.offset-x = root.width / 2;
+        root.offset-y = root.height / 2;
+    }
+
+    changed width => {
+        if !root.view-initialized && root.width > 0px && root.height > 0px {
+            root.view-initialized = true;
+            root.reset-view();
+        }
+    }
+
+    changed height => {
+        if !root.view-initialized && root.width > 0px && root.height > 0px {
+            root.view-initialized = true;
+            root.reset-view();
+        }
+    }
+
+    background: Themes.canvas-bg;
+    clip: true;
+
+    if root.grid-visible: Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: transparent;
+
+        for i in Math.floor(parent.width / root.grid-spacing()) + 3 : Rectangle {
+            x: root.grid-origin-x() - root.grid-spacing() + i * root.grid-spacing();
+            y: 0;
+            width: 1px;
+            height: parent.height;
+            background: Themes.canvas-grid-color;
+        }
+
+        for j in Math.floor(parent.height / root.grid-spacing()) + 3 : Rectangle {
+            x: 0;
+            y: root.grid-origin-y() - root.grid-spacing() + j * root.grid-spacing();
+            width: parent.width;
+            height: 1px;
+            background: Themes.canvas-grid-color;
+        }
+    }
+
+    TouchArea {
+        width: parent.width;
+        height: parent.height;
+        mouse-cursor: root.is-panning ? MouseCursor.grabbing : MouseCursor.grab;
+
+        scroll-event(event) => {
+            if event.modifiers.control {
+                root.zoom-at-cursor(self.mouse-x, self.mouse-y, event.delta-y);
+                return accept;
+            }
+            reject
+        }
+
+        pointer-event(ev) => {
+            if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.middle {
+                root.start-pan(self.mouse-x, self.mouse-y);
+            }
+
+            if ev.kind == PointerEventKind.move {
+                root.update-pan(self.mouse-x, self.mouse-y);
+            }
+
+            if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.middle {
+                root.stop-pan();
+            }
+
+            if ev.kind == PointerEventKind.cancel {
+                root.stop-pan();
+            }
+        }
+    }
+
+    if root.ui-helpers-visible: CanvasZoomControls {
+        z: 10;
+        x: 12px;
+        y: parent.height - self.height - 12px;
+        zoom-level: root.zoom-level;
+        zoom-out-requested => { root.zoom-at-cursor(root.width / 2, root.height / 2, -1px); }
+        zoom-in-requested => { root.zoom-at-cursor(root.width / 2, root.height / 2, 1px); }
+        reset-view-requested => { root.reset-view(); }
+    }
+}

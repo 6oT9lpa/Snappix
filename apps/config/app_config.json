@@ -1,0 +1,50 @@
+{
+  "version": "1.0.0",
+  "description": "Global editor configuration for Snappix",
+  "hotkeys": {
+    "source": "appdata/hotkeys.bin"
+  },
+  "language": {
+    "current": "en",
+    "fallback": "en",
+    "supported": ["ru", "en"]
+  },
+  "theme": {
+    "current": "light",
+    "builtin": ["dark", "light", "custom"],
+    "custom": {
+      "primary_bg": "#20242B",
+      "secondary_bg": "#2B313A",
+      "primary_text": "#F5F7FA",
+      "secondary_text": "#98A4B3",
+      "disabled_text": "#677382",
+      "border_color": "#3C4552",
+      "divider_color": "#444D5A",
+      "hover_color": "#323B47",
+      "active_color": "#FFD24D",
+      "button_color": "#445066",
+      "tooltip_bg": "#1F2630",
+      "overlay_bg": "#00000066",
+      "overlay_strong_bg": "#00000090",
+      "shadow_color": "#00000040",
+      "shadow_size": 10.0,
+      "border_radius": 6.0,
+      "error_bg": "#FF444420",
+      "error_text": "#FF6666",
+      "success_color": "#7DD97D",
+      "warning_color": "#F5DC78",
+      "selection_border": "#4EA1FF",
+      "selection_fill": "#4EA1FF33",
+      "selection_panel_bg": "#10203ACC",
+      "selection_text": "#D9E7FF",
+      "on_accent_text": "#000000",
+      "canvas_bg": "#0F0F0F",
+      "canvas_grid_color": "#2B2B2B"
+    }
+  },
+  "pressed_keys": {
+    "enabled": true,
+    "position": "bottom-right",
+    "show_mouse_buttons": true
+  }
+}
