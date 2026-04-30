@@ -686,6 +686,139 @@ fn register_page_callbacks(ui: &AppWindow, state: &EditorState) {
     });
 
     let ui_weak = ui.as_weak();
+    let add_blueprint_catalog_node_state = state.clone();
+    ui.on_add_blueprint_catalog_node_internal(move |descriptor_id, x, y| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        if !exit_history_preview_mode(&ui, &add_blueprint_catalog_node_state) {
+            return;
+        }
+
+        let mut pm = add_blueprint_catalog_node_state
+            .project_manager
+            .borrow_mut();
+        let Some(project) = pm.current_project_mut() else {
+            return;
+        };
+        let before_snapshot = capture_project_snapshot(project, &add_blueprint_catalog_node_state);
+        if project
+            .add_catalog_node_to_active_blueprint(descriptor_id.as_str(), x, y)
+            .is_none()
+        {
+            return;
+        }
+        helpers::save_project_silent(project);
+        if let (Some(before_snapshot), Some(after_snapshot)) = (
+            before_snapshot,
+            capture_project_snapshot(project, &add_blueprint_catalog_node_state),
+        ) {
+            add_blueprint_catalog_node_state
+                .history
+                .borrow_mut()
+                .record_change(
+                    HistoryActionKind::CreateObject,
+                    "Add blueprint node",
+                    descriptor_id.to_string(),
+                    before_snapshot,
+                    after_snapshot,
+                );
+        }
+        sync::sync_editor_models(&ui, project);
+        refresh_canvas(&ui, project, &add_blueprint_catalog_node_state);
+    });
+
+    let ui_weak = ui.as_weak();
+    let move_blueprint_node_state = state.clone();
+    ui.on_move_blueprint_node_internal(move |node_id, x, y| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        let Some(node_id) = helpers::parse_uuid(node_id.as_str()) else {
+            return;
+        };
+        let mut pm = move_blueprint_node_state.project_manager.borrow_mut();
+        let Some(project) = pm.current_project_mut() else {
+            return;
+        };
+        if !project.move_node_in_active_blueprint(node_id, x, y) {
+            return;
+        }
+        helpers::save_project_silent(project);
+        sync::sync_editor_models(&ui, project);
+    });
+
+    let ui_weak = ui.as_weak();
+    let delete_blueprint_node_state = state.clone();
+    ui.on_delete_blueprint_node_internal(move |node_id| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        if !exit_history_preview_mode(&ui, &delete_blueprint_node_state) {
+            return;
+        }
+        let Some(node_id) = helpers::parse_uuid(node_id.as_str()) else {
+            return;
+        };
+        let mut pm = delete_blueprint_node_state.project_manager.borrow_mut();
+        let Some(project) = pm.current_project_mut() else {
+            return;
+        };
+        if !project.delete_node_from_active_blueprint(node_id) {
+            return;
+        }
+        helpers::save_project_silent(project);
+        // Blueprint node deletion is intentionally kept on a lightweight path.
+        // Capturing full project snapshots and refreshing the visual canvas here
+        // can stall large projects because blueprint edits do not affect scene geometry.
+        sync::sync_editor_models(&ui, project);
+        sync::sync_timeline(&ui, &delete_blueprint_node_state.history.borrow());
+    });
+
+    let ui_weak = ui.as_weak();
+    let duplicate_blueprint_node_state = state.clone();
+    ui.on_duplicate_blueprint_node_internal(move |node_id, x, y| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        if !exit_history_preview_mode(&ui, &duplicate_blueprint_node_state) {
+            return;
+        }
+        let Some(node_id) = helpers::parse_uuid(node_id.as_str()) else {
+            return;
+        };
+        let mut pm = duplicate_blueprint_node_state.project_manager.borrow_mut();
+        let Some(project) = pm.current_project_mut() else {
+            return;
+        };
+        let before_snapshot = capture_project_snapshot(project, &duplicate_blueprint_node_state);
+        if project
+            .duplicate_node_in_active_blueprint(node_id, x, y)
+            .is_none()
+        {
+            return;
+        }
+        helpers::save_project_silent(project);
+        if let (Some(before_snapshot), Some(after_snapshot)) = (
+            before_snapshot,
+            capture_project_snapshot(project, &duplicate_blueprint_node_state),
+        ) {
+            duplicate_blueprint_node_state
+                .history
+                .borrow_mut()
+                .record_change(
+                    HistoryActionKind::CreateObject,
+                    "Duplicate blueprint node",
+                    node_id.to_string(),
+                    before_snapshot,
+                    after_snapshot,
+                );
+        }
+        sync::sync_editor_models(&ui, project);
+        refresh_canvas(&ui, project, &duplicate_blueprint_node_state);
+    });
+
+    let ui_weak = ui.as_weak();
     let rename_blueprint_variable_state = state.clone();
     ui.on_rename_blueprint_variable_internal(move |variable_id, name| {
         let Some(ui) = ui_weak.upgrade() else {
@@ -736,33 +869,85 @@ fn register_page_callbacks(ui: &AppWindow, state: &EditorState) {
         let Some(variable_id) = helpers::parse_uuid(variable_id.as_str()) else {
             return;
         };
-        let mut pm = set_blueprint_variable_type_state.project_manager.borrow_mut();
+        let mut pm = set_blueprint_variable_type_state
+            .project_manager
+            .borrow_mut();
         let Some(project) = pm.current_project_mut() else {
             return;
         };
-        let before_snapshot =
-            capture_project_snapshot(project, &set_blueprint_variable_type_state);
         if !project.set_local_variable_type_in_active_blueprint(variable_id, type_name.as_str()) {
             return;
         }
         helpers::save_project_silent(project);
-        if let (Some(before_snapshot), Some(after_snapshot)) = (
-            before_snapshot,
-            capture_project_snapshot(project, &set_blueprint_variable_type_state),
-        ) {
-            set_blueprint_variable_type_state
-                .history
-                .borrow_mut()
-                .record_change(
-                    HistoryActionKind::ModifyObject,
-                    "Change blueprint variable type",
-                    format!("Type: {}", type_name),
-                    before_snapshot,
-                    after_snapshot,
-                );
-        }
+        // Keep blueprint type edits responsive. Full project snapshots here delay
+        // the second dropdown for collection item types.
         sync::sync_editor_models(&ui, project);
+        sync::sync_timeline(&ui, &set_blueprint_variable_type_state.history.borrow());
     });
+
+    let ui_weak = ui.as_weak();
+    let set_blueprint_variable_item_type_state = state.clone();
+    ui.on_set_blueprint_variable_item_type_internal(move |variable_id, type_name| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        if !exit_history_preview_mode(&ui, &set_blueprint_variable_item_type_state) {
+            return;
+        }
+        let Some(variable_id) = helpers::parse_uuid(variable_id.as_str()) else {
+            return;
+        };
+        let mut pm = set_blueprint_variable_item_type_state
+            .project_manager
+            .borrow_mut();
+        let Some(project) = pm.current_project_mut() else {
+            return;
+        };
+        if !project
+            .set_local_variable_item_type_in_active_blueprint(variable_id, type_name.as_str())
+        {
+            return;
+        }
+        helpers::save_project_silent(project);
+        sync::sync_editor_models(&ui, project);
+        sync::sync_timeline(
+            &ui,
+            &set_blueprint_variable_item_type_state.history.borrow(),
+        );
+    });
+
+    let ui_weak = ui.as_weak();
+    let set_blueprint_variable_object_state = state.clone();
+    ui.on_set_blueprint_variable_object_internal(
+        move |variable_id, object_kind, object_id, object_name| {
+            let Some(ui) = ui_weak.upgrade() else {
+                return;
+            };
+            if !exit_history_preview_mode(&ui, &set_blueprint_variable_object_state) {
+                return;
+            }
+            let Some(variable_id) = helpers::parse_uuid(variable_id.as_str()) else {
+                return;
+            };
+            let mut pm = set_blueprint_variable_object_state
+                .project_manager
+                .borrow_mut();
+            let Some(project) = pm.current_project_mut() else {
+                return;
+            };
+            if !project.set_local_variable_object_in_active_blueprint(
+                variable_id,
+                object_kind.as_str(),
+                object_id.as_str(),
+                object_name.as_str(),
+            ) {
+                return;
+            }
+            helpers::save_project_silent(project);
+            sync::sync_editor_models(&ui, project);
+            sync::sync_timeline(&ui, &set_blueprint_variable_object_state.history.borrow());
+        },
+    );
 
     let ui_weak = ui.as_weak();
     let add_blueprint_function_state = state.clone();
@@ -932,11 +1117,8 @@ fn register_element_callbacks(ui: &AppWindow, state: &EditorState) {
         };
         let before_snapshot = capture_project_snapshot(project, &add_element_state);
 
-        let mut element = app::project::CanvasElementData::from_component_template(
-            element_type.as_ref(),
-            x,
-            y,
-        );
+        let mut element =
+            app::project::CanvasElementData::from_component_template(element_type.as_ref(), x, y);
         if width > 0.0 {
             element.width = width;
         }
@@ -1543,11 +1725,13 @@ fn register_element_callbacks(ui: &AppWindow, state: &EditorState) {
               checkbox_box_color,
               checkbox_box_border_color,
               checkbox_box_border_width,
-              checkbox_space_between| {
+              checkbox_space_between,
+              opacity,
+              display_mode| {
             let Some(ui) = ui_weak.upgrade() else {
                 return;
             };
-            if !is_finite_style_values(bw, br, fs) {
+            if !is_finite_style_values(bw, br, fs) || !opacity.is_finite() {
                 return;
             }
             if !exit_history_preview_mode(&ui, &update_style_state) {
@@ -1585,6 +1769,8 @@ fn register_element_callbacks(ui: &AppWindow, state: &EditorState) {
                 checkbox_box_border_color.as_str(),
                 checkbox_box_border_width,
                 checkbox_space_between,
+                opacity,
+                display_mode.as_str(),
             ) {
                 return;
             }

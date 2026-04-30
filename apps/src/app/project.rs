@@ -10,13 +10,12 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use core_blueprint::{
-    blueprint_name_for_page, compile_project, BlueprintCompilationResult,
+    blueprint_name_for_page, builtin_node_descriptor, compile_project, BlueprintCompilationResult,
     BlueprintDocument, BlueprintDocumentKind, BlueprintFunctionParameter,
     BlueprintFunctionSignature, BlueprintGraph, BlueprintGraphKind, BlueprintLocalVariable,
     BlueprintNode, BlueprintNodeKind, BlueprintOwner, BlueprintPinType, BlueprintPoint,
-    BlueprintProjectApi,
-    PageApiDescriptor, ServerApiDescriptor, UiActionDescriptor, UiElementApiDescriptor,
-    UiEventDescriptor,
+    BlueprintProjectApi, PageApiDescriptor, ServerApiDescriptor, UiActionDescriptor,
+    UiElementApiDescriptor, UiEventDescriptor,
 };
 use core_ui_graphs::{
     layout::{
@@ -240,6 +239,8 @@ impl CanvasElementData {
         props.insert("layout_margin_top".to_string(), serde_json::json!(0.0));
         props.insert("layout_margin_bottom".to_string(), serde_json::json!(0.0));
         props.insert("layout_order".to_string(), serde_json::json!(0.0));
+        props.insert("opacity".to_string(), serde_json::json!(1.0));
+        props.insert("display_mode".to_string(), serde_json::json!("visible"));
         props.insert("stack_alignment".to_string(), serde_json::json!("stretch"));
         props.insert("justify_items".to_string(), serde_json::json!("stretch"));
         props.insert(
@@ -1828,6 +1829,81 @@ impl Project {
             .unwrap_or_default()
     }
 
+    pub fn add_catalog_node_to_active_blueprint(
+        &mut self,
+        descriptor_id: &str,
+        preferred_x: f32,
+        preferred_y: f32,
+    ) -> Option<Uuid> {
+        let descriptor = builtin_node_descriptor(descriptor_id)?;
+        let graph = self.active_blueprint_graph_mut()?;
+        let mut node = descriptor.instantiate(BlueprintPoint {
+            x: preferred_x.round() as i32,
+            y: preferred_y.round() as i32,
+        });
+        node.position = nearest_free_blueprint_position(
+            &graph.nodes,
+            node.position,
+            blueprint_node_size(&node.kind),
+        );
+        let node_id = node.id;
+        graph.nodes.push(node);
+        Some(node_id)
+    }
+
+    pub fn move_node_in_active_blueprint(&mut self, node_id: Uuid, x: f32, y: f32) -> bool {
+        let Some(graph) = self.active_blueprint_graph_mut() else {
+            return false;
+        };
+        let Some(node) = graph.nodes.iter_mut().find(|node| node.id == node_id) else {
+            return false;
+        };
+        node.position = BlueprintPoint {
+            x: x.round() as i32,
+            y: y.round() as i32,
+        };
+        true
+    }
+
+    pub fn delete_node_from_active_blueprint(&mut self, node_id: Uuid) -> bool {
+        let Some(graph) = self.active_blueprint_graph_mut() else {
+            return false;
+        };
+        let Some(position) = graph.nodes.iter().position(|node| node.id == node_id) else {
+            return false;
+        };
+        graph.nodes.remove(position);
+        graph
+            .entrypoints
+            .retain(|entrypoint| *entrypoint != node_id);
+        graph
+            .links
+            .retain(|link| link.from_node_id != node_id && link.to_node_id != node_id);
+        true
+    }
+
+    pub fn duplicate_node_in_active_blueprint(
+        &mut self,
+        node_id: Uuid,
+        preferred_x: f32,
+        preferred_y: f32,
+    ) -> Option<Uuid> {
+        let graph = self.active_blueprint_graph_mut()?;
+        let source = graph.nodes.iter().find(|node| node.id == node_id)?.clone();
+        let mut duplicate = clone_blueprint_node_with_new_ids(&source);
+        duplicate.position = nearest_free_blueprint_position(
+            &graph.nodes,
+            BlueprintPoint {
+                x: preferred_x.round() as i32,
+                y: preferred_y.round() as i32,
+            },
+            blueprint_node_size(&duplicate.kind),
+        );
+        let duplicate_id = duplicate.id;
+        graph.nodes.push(duplicate);
+        Some(duplicate_id)
+    }
+
     pub fn active_blueprint_local_variables(&self) -> Vec<BlueprintLocalVariable> {
         self.active_blueprint_document()
             .and_then(|document| document.graphs.first())
@@ -1885,6 +1961,8 @@ impl Project {
             id: Uuid::new_v4(),
             name: format!("var{next_index}"),
             data_type: BlueprintPinType::Bool,
+            item_type: None,
+            value: None,
         };
         let variable_id = variable.id;
         graph.local_variables.push(variable);
@@ -1959,6 +2037,14 @@ impl Project {
             return false;
         };
         variable.data_type = data_type;
+        if !blueprint_pin_type_is_collection(data_type) {
+            variable.item_type = None;
+        } else if variable.item_type.is_none() {
+            variable.item_type = Some(BlueprintPinType::String);
+        }
+        if data_type != BlueprintPinType::Object {
+            variable.value = None;
+        }
 
         for node in &mut graph.nodes {
             match node.kind {
@@ -1978,6 +2064,62 @@ impl Project {
             }
         }
 
+        true
+    }
+
+    pub fn set_local_variable_item_type_in_active_blueprint(
+        &mut self,
+        variable_id: Uuid,
+        type_name: &str,
+    ) -> bool {
+        let Some(item_type) = parse_blueprint_pin_type_name(type_name) else {
+            return false;
+        };
+        if blueprint_pin_type_is_collection(item_type) || item_type == BlueprintPinType::Void {
+            return false;
+        }
+        let Some(graph) = self.active_blueprint_graph_mut() else {
+            return false;
+        };
+        let Some(variable) = graph
+            .local_variables
+            .iter_mut()
+            .find(|variable| variable.id == variable_id)
+        else {
+            return false;
+        };
+        if !blueprint_pin_type_is_collection(variable.data_type) {
+            return false;
+        }
+        variable.item_type = Some(item_type);
+        true
+    }
+
+    pub fn set_local_variable_object_in_active_blueprint(
+        &mut self,
+        variable_id: Uuid,
+        object_kind: &str,
+        object_id: &str,
+        object_name: &str,
+    ) -> bool {
+        let Some(graph) = self.active_blueprint_graph_mut() else {
+            return false;
+        };
+        let Some(variable) = graph
+            .local_variables
+            .iter_mut()
+            .find(|variable| variable.id == variable_id)
+        else {
+            return false;
+        };
+        if variable.data_type != BlueprintPinType::Object {
+            return false;
+        }
+        variable.value = Some(serde_json::json!({
+            "kind": object_kind,
+            "id": object_id,
+            "name": object_name,
+        }));
         true
     }
 
@@ -3497,6 +3639,8 @@ impl Project {
         checkbox_box_border_color: &str,
         checkbox_box_border_width: f32,
         checkbox_space_between: bool,
+        opacity: f32,
+        display_mode: &str,
     ) -> bool {
         let Some(root) = self.active_page_root_mut() else {
             return false;
@@ -3575,6 +3719,15 @@ impl Project {
         } else {
             1.0
         };
+        let normalized_opacity = opacity.clamp(0.0, 1.0);
+        let normalized_display_mode = if is_container {
+            match display_mode.trim().to_ascii_lowercase().as_str() {
+                "none" => "none",
+                _ => "visible",
+            }
+        } else {
+            "visible"
+        };
 
         element.properties.insert(
             "background".to_string(),
@@ -3646,6 +3799,13 @@ impl Project {
         element.properties.insert(
             "checkbox_space_between".to_string(),
             serde_json::json!(is_checkbox_component && checkbox_space_between),
+        );
+        element
+            .properties
+            .insert("opacity".to_string(), serde_json::json!(normalized_opacity));
+        element.properties.insert(
+            "display_mode".to_string(),
+            serde_json::json!(normalized_display_mode),
         );
 
         let mut candidates = Vec::new();
@@ -4203,12 +4363,56 @@ impl Project {
         };
         let removed = retain_elements_recursive(&mut root.children, &remove_set);
         if removed {
+            self.remove_blueprint_references_to_elements(&remove_set);
             if let Some(parent_id) = parent_id {
                 let _ = self.layout_children_in_parent_on_active_page(parent_id);
             }
             self.prune_unused_image_assets(&removed_image_paths);
         }
         removed
+    }
+
+    fn remove_blueprint_references_to_elements(&mut self, element_ids: &HashSet<Uuid>) {
+        if element_ids.is_empty() {
+            return;
+        }
+
+        for document in &mut self.project_file.logic_data.documents {
+            if document.kind != BlueprintDocumentKind::PageBlueprint {
+                continue;
+            }
+
+            for graph in &mut document.graphs {
+                let removed_node_ids: HashSet<Uuid> = graph
+                    .nodes
+                    .iter()
+                    .filter(|node| match &node.kind {
+                        BlueprintNodeKind::UiEvent { element_id, .. }
+                        | BlueprintNodeKind::SetElementText { element_id } => {
+                            element_ids.contains(element_id)
+                        }
+                        _ => false,
+                    })
+                    .map(|node| node.id)
+                    .collect();
+
+                if removed_node_ids.is_empty() {
+                    continue;
+                }
+
+                graph
+                    .nodes
+                    .retain(|node| !removed_node_ids.contains(&node.id));
+                graph
+                    .entrypoints
+                    .retain(|node_id| !removed_node_ids.contains(node_id));
+                graph.links.retain(|link| {
+                    !removed_node_ids.contains(&link.from_node_id)
+                        && !removed_node_ids.contains(&link.to_node_id)
+                });
+            }
+            document.sync_exports();
+        }
     }
 
     pub fn snapshot_binary(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
@@ -4362,11 +4566,22 @@ fn parse_blueprint_pin_type_name(type_name: &str) -> Option<BlueprintPinType> {
         "vector" | "vec" => Some(BlueprintPinType::Vector),
         "set" | "hashset" => Some(BlueprintPinType::HashSet),
         "hashmap" | "map" => Some(BlueprintPinType::HashMap),
+        "object" | "json" => Some(BlueprintPinType::Object),
         "element" | "uielement" => Some(BlueprintPinType::UiElementRef),
         "page" => Some(BlueprintPinType::PageRef),
         "api" => Some(BlueprintPinType::ApiRef),
         _ => None,
     }
+}
+
+fn blueprint_pin_type_is_collection(data_type: BlueprintPinType) -> bool {
+    matches!(
+        data_type,
+        BlueprintPinType::Array
+            | BlueprintPinType::Vector
+            | BlueprintPinType::HashSet
+            | BlueprintPinType::HashMap
+    )
 }
 
 fn blueprint_node_size(kind: &BlueprintNodeKind) -> (i32, i32) {
@@ -4377,6 +4592,15 @@ fn blueprint_node_size(kind: &BlueprintNodeKind) -> (i32, i32) {
         BlueprintNodeKind::UiEvent { .. } => (190, 112),
         _ => (220, 112),
     }
+}
+
+fn clone_blueprint_node_with_new_ids(source: &BlueprintNode) -> BlueprintNode {
+    let mut next = source.clone();
+    next.id = Uuid::new_v4();
+    for pin in &mut next.pins {
+        pin.id = Uuid::new_v4();
+    }
+    next
 }
 
 fn nearest_free_blueprint_position(
@@ -4720,6 +4944,47 @@ mod tests {
             .spans
             .iter()
             .any(|span| span.node_id == set_text.id));
+    }
+
+    #[test]
+    fn deleting_scene_element_removes_bound_blueprint_nodes() {
+        let temp = tempdir().expect("tempdir");
+        let project_dir = temp.path().to_string_lossy().to_string();
+        let mut project = Project::new(
+            "SnappixDeleteBlueprintRefs",
+            &project_dir,
+            Platform::Desktop,
+            DevMode::Nodes,
+            PageSize::Desktop,
+            0,
+            0,
+        );
+
+        let button = CanvasElementData::from_component_template("button", 24.0, 24.0);
+        let button_id = button.id;
+        assert!(project
+            .add_element_to_active_page_with_parent(button, None)
+            .is_some());
+
+        let blueprint_ref = project
+            .page_blueprint_document_ref(project.active_page_index())
+            .expect("page blueprint");
+        assert!(project.open_document(blueprint_ref));
+        assert!(project.ensure_element_event_nodes_on_active_page_blueprint(button_id));
+        assert!(project.active_blueprint_nodes().iter().any(|node| matches!(
+            node.kind,
+            BlueprintNodeKind::UiEvent { element_id, .. } if element_id == button_id
+        )));
+
+        assert!(project.remove_element_on_active_page(button_id));
+
+        assert!(project
+            .active_blueprint_nodes()
+            .iter()
+            .all(|node| !matches!(
+                node.kind,
+                BlueprintNodeKind::UiEvent { element_id, .. } if element_id == button_id
+            )));
     }
 
     #[test]

@@ -4,15 +4,18 @@ use std::path::Path;
 use std::rc::Rc;
 use uuid::Uuid;
 
-use core_blueprint::BlueprintPinType;
+use core_blueprint::{
+    builtin_node_descriptor, BlueprintNodeKind, BlueprintPinDirection, BlueprintPinKind,
+    BlueprintPinType,
+};
 
 use crate::app::project::{CanvasElementData, Project};
 use crate::config;
 use crate::editor_runtime::history::HistoryManager;
 use crate::{
-    AppWindow, BlueprintFunctionInfo, BlueprintVariableInfo, CanvasBounds, CanvasCommentInfo,
-    CanvasPosition, CanvasSize, EditorDocumentInfo, ProjectPageInfo, RecentProjectData,
-    SelectionInfo, TimelineEntry,
+    AppWindow, BlueprintFunctionInfo, BlueprintNodeInfo, BlueprintVariableInfo, CanvasBounds,
+    CanvasCommentInfo, CanvasPosition, CanvasSize, EditorDocumentInfo, ProjectPageInfo,
+    RecentProjectData, SelectionInfo, TimelineEntry,
 };
 
 #[derive(Clone)]
@@ -126,7 +129,14 @@ pub fn sync_blueprint_models(ui: &AppWindow, project: &Project) {
         .map(|variable| BlueprintVariableInfo {
             variable_id: SharedString::from(variable.id.to_string()),
             name: SharedString::from(variable.name),
-            type_name: SharedString::from(pin_type_label(variable.data_type)),
+            type_name: SharedString::from(variable_type_label(
+                variable.data_type,
+                variable.item_type,
+            )),
+            item_type_name: SharedString::from(
+                variable.item_type.map(pin_type_label).unwrap_or("String"),
+            ),
+            value_label: SharedString::from(variable_value_label(variable.value.as_ref())),
             color: pin_type_color(variable.data_type),
         })
         .collect();
@@ -142,6 +152,150 @@ pub fn sync_blueprint_models(ui: &AppWindow, project: &Project) {
         })
         .collect();
     ui.set_blueprint_function_items(Rc::new(VecModel::from(functions)).into());
+
+    let nodes: Vec<BlueprintNodeInfo> = project
+        .active_blueprint_nodes()
+        .into_iter()
+        .map(|node| {
+            let exec_outputs: Vec<_> = node
+                .pins
+                .iter()
+                .filter(|pin| {
+                    pin.direction == BlueprintPinDirection::Output
+                        && pin.kind == BlueprintPinKind::Exec
+                })
+                .map(|pin| pin.name.clone())
+                .collect();
+            let data_input = node.pins.iter().find(|pin| {
+                pin.direction == BlueprintPinDirection::Input && pin.kind == BlueprintPinKind::Data
+            });
+            let has_exec_input = node.pins.iter().any(|pin| {
+                pin.direction == BlueprintPinDirection::Input && pin.kind == BlueprintPinKind::Exec
+            });
+
+            let (category, element_type, descriptor_id, is_event, is_bound_event) =
+                blueprint_node_display_meta(&node.kind);
+            BlueprintNodeInfo {
+                node_id: SharedString::from(node.id.to_string()),
+                title: SharedString::from(node.title),
+                category: SharedString::from(category),
+                element_type: SharedString::from(element_type),
+                descriptor_id: SharedString::from(descriptor_id),
+                x: node.position.x as f32,
+                y: node.position.y as f32,
+                is_event,
+                is_bound_event,
+                has_exec_input,
+                exec_output_1: SharedString::from(
+                    exec_outputs.first().cloned().unwrap_or_default(),
+                ),
+                exec_output_2: SharedString::from(exec_outputs.get(1).cloned().unwrap_or_default()),
+                exec_output_3: SharedString::from(exec_outputs.get(2).cloned().unwrap_or_default()),
+                data_input_name: SharedString::from(
+                    data_input.map(|pin| pin.name.clone()).unwrap_or_default(),
+                ),
+                data_input_type: SharedString::from(
+                    data_input
+                        .map(|pin| pin_type_label(pin.data_type))
+                        .unwrap_or(""),
+                ),
+                data_input_color: data_input
+                    .map(|pin| pin_type_color(pin.data_type))
+                    .unwrap_or_else(|| Color::from_rgb_u8(90, 198, 139)),
+            }
+        })
+        .collect();
+    ui.set_blueprint_node_items(Rc::new(VecModel::from(nodes)).into());
+}
+
+fn blueprint_node_display_meta(kind: &BlueprintNodeKind) -> (String, String, String, bool, bool) {
+    match kind {
+        BlueprintNodeKind::UiEvent {
+            element_id,
+            event_name,
+        } => (
+            "Events".to_string(),
+            "Event Element".to_string(),
+            format!("ui_event:{event_name}"),
+            true,
+            !element_id.is_nil(),
+        ),
+        BlueprintNodeKind::Catalog { descriptor_id } => {
+            let descriptor = builtin_node_descriptor(descriptor_id);
+            let category = descriptor
+                .as_ref()
+                .map(|descriptor| descriptor.category.clone())
+                .unwrap_or_else(|| "Nodes".to_string());
+            let is_event = category == "Events";
+            let element_type = descriptor
+                .as_ref()
+                .map(|descriptor| descriptor.title.clone())
+                .unwrap_or_else(|| "Catalog Node".to_string());
+            (
+                category,
+                element_type,
+                descriptor_id.clone(),
+                is_event,
+                false,
+            )
+        }
+        BlueprintNodeKind::VariableGet { .. } => (
+            "Variables".to_string(),
+            "Variable".to_string(),
+            "variable.get".to_string(),
+            false,
+            false,
+        ),
+        BlueprintNodeKind::VariableSet { .. } => (
+            "Variables".to_string(),
+            "Variable".to_string(),
+            "variable.set".to_string(),
+            false,
+            false,
+        ),
+        BlueprintNodeKind::SetElementText { .. } => (
+            "UI".to_string(),
+            "Action".to_string(),
+            "ui.set_text".to_string(),
+            false,
+            false,
+        ),
+        BlueprintNodeKind::LiteralString { .. } => (
+            "Values".to_string(),
+            "String".to_string(),
+            "literal.string".to_string(),
+            false,
+            false,
+        ),
+        BlueprintNodeKind::FunctionEntry { .. } => (
+            "Functions".to_string(),
+            "Function".to_string(),
+            "function.entry".to_string(),
+            true,
+            true,
+        ),
+        BlueprintNodeKind::FunctionResult { .. } => (
+            "Functions".to_string(),
+            "Function".to_string(),
+            "function.result".to_string(),
+            false,
+            false,
+        ),
+        BlueprintNodeKind::CallDocumentFunction { .. } => (
+            "Functions".to_string(),
+            "Function".to_string(),
+            "function.call".to_string(),
+            false,
+            false,
+        ),
+        BlueprintNodeKind::Functional { node_id } => (
+            "Legacy".to_string(),
+            "Functional".to_string(),
+            node_id.clone(),
+            false,
+            false,
+        ),
+    }
 }
 
 fn pin_type_label(pin_type: BlueprintPinType) -> &'static str {
@@ -149,18 +303,33 @@ fn pin_type_label(pin_type: BlueprintPinType) -> &'static str {
         BlueprintPinType::Exec => "exec",
         BlueprintPinType::Any => "any",
         BlueprintPinType::Bool => "bool",
-        BlueprintPinType::Int => "i64",
-        BlueprintPinType::Float => "f64",
+        BlueprintPinType::Int => "int",
+        BlueprintPinType::Float => "float",
         BlueprintPinType::String => "String",
         BlueprintPinType::Color => "Color",
         BlueprintPinType::Array => "Array",
         BlueprintPinType::Vector => "Vector",
         BlueprintPinType::HashSet => "Set",
         BlueprintPinType::HashMap => "HashMap",
+        BlueprintPinType::Object => "Object",
         BlueprintPinType::UiElementRef => "Element",
         BlueprintPinType::PageRef => "Page",
         BlueprintPinType::ApiRef => "Api",
         BlueprintPinType::Void => "void",
+    }
+}
+
+fn variable_type_label(data_type: BlueprintPinType, item_type: Option<BlueprintPinType>) -> String {
+    let base = pin_type_label(data_type);
+    match data_type {
+        BlueprintPinType::Array
+        | BlueprintPinType::Vector
+        | BlueprintPinType::HashSet
+        | BlueprintPinType::HashMap => {
+            let item = item_type.map(pin_type_label).unwrap_or("String");
+            format!("{base}<{item}>")
+        }
+        _ => base.to_string(),
     }
 }
 
@@ -170,6 +339,7 @@ fn pin_type_color(pin_type: BlueprintPinType) -> Color {
         BlueprintPinType::Int | BlueprintPinType::Float => Color::from_rgb_u8(76, 137, 219),
         BlueprintPinType::String => Color::from_rgb_u8(218, 171, 64),
         BlueprintPinType::Color => Color::from_rgb_u8(181, 93, 205),
+        BlueprintPinType::Object => Color::from_rgb_u8(70, 190, 124),
         BlueprintPinType::Array
         | BlueprintPinType::Vector
         | BlueprintPinType::HashSet
@@ -179,6 +349,18 @@ fn pin_type_color(pin_type: BlueprintPinType) -> Color {
         BlueprintPinType::Any => Color::from_rgb_u8(132, 139, 150),
         BlueprintPinType::Exec | BlueprintPinType::Void => Color::from_rgb_u8(235, 235, 235),
     }
+}
+
+fn variable_value_label(value: Option<&serde_json::Value>) -> String {
+    let Some(value) = value else {
+        return String::new();
+    };
+    value
+        .get("name")
+        .and_then(|value| value.as_str())
+        .filter(|name| !name.trim().is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| value.to_string())
 }
 
 pub fn sync_canvas(
@@ -836,6 +1018,8 @@ fn to_selection_info(
         image_source_path: SharedString::from(image_source_path.clone()),
         image_source: load_image_from_project_path(project, &image_source_path),
         text_color: resolved_text_color,
+        opacity: prop_f32(props, "opacity", 1.0).clamp(0.0, 1.0),
+        display_mode: SharedString::from(prop_str(props, "display_mode", "visible")),
         is_selected,
         is_group_anchor: group_anchor.map(|id| id == element.id).unwrap_or(false),
         is_hovered: false,
@@ -894,6 +1078,8 @@ fn set_selected_defaults(ui: &AppWindow) {
     ui.set_selected_element_background_image(SharedString::from(""));
     ui.set_selected_element_image_source(SharedString::from(""));
     ui.set_selected_element_image_source_display(SharedString::from(""));
+    ui.set_selected_element_opacity(1.0);
+    ui.set_selected_element_display_mode(SharedString::from("visible"));
     ui.set_selected_element_inherit_text_style(true);
 }
 
@@ -1127,6 +1313,12 @@ fn set_selected_element(
     ui.set_selected_element_image_source(SharedString::from(image_source_path.clone()));
     ui.set_selected_element_image_source_display(SharedString::from(asset_display_name(
         &image_source_path,
+    )));
+    ui.set_selected_element_opacity(prop_f32(props, "opacity", 1.0).clamp(0.0, 1.0));
+    ui.set_selected_element_display_mode(SharedString::from(prop_str(
+        props,
+        "display_mode",
+        "visible",
     )));
     ui.set_selected_element_inherit_text_style(prop_bool(props, "inherit_text_style", true));
 }
