@@ -7,9 +7,9 @@ use crate::{AppErrorNotification, AppWindow};
 const MAX_ERROR_NOTIFICATIONS: usize = 8;
 
 thread_local! {
-    static ERROR_QUEUE: RefCell<Vec<AppErrorNotification>> = RefCell::new(Vec::new());
-    static NEXT_ERROR_ID: RefCell<u64> = RefCell::new(0);
-    static ACTIVE_UI: RefCell<Option<slint::Weak<AppWindow>>> = RefCell::new(None);
+    static ERROR_QUEUE: RefCell<Vec<AppErrorNotification>> = const { RefCell::new(Vec::new()) };
+    static NEXT_ERROR_ID: RefCell<u64> = const { RefCell::new(0) };
+    static ACTIVE_UI: RefCell<Option<slint::Weak<AppWindow>>> = const { RefCell::new(None) };
 }
 
 #[derive(Clone, Copy, Debug)]

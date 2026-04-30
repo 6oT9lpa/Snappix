@@ -1,6 +1,5 @@
 //! File associations and desktop integration.
 
-
 pub fn register_file_associations() {
     #[cfg(target_os = "linux")]
     {
@@ -31,7 +30,11 @@ fn register_linux_associations() -> Result<(), Box<dyn std::error::Error>> {
     let applications_dir = data_dir.join("applications");
     let mime_dir = data_dir.join("mime");
     let mime_packages_dir = mime_dir.join("packages");
-    let icon_dir = data_dir.join("icons").join("hicolor").join("256x256").join("apps");
+    let icon_dir = data_dir
+        .join("icons")
+        .join("hicolor")
+        .join("256x256")
+        .join("apps");
 
     fs::create_dir_all(&applications_dir)?;
     fs::create_dir_all(&mime_packages_dir)?;

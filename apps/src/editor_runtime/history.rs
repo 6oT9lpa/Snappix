@@ -1,6 +1,4 @@
 use std::collections::HashSet;
-use std::path::Path;
-
 use chrono::Local;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -188,21 +186,6 @@ impl HistoryManager {
         self.push_timeline(action_kind, title, details, after);
     }
 
-    pub fn save_to_file(&self, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let payload = PersistedHistoryState {
-            command_entries: self.command_entries.clone(),
-            cursor: self.cursor,
-            timeline_entries: self.timeline_entries.clone(),
-        };
-        let bytes =
-            shared::to_msgpack(&payload).map_err(|err| std::io::Error::other(err.to_string()))?;
-        std::fs::write(path, bytes)?;
-        Ok(())
-    }
-
     pub fn save_to_bytes(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         let payload = PersistedHistoryState {
             command_entries: self.command_entries.clone(),
@@ -212,26 +195,6 @@ impl HistoryManager {
         let bytes =
             shared::to_msgpack(&payload).map_err(|err| std::io::Error::other(err.to_string()))?;
         Ok(bytes)
-    }
-
-    pub fn load_from_file(&mut self, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-        let bytes = std::fs::read(path)?;
-        let payload: PersistedHistoryState =
-            shared::from_msgpack(&bytes).map_err(|err| std::io::Error::other(err.to_string()))?;
-
-        self.command_entries = payload.command_entries;
-        if self.command_entries.len() > self.capacity {
-            self.command_entries.truncate(self.capacity);
-        }
-
-        self.timeline_entries = payload.timeline_entries;
-        if self.timeline_entries.len() > self.capacity {
-            self.timeline_entries.truncate(self.capacity);
-        }
-
-        self.cursor = payload.cursor.min(self.command_entries.len());
-        self.preview = None;
-        Ok(())
     }
 
     pub fn load_from_bytes(&mut self, bytes: &[u8]) -> Result<(), Box<dyn std::error::Error>> {

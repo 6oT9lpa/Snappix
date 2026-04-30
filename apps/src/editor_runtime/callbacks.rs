@@ -292,7 +292,7 @@ fn register_project_callbacks(ui: &AppWindow, state: &EditorState) {
             let mut pm = create_project_state.project_manager.borrow_mut();
             let project = pm.create_project(
                 &sanitized_name,
-                &path.to_string(),
+                path.as_ref(),
                 parse_platform(platform_idx),
                 parse_dev_mode(dev_mode_idx),
                 parse_page_size(page_size_idx),
@@ -303,10 +303,7 @@ fn register_project_callbacks(ui: &AppWindow, state: &EditorState) {
             helpers::save_project_silent(project);
 
             let mut recent_storage = config::RecentProjectsStorage::load();
-            recent_storage.add_project(
-                &sanitized_name,
-                &project.spx_file_path().to_string_lossy(),
-            );
+            recent_storage.add_project(&sanitized_name, &project.spx_file_path().to_string_lossy());
 
             if let Some(ui) = ui_weak.upgrade() {
                 ui.set_project_error_message(SharedString::from(""));
@@ -577,13 +574,21 @@ fn register_page_callbacks(ui: &AppWindow, state: &EditorState) {
 
     let ui_weak = ui.as_weak();
     let open_selected_element_blueprint_state = state.clone();
-    ui.on_open_selected_element_blueprint_internal(move |_element_id| {
-        let mut pm = open_selected_element_blueprint_state.project_manager.borrow_mut();
+    ui.on_open_selected_element_blueprint_internal(move |element_id| {
+        let mut pm = open_selected_element_blueprint_state
+            .project_manager
+            .borrow_mut();
         let Some(project) = pm.current_project_mut() else {
             return;
         };
 
-        let Some(document) = project.page_blueprint_document_ref(project.active_page_index()) else {
+        if let Some(element_id) = helpers::parse_uuid(element_id.as_str()) {
+            let _ = project.ensure_element_event_nodes_on_active_page_blueprint(element_id);
+            helpers::save_project_silent(project);
+        }
+
+        let Some(document) = project.page_blueprint_document_ref(project.active_page_index())
+        else {
             return;
         };
         if !project.open_document(document) {
@@ -595,6 +600,205 @@ fn register_page_callbacks(ui: &AppWindow, state: &EditorState) {
             apply_scene_for_active_document(&ui, project);
             refresh_canvas(&ui, project, &open_selected_element_blueprint_state);
         }
+    });
+
+    let ui_weak = ui.as_weak();
+    let add_blueprint_variable_state = state.clone();
+    ui.on_add_blueprint_variable_internal(move || {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        if !exit_history_preview_mode(&ui, &add_blueprint_variable_state) {
+            return;
+        }
+
+        let mut pm = add_blueprint_variable_state.project_manager.borrow_mut();
+        let Some(project) = pm.current_project_mut() else {
+            return;
+        };
+        let before_snapshot = capture_project_snapshot(project, &add_blueprint_variable_state);
+        if project.add_local_variable_to_active_blueprint().is_none() {
+            return;
+        }
+        helpers::save_project_silent(project);
+        if let (Some(before_snapshot), Some(after_snapshot)) = (
+            before_snapshot,
+            capture_project_snapshot(project, &add_blueprint_variable_state),
+        ) {
+            add_blueprint_variable_state
+                .history
+                .borrow_mut()
+                .record_change(
+                    HistoryActionKind::ModifyObject,
+                    "Add blueprint variable",
+                    "Created bool variable",
+                    before_snapshot,
+                    after_snapshot,
+                );
+        }
+        sync::sync_editor_models(&ui, project);
+    });
+
+    let ui_weak = ui.as_weak();
+    let add_blueprint_variable_node_state = state.clone();
+    ui.on_add_blueprint_variable_node_internal(move |variable_id, access_kind, x, y| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        if !exit_history_preview_mode(&ui, &add_blueprint_variable_node_state) {
+            return;
+        }
+
+        let Some(variable_id) = helpers::parse_uuid(variable_id.as_str()) else {
+            return;
+        };
+        let mut pm = add_blueprint_variable_node_state
+            .project_manager
+            .borrow_mut();
+        let Some(project) = pm.current_project_mut() else {
+            return;
+        };
+        let before_snapshot = capture_project_snapshot(project, &add_blueprint_variable_node_state);
+        if project
+            .add_variable_node_to_active_blueprint(variable_id, access_kind.as_str(), x, y)
+            .is_none()
+        {
+            return;
+        }
+        helpers::save_project_silent(project);
+        if let (Some(before_snapshot), Some(after_snapshot)) = (
+            before_snapshot,
+            capture_project_snapshot(project, &add_blueprint_variable_node_state),
+        ) {
+            add_blueprint_variable_node_state
+                .history
+                .borrow_mut()
+                .record_change(
+                    HistoryActionKind::CreateObject,
+                    "Add variable node",
+                    format!("{} variable node", access_kind),
+                    before_snapshot,
+                    after_snapshot,
+                );
+        }
+        sync::sync_editor_models(&ui, project);
+        refresh_canvas(&ui, project, &add_blueprint_variable_node_state);
+    });
+
+    let ui_weak = ui.as_weak();
+    let rename_blueprint_variable_state = state.clone();
+    ui.on_rename_blueprint_variable_internal(move |variable_id, name| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        if !exit_history_preview_mode(&ui, &rename_blueprint_variable_state) {
+            return;
+        }
+        let Some(variable_id) = helpers::parse_uuid(variable_id.as_str()) else {
+            return;
+        };
+        let mut pm = rename_blueprint_variable_state.project_manager.borrow_mut();
+        let Some(project) = pm.current_project_mut() else {
+            return;
+        };
+        let before_snapshot = capture_project_snapshot(project, &rename_blueprint_variable_state);
+        if !project.rename_local_variable_in_active_blueprint(variable_id, name.as_str()) {
+            return;
+        }
+        helpers::save_project_silent(project);
+        if let (Some(before_snapshot), Some(after_snapshot)) = (
+            before_snapshot,
+            capture_project_snapshot(project, &rename_blueprint_variable_state),
+        ) {
+            rename_blueprint_variable_state
+                .history
+                .borrow_mut()
+                .record_change(
+                    HistoryActionKind::ModifyObject,
+                    "Rename blueprint variable",
+                    format!("Variable: {}", name),
+                    before_snapshot,
+                    after_snapshot,
+                );
+        }
+        sync::sync_editor_models(&ui, project);
+    });
+
+    let ui_weak = ui.as_weak();
+    let set_blueprint_variable_type_state = state.clone();
+    ui.on_set_blueprint_variable_type_internal(move |variable_id, type_name| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        if !exit_history_preview_mode(&ui, &set_blueprint_variable_type_state) {
+            return;
+        }
+        let Some(variable_id) = helpers::parse_uuid(variable_id.as_str()) else {
+            return;
+        };
+        let mut pm = set_blueprint_variable_type_state.project_manager.borrow_mut();
+        let Some(project) = pm.current_project_mut() else {
+            return;
+        };
+        let before_snapshot =
+            capture_project_snapshot(project, &set_blueprint_variable_type_state);
+        if !project.set_local_variable_type_in_active_blueprint(variable_id, type_name.as_str()) {
+            return;
+        }
+        helpers::save_project_silent(project);
+        if let (Some(before_snapshot), Some(after_snapshot)) = (
+            before_snapshot,
+            capture_project_snapshot(project, &set_blueprint_variable_type_state),
+        ) {
+            set_blueprint_variable_type_state
+                .history
+                .borrow_mut()
+                .record_change(
+                    HistoryActionKind::ModifyObject,
+                    "Change blueprint variable type",
+                    format!("Type: {}", type_name),
+                    before_snapshot,
+                    after_snapshot,
+                );
+        }
+        sync::sync_editor_models(&ui, project);
+    });
+
+    let ui_weak = ui.as_weak();
+    let add_blueprint_function_state = state.clone();
+    ui.on_add_blueprint_function_internal(move || {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        if !exit_history_preview_mode(&ui, &add_blueprint_function_state) {
+            return;
+        }
+
+        let mut pm = add_blueprint_function_state.project_manager.borrow_mut();
+        let Some(project) = pm.current_project_mut() else {
+            return;
+        };
+        let before_snapshot = capture_project_snapshot(project, &add_blueprint_function_state);
+        if project.add_function_to_active_blueprint().is_none() {
+            return;
+        }
+        helpers::save_project_silent(project);
+        if let (Some(before_snapshot), Some(after_snapshot)) = (
+            before_snapshot,
+            capture_project_snapshot(project, &add_blueprint_function_state),
+        ) {
+            add_blueprint_function_state
+                .history
+                .borrow_mut()
+                .record_change(
+                    HistoryActionKind::CreateObject,
+                    "Add blueprint function",
+                    "Created user function",
+                    before_snapshot,
+                    after_snapshot,
+                );
+        }
+        sync::sync_editor_models(&ui, project);
     });
 
     let ui_weak = ui.as_weak();
@@ -729,7 +933,7 @@ fn register_element_callbacks(ui: &AppWindow, state: &EditorState) {
         let before_snapshot = capture_project_snapshot(project, &add_element_state);
 
         let mut element = app::project::CanvasElementData::from_component_template(
-            &element_type.to_string(),
+            element_type.as_ref(),
             x,
             y,
         );
@@ -773,7 +977,7 @@ fn register_element_callbacks(ui: &AppWindow, state: &EditorState) {
 
     let ui_weak = ui.as_weak();
     let select_element_state = state.clone();
-    ui.on_select_element_internal(move |id, additive, deep_select| {
+    ui.on_select_element_internal(move |id, additive, _deep_select| {
         let mut pm = select_element_state.project_manager.borrow_mut();
         let Some(project) = pm.current_project_mut() else {
             return;
@@ -789,9 +993,6 @@ fn register_element_callbacks(ui: &AppWindow, state: &EditorState) {
                 } else {
                     selected.push(clicked_id);
                 }
-            } else if deep_select {
-                selected.clear();
-                selected.push(clicked_id);
             } else {
                 selected.clear();
                 selected.push(clicked_id);
@@ -1413,8 +1614,16 @@ fn register_element_callbacks(ui: &AppWindow, state: &EditorState) {
               container_mode,
               allow_absolute_children,
               layout_padding,
+              layout_padding_left,
+              layout_padding_right,
+              layout_padding_top,
+              layout_padding_bottom,
               layout_spacing,
               layout_margin,
+              layout_margin_left,
+              layout_margin_right,
+              layout_margin_top,
+              layout_margin_bottom,
               layout_order,
               stack_alignment,
               flex_direction,
@@ -1432,8 +1641,16 @@ fn register_element_callbacks(ui: &AppWindow, state: &EditorState) {
                 return;
             };
             if !(layout_padding.is_finite()
+                && layout_padding_left.is_finite()
+                && layout_padding_right.is_finite()
+                && layout_padding_top.is_finite()
+                && layout_padding_bottom.is_finite()
                 && layout_spacing.is_finite()
                 && layout_margin.is_finite()
+                && layout_margin_left.is_finite()
+                && layout_margin_right.is_finite()
+                && layout_margin_top.is_finite()
+                && layout_margin_bottom.is_finite()
                 && layout_order.is_finite())
             {
                 return;
@@ -1459,8 +1676,16 @@ fn register_element_callbacks(ui: &AppWindow, state: &EditorState) {
                 container_mode.as_str(),
                 allow_absolute_children,
                 layout_padding,
+                layout_padding_left,
+                layout_padding_right,
+                layout_padding_top,
+                layout_padding_bottom,
                 layout_spacing,
                 layout_margin,
+                layout_margin_left,
+                layout_margin_right,
+                layout_margin_top,
+                layout_margin_bottom,
                 layout_order,
                 stack_alignment.as_str(),
                 flex_direction.as_str(),
@@ -1484,13 +1709,16 @@ fn register_element_callbacks(ui: &AppWindow, state: &EditorState) {
                 before_snapshot,
                 capture_project_snapshot(project, &update_container_settings_state),
             ) {
-                update_container_settings_state.history.borrow_mut().record_change(
-                    HistoryActionKind::ModifyObject,
-                    "Edit container settings",
-                    "Updated layout container constraints",
-                    before_snapshot,
-                    after_snapshot,
-                );
+                update_container_settings_state
+                    .history
+                    .borrow_mut()
+                    .record_change(
+                        HistoryActionKind::ModifyObject,
+                        "Edit container settings",
+                        "Updated layout container constraints",
+                        before_snapshot,
+                        after_snapshot,
+                    );
             }
             refresh_canvas(&ui, project, &update_container_settings_state);
         },
@@ -1533,18 +1761,20 @@ fn register_element_callbacks(ui: &AppWindow, state: &EditorState) {
             before_snapshot,
             capture_project_snapshot(project, &browse_image_source_state),
         ) {
-            browse_image_source_state.history.borrow_mut().record_change(
-                HistoryActionKind::ModifyObject,
-                "Set image source",
-                "Updated image source from file",
-                before_snapshot,
-                after_snapshot,
-            );
+            browse_image_source_state
+                .history
+                .borrow_mut()
+                .record_change(
+                    HistoryActionKind::ModifyObject,
+                    "Set image source",
+                    "Updated image source from file",
+                    before_snapshot,
+                    after_snapshot,
+                );
         }
         refresh_canvas(&ui, project, &browse_image_source_state);
     });
 }
-
 
 fn register_comment_callbacks(ui: &AppWindow, state: &EditorState) {
     let ui_weak = ui.as_weak();
@@ -1606,7 +1836,11 @@ fn register_comment_callbacks(ui: &AppWindow, state: &EditorState) {
         let Some(comment_uuid) = helpers::parse_uuid(comment_id.as_str()) else {
             return;
         };
-        if !project.update_comment_content_on_active_page(comment_uuid, title.as_str(), body.as_str()) {
+        if !project.update_comment_content_on_active_page(
+            comment_uuid,
+            title.as_str(),
+            body.as_str(),
+        ) {
             return;
         }
 
@@ -1751,8 +1985,7 @@ fn register_comment_callbacks(ui: &AppWindow, state: &EditorState) {
         let Some(project) = pm.current_project_mut() else {
             return;
         };
-        let before_snapshot =
-            capture_project_snapshot(project, &update_comment_font_sizes_state);
+        let before_snapshot = capture_project_snapshot(project, &update_comment_font_sizes_state);
 
         let Some(comment_uuid) = helpers::parse_uuid(comment_id.as_str()) else {
             return;
@@ -1931,7 +2164,6 @@ fn register_comment_callbacks(ui: &AppWindow, state: &EditorState) {
         refresh_canvas(&ui, project, &clear_comment_image_state);
     });
 }
-
 
 fn register_hotkey_callbacks(ui: &AppWindow, state: &EditorState) {
     let ui_weak = ui.as_weak();
@@ -2613,10 +2845,7 @@ fn pick_image_file() -> Option<PathBuf> {
 }
 
 fn project_images_dir(project: &Project) -> PathBuf {
-    project
-        .assets_root_dir()
-        .join("assets")
-        .join("images")
+    project.assets_root_dir().join("assets").join("images")
 }
 
 fn project_image_asset_path(file_name: &str) -> String {
@@ -2722,8 +2951,7 @@ fn try_paste_clipboard_image_into_selected_image(
     let Some(before_snapshot) = capture_project_snapshot(project, state) else {
         return false;
     };
-    let Some(imported_path) =
-        save_clipboard_image_to_project_assets(project, width, height, &rgba)
+    let Some(imported_path) = save_clipboard_image_to_project_assets(project, width, height, &rgba)
     else {
         return false;
     };
@@ -2757,12 +2985,7 @@ fn refresh_canvas(ui: &AppWindow, project: &Project, state: &EditorState) {
 }
 
 fn refresh_canvas_preview(ui: &AppWindow, project: &Project, state: &EditorState) {
-    sync::sync_canvas_view(
-        ui,
-        project,
-        &state.selected_elements.borrow(),
-        None,
-    );
+    sync::sync_canvas_view(ui, project, &state.selected_elements.borrow(), None);
 }
 
 fn clear_selection_and_outline(state: &EditorState) {
@@ -3130,11 +3353,7 @@ fn flip_selected_elements(project: &mut Project, state: &EditorState, horizontal
 
         let next_x = next_center_x - element.width / 2.0;
         let next_y = next_center_y - element.height / 2.0;
-        let next_rotation = if horizontal {
-            normalize_rotation_degrees(180.0 - element.rotation)
-        } else {
-            normalize_rotation_degrees(-element.rotation)
-        };
+        let next_rotation = normalize_rotation_degrees(element.rotation);
 
         let (clamped_x, clamped_y, clamped_w, clamped_h, clamped_rotation) =
             helpers::clamp_rotated_geometry_to_page(
@@ -3147,14 +3366,16 @@ fn flip_selected_elements(project: &mut Project, state: &EditorState, horizontal
                 page_h,
             );
 
-        if project.update_element_geometry_on_active_page(
+        let geometry_changed = project.update_element_geometry_on_active_page(
             element_id,
             clamped_x,
             clamped_y,
             clamped_w,
             clamped_h,
             clamped_rotation,
-        ) {
+        );
+        let flip_changed = project.toggle_element_flip_on_active_page(element_id, horizontal);
+        if geometry_changed || flip_changed {
             changed += 1;
         }
     }

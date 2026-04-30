@@ -10,19 +10,23 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use core_blueprint::{
-    blueprint_name_for_page, compile_project, BlueprintCompilationResult, BlueprintDocument,
-    BlueprintDocumentKind, BlueprintFunctionParameter, BlueprintOwner, BlueprintPinType,
-    BlueprintProjectApi, PageApiDescriptor, ServerApiDescriptor, UiActionDescriptor,
-    UiElementApiDescriptor, UiEventDescriptor,
+    blueprint_name_for_page, compile_project, BlueprintCompilationResult,
+    BlueprintDocument, BlueprintDocumentKind, BlueprintFunctionParameter,
+    BlueprintFunctionSignature, BlueprintGraph, BlueprintGraphKind, BlueprintLocalVariable,
+    BlueprintNode, BlueprintNodeKind, BlueprintOwner, BlueprintPinType, BlueprintPoint,
+    BlueprintProjectApi,
+    PageApiDescriptor, ServerApiDescriptor, UiActionDescriptor, UiElementApiDescriptor,
+    UiEventDescriptor,
 };
 use core_ui_graphs::{
     layout::{
         AlignContent, AlignItems, FlexDirection, FlexLayout, FlexWrap, GridLayout, JustifyContent,
         LayoutStyles, SizeValue,
     },
-    project::{Page as CorePage, PageComment as CorePageComment, PageCommentImage as CorePageCommentImage},
-    ElementKind, FormFactor, Os, Platform as CorePlatform, ProjectManifest, ProjectMode,
-    UiElement,
+    project::{
+        Page as CorePage, PageComment as CorePageComment, PageCommentImage as CorePageCommentImage,
+    },
+    ElementKind, FormFactor, Os, Platform as CorePlatform, ProjectManifest, ProjectMode, UiElement,
 };
 use project_manager::{operations, EditorDocumentRef, ProjectFile};
 
@@ -215,13 +219,26 @@ impl CanvasElementData {
         props.insert("background_image".to_string(), serde_json::json!(""));
         props.insert("image_src".to_string(), serde_json::json!(""));
         props.insert("locked".to_string(), serde_json::json!(false));
+        props.insert("flip_horizontal".to_string(), serde_json::json!(false));
+        props.insert("flip_vertical".to_string(), serde_json::json!(false));
         props.insert("positioning".to_string(), serde_json::json!("absolute"));
         props.insert("responsive_mode".to_string(), serde_json::json!("manual"));
         props.insert("container_mode".to_string(), serde_json::json!("absolute"));
-        props.insert("allow_absolute_children".to_string(), serde_json::json!(false));
+        props.insert(
+            "allow_absolute_children".to_string(),
+            serde_json::json!(false),
+        );
         props.insert("layout_padding".to_string(), serde_json::json!(8.0));
+        props.insert("layout_padding_left".to_string(), serde_json::json!(8.0));
+        props.insert("layout_padding_right".to_string(), serde_json::json!(8.0));
+        props.insert("layout_padding_top".to_string(), serde_json::json!(8.0));
+        props.insert("layout_padding_bottom".to_string(), serde_json::json!(8.0));
         props.insert("layout_spacing".to_string(), serde_json::json!(8.0));
         props.insert("layout_margin".to_string(), serde_json::json!(0.0));
+        props.insert("layout_margin_left".to_string(), serde_json::json!(0.0));
+        props.insert("layout_margin_right".to_string(), serde_json::json!(0.0));
+        props.insert("layout_margin_top".to_string(), serde_json::json!(0.0));
+        props.insert("layout_margin_bottom".to_string(), serde_json::json!(0.0));
         props.insert("layout_order".to_string(), serde_json::json!(0.0));
         props.insert("stack_alignment".to_string(), serde_json::json!("stretch"));
         props.insert("justify_items".to_string(), serde_json::json!("stretch"));
@@ -231,7 +248,10 @@ impl CanvasElementData {
         );
         props.insert("align_items".to_string(), serde_json::json!("stretch"));
         props.insert("align_content".to_string(), serde_json::json!("stretch"));
-        props.insert("place_items".to_string(), serde_json::json!("stretch stretch"));
+        props.insert(
+            "place_items".to_string(),
+            serde_json::json!("stretch stretch"),
+        );
         props.insert("flex_flow".to_string(), serde_json::json!("column nowrap"));
         props.insert(
             "grid_template_columns".to_string(),
@@ -612,6 +632,16 @@ fn find_element_recursive_mut(elements: &mut [UiElement], id: Uuid) -> Option<&m
     None
 }
 
+fn retain_elements_recursive(elements: &mut Vec<UiElement>, remove_set: &HashSet<Uuid>) -> bool {
+    let before = elements.len();
+    elements.retain(|element| !remove_set.contains(&element.id));
+    let mut removed = before != elements.len();
+    for element in elements {
+        removed |= retain_elements_recursive(&mut element.children, remove_set);
+    }
+    removed
+}
+
 fn get_string_property(element: &UiElement, key: &str) -> Option<String> {
     element
         .properties
@@ -670,11 +700,7 @@ fn canvas_property_map(
     element.properties.as_object()
 }
 
-fn canvas_prop_str(
-    element: &CanvasElementData,
-    key: &str,
-    default: &str,
-) -> String {
+fn canvas_prop_str(element: &CanvasElementData, key: &str, default: &str) -> String {
     canvas_property_map(element)
         .and_then(|props| props.get(key))
         .and_then(|value| value.as_str())
@@ -682,11 +708,7 @@ fn canvas_prop_str(
         .to_string()
 }
 
-fn canvas_prop_f32(
-    element: &CanvasElementData,
-    key: &str,
-    default: f32,
-) -> f32 {
+fn canvas_prop_f32(element: &CanvasElementData, key: &str, default: f32) -> f32 {
     canvas_property_map(element)
         .and_then(|props| props.get(key))
         .and_then(|value| value.as_f64())
@@ -694,11 +716,35 @@ fn canvas_prop_f32(
         .unwrap_or(default)
 }
 
-fn canvas_prop_bool(
-    element: &CanvasElementData,
-    key: &str,
-    default: bool,
-) -> bool {
+#[derive(Debug, Clone, Copy)]
+struct LayoutEdges {
+    left: f32,
+    right: f32,
+    top: f32,
+    bottom: f32,
+}
+
+impl LayoutEdges {
+    fn from_canvas(element: &CanvasElementData, prefix: &str, default: f32) -> Self {
+        let fallback = canvas_prop_f32(element, prefix, default).max(0.0);
+        Self {
+            left: canvas_prop_f32(element, &format!("{prefix}_left"), fallback).max(0.0),
+            right: canvas_prop_f32(element, &format!("{prefix}_right"), fallback).max(0.0),
+            top: canvas_prop_f32(element, &format!("{prefix}_top"), fallback).max(0.0),
+            bottom: canvas_prop_f32(element, &format!("{prefix}_bottom"), fallback).max(0.0),
+        }
+    }
+
+    fn horizontal(self) -> f32 {
+        self.left + self.right
+    }
+
+    fn vertical(self) -> f32 {
+        self.top + self.bottom
+    }
+}
+
+fn canvas_prop_bool(element: &CanvasElementData, key: &str, default: bool) -> bool {
     canvas_property_map(element)
         .and_then(|props| props.get(key))
         .and_then(|value| value.as_bool())
@@ -793,11 +839,7 @@ fn parse_place_items(
     (justify, align)
 }
 
-fn parse_flex_flow(
-    value: &str,
-    fallback_direction: &str,
-    fallback_wrap: &str,
-) -> (String, String) {
+fn parse_flex_flow(value: &str, fallback_direction: &str, fallback_wrap: &str) -> (String, String) {
     let mut direction = fallback_direction.to_string();
     let mut wrap = fallback_wrap.to_string();
     for token in value.split_whitespace() {
@@ -829,7 +871,10 @@ fn effective_container_mode_for_type_and_props(
 }
 
 fn effective_container_mode_for_canvas(element: &CanvasElementData) -> ContainerMode {
-    effective_container_mode_for_type_and_props(element.element_type.as_str(), canvas_property_map(element))
+    effective_container_mode_for_type_and_props(
+        element.element_type.as_str(),
+        canvas_property_map(element),
+    )
 }
 
 fn container_allows_absolute_children(element: &CanvasElementData) -> bool {
@@ -985,21 +1030,23 @@ fn layout_sequence_offsets(
 }
 
 fn element_type_name(element: &UiElement) -> String {
-    get_string_property(element, "element_type").unwrap_or_else(|| match element.kind {
-        ElementKind::FlexContainer => "flex-container",
-        ElementKind::GridContainer => "grid-container",
-        ElementKind::StackContainer => "stack-container",
-        ElementKind::Div => "div",
-        ElementKind::Text => "text",
-        ElementKind::Label => "label",
-        ElementKind::Input => "input",
-        ElementKind::Textarea => "textarea",
-        ElementKind::Checkbox => "checkbox",
-        ElementKind::Image => "image",
-        ElementKind::Button => "button",
-        _ => "component",
-    }
-    .to_string())
+    get_string_property(element, "element_type").unwrap_or_else(|| {
+        match element.kind {
+            ElementKind::FlexContainer => "flex-container",
+            ElementKind::GridContainer => "grid-container",
+            ElementKind::StackContainer => "stack-container",
+            ElementKind::Div => "div",
+            ElementKind::Text => "text",
+            ElementKind::Label => "label",
+            ElementKind::Input => "input",
+            ElementKind::Textarea => "textarea",
+            ElementKind::Checkbox => "checkbox",
+            ElementKind::Image => "image",
+            ElementKind::Button => "button",
+            _ => "component",
+        }
+        .to_string()
+    })
 }
 
 fn element_display_name(element: &UiElement) -> String {
@@ -1010,15 +1057,35 @@ fn element_display_name(element: &UiElement) -> String {
 
 fn blueprint_events_for_element_type(element_type: &str) -> Vec<UiEventDescriptor> {
     match element_type {
-        "button" | "checkbox" | "radio" | "switch" | "image" => vec![UiEventDescriptor {
-            name: "clicked".to_string(),
-            display_name: "Clicked".to_string(),
-        }],
-        "input" | "textarea" | "select" | "slider" => vec![UiEventDescriptor {
-            name: "changed".to_string(),
-            display_name: "Changed".to_string(),
-        }],
+        "button" => vec![
+            ui_event_descriptor("clicked", "Clicked"),
+            ui_event_descriptor("hovered", "Hovered"),
+            ui_event_descriptor("pressed", "Pressed"),
+            ui_event_descriptor("released", "Released"),
+            ui_event_descriptor("focused", "Focused"),
+            ui_event_descriptor("blurred", "Blurred"),
+        ],
+        "checkbox" | "radio" | "switch" => vec![
+            ui_event_descriptor("clicked", "Clicked"),
+            ui_event_descriptor("changed", "Changed"),
+        ],
+        "image" | "video" | "audio" => vec![
+            ui_event_descriptor("clicked", "Clicked"),
+            ui_event_descriptor("hovered", "Hovered"),
+        ],
+        "input" | "textarea" | "select" | "slider" => vec![
+            ui_event_descriptor("changed", "Changed"),
+            ui_event_descriptor("focused", "Focused"),
+            ui_event_descriptor("blurred", "Blurred"),
+        ],
         _ => Vec::new(),
+    }
+}
+
+fn ui_event_descriptor(name: &str, display_name: &str) -> UiEventDescriptor {
+    UiEventDescriptor {
+        name: name.to_string(),
+        display_name: display_name.to_string(),
     }
 }
 
@@ -1027,16 +1094,58 @@ fn blueprint_actions_for_element_type(element_type: &str) -> Vec<UiActionDescrip
         name: "text".to_string(),
         data_type: BlueprintPinType::String,
     };
+    let opacity_param = BlueprintFunctionParameter {
+        name: "opacity".to_string(),
+        data_type: BlueprintPinType::Float,
+    };
+    let color_param = BlueprintFunctionParameter {
+        name: "color".to_string(),
+        data_type: BlueprintPinType::Color,
+    };
 
     match element_type {
-        "text" | "label" | "button" | "input" | "textarea" | "checkbox" | "radio"
-        | "select" => vec![UiActionDescriptor {
-            name: "set_text".to_string(),
-            display_name: "Set Text".to_string(),
-            parameters: vec![text_param],
+        "text" | "label" | "button" | "input" | "textarea" | "checkbox" | "radio" | "select" => {
+            vec![
+                UiActionDescriptor {
+                    name: "set_text".to_string(),
+                    display_name: "Set Text".to_string(),
+                    parameters: vec![text_param],
+                    return_type: BlueprintPinType::Void,
+                },
+                UiActionDescriptor {
+                    name: "set_opacity".to_string(),
+                    display_name: "Set Opacity".to_string(),
+                    parameters: vec![opacity_param.clone()],
+                    return_type: BlueprintPinType::Void,
+                },
+                UiActionDescriptor {
+                    name: "set_background_color".to_string(),
+                    display_name: "Set Background Color".to_string(),
+                    parameters: vec![color_param.clone()],
+                    return_type: BlueprintPinType::Void,
+                },
+            ]
+        }
+        "div" | "flex-container" | "grid-container" | "stack-container" | "image" => vec![
+            UiActionDescriptor {
+                name: "set_opacity".to_string(),
+                display_name: "Set Opacity".to_string(),
+                parameters: vec![opacity_param],
+                return_type: BlueprintPinType::Void,
+            },
+            UiActionDescriptor {
+                name: "set_background_color".to_string(),
+                display_name: "Set Background Color".to_string(),
+                parameters: vec![color_param],
+                return_type: BlueprintPinType::Void,
+            },
+        ],
+        _ => vec![UiActionDescriptor {
+            name: "set_opacity".to_string(),
+            display_name: "Set Opacity".to_string(),
+            parameters: vec![opacity_param],
             return_type: BlueprintPinType::Void,
         }],
-        _ => Vec::new(),
     }
 }
 
@@ -1356,10 +1465,12 @@ impl Project {
             initial_page_size.default_size()
         };
 
-        let mut manifest = ProjectManifest::default();
-        manifest.project_name = name.to_string();
-        manifest.mode = dev_mode.into();
-        manifest.platforms = vec![platform.into()];
+        let manifest = ProjectManifest {
+            project_name: name.to_string(),
+            mode: dev_mode.into(),
+            platforms: vec![platform.into()],
+            ..ProjectManifest::default()
+        };
 
         let mut project_file = ProjectFile::new(manifest);
 
@@ -1368,8 +1479,7 @@ impl Project {
         project_file.ui_data.pages.push(main_page);
 
         let file_path = PathBuf::from(path).join(format!("{name}.spx"));
-        let assets_root =
-            std::env::temp_dir().join(format!("snappix-assets-{}", Uuid::new_v4()));
+        let assets_root = std::env::temp_dir().join(format!("snappix-assets-{}", Uuid::new_v4()));
 
         let mut project = Self {
             project_file,
@@ -1550,9 +1660,9 @@ impl Project {
 
     pub fn document_label(&self, document: &EditorDocumentRef) -> Option<String> {
         match document {
-            EditorDocumentRef::PageUi { page_id } => self
-                .page_by_id(*page_id)
-                .map(|page| page.name.clone()),
+            EditorDocumentRef::PageUi { page_id } => {
+                self.page_by_id(*page_id).map(|page| page.name.clone())
+            }
             EditorDocumentRef::PageBlueprint { document_id }
             | EditorDocumentRef::ServerBlueprint { document_id } => self
                 .blueprint_document(*document_id)
@@ -1603,7 +1713,11 @@ impl Project {
             return false;
         }
 
-        let removed = self.project_file.workspace_data.open_documents.remove(tab_index);
+        let removed = self
+            .project_file
+            .workspace_data
+            .open_documents
+            .remove(tab_index);
         let next_active = if self
             .project_file
             .workspace_data
@@ -1615,7 +1729,11 @@ impl Project {
             let fallback_index = tab_index
                 .saturating_sub(1)
                 .min(self.project_file.workspace_data.open_documents.len() - 1);
-            self.project_file.workspace_data.open_documents.get(fallback_index).cloned()
+            self.project_file
+                .workspace_data
+                .open_documents
+                .get(fallback_index)
+                .cloned()
         } else {
             self.project_file.workspace_data.active_document.clone()
         };
@@ -1703,6 +1821,236 @@ impl Project {
         BlueprintProjectApi { pages, server }
     }
 
+    pub fn active_blueprint_nodes(&self) -> Vec<BlueprintNode> {
+        self.active_blueprint_document()
+            .and_then(|document| document.graphs.first())
+            .map(|graph| graph.nodes.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn active_blueprint_local_variables(&self) -> Vec<BlueprintLocalVariable> {
+        self.active_blueprint_document()
+            .and_then(|document| document.graphs.first())
+            .map(|graph| graph.local_variables.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn active_blueprint_functions(&self) -> Vec<BlueprintFunctionSignature> {
+        self.active_blueprint_document()
+            .map(|document| {
+                document
+                    .graphs
+                    .iter()
+                    .filter_map(BlueprintGraph::function_signature)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    pub fn add_variable_node_to_active_blueprint(
+        &mut self,
+        variable_id: Uuid,
+        access_kind: &str,
+        preferred_x: f32,
+        preferred_y: f32,
+    ) -> Option<Uuid> {
+        let graph = self.active_blueprint_graph_mut()?;
+        let variable = graph
+            .local_variables
+            .iter()
+            .find(|variable| variable.id == variable_id)
+            .cloned()?;
+
+        let mut node = match access_kind {
+            "set" | "setter" => BlueprintNode::variable_set(&variable),
+            _ => BlueprintNode::variable_get(&variable),
+        };
+        node.position = nearest_free_blueprint_position(
+            &graph.nodes,
+            BlueprintPoint {
+                x: preferred_x.round() as i32,
+                y: preferred_y.round() as i32,
+            },
+            blueprint_node_size(&node.kind),
+        );
+        let node_id = node.id;
+        graph.nodes.push(node);
+        Some(node_id)
+    }
+
+    pub fn add_local_variable_to_active_blueprint(&mut self) -> Option<Uuid> {
+        let graph = self.active_blueprint_graph_mut()?;
+        let next_index = graph.local_variables.len() + 1;
+        let variable = BlueprintLocalVariable {
+            id: Uuid::new_v4(),
+            name: format!("var{next_index}"),
+            data_type: BlueprintPinType::Bool,
+        };
+        let variable_id = variable.id;
+        graph.local_variables.push(variable);
+        Some(variable_id)
+    }
+
+    pub fn rename_local_variable_in_active_blueprint(
+        &mut self,
+        variable_id: Uuid,
+        new_name: &str,
+    ) -> bool {
+        let name = sanitize_blueprint_symbol(new_name);
+        if name.is_empty() {
+            return false;
+        }
+
+        let Some(graph) = self.active_blueprint_graph_mut() else {
+            return false;
+        };
+        if graph
+            .local_variables
+            .iter()
+            .any(|variable| variable.id != variable_id && variable.name == name)
+        {
+            return false;
+        }
+
+        let Some(variable) = graph
+            .local_variables
+            .iter_mut()
+            .find(|variable| variable.id == variable_id)
+        else {
+            return false;
+        };
+        variable.name = name.clone();
+
+        for node in &mut graph.nodes {
+            match node.kind {
+                BlueprintNodeKind::VariableGet {
+                    variable_id: node_variable_id,
+                } if node_variable_id == variable_id => {
+                    node.title = name.clone();
+                }
+                BlueprintNodeKind::VariableSet {
+                    variable_id: node_variable_id,
+                } if node_variable_id == variable_id => {
+                    node.title = format!("Set {name}");
+                }
+                _ => {}
+            }
+        }
+
+        true
+    }
+
+    pub fn set_local_variable_type_in_active_blueprint(
+        &mut self,
+        variable_id: Uuid,
+        type_name: &str,
+    ) -> bool {
+        let Some(data_type) = parse_blueprint_pin_type_name(type_name) else {
+            return false;
+        };
+        let Some(graph) = self.active_blueprint_graph_mut() else {
+            return false;
+        };
+        let Some(variable) = graph
+            .local_variables
+            .iter_mut()
+            .find(|variable| variable.id == variable_id)
+        else {
+            return false;
+        };
+        variable.data_type = data_type;
+
+        for node in &mut graph.nodes {
+            match node.kind {
+                BlueprintNodeKind::VariableGet {
+                    variable_id: node_variable_id,
+                }
+                | BlueprintNodeKind::VariableSet {
+                    variable_id: node_variable_id,
+                } if node_variable_id == variable_id => {
+                    for pin in &mut node.pins {
+                        if pin.name == "value" {
+                            pin.data_type = data_type;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        true
+    }
+
+    pub fn add_function_to_active_blueprint(&mut self) -> Option<Uuid> {
+        let graph_count = self.active_blueprint_document()?.graphs.len();
+        let function_name = format!("function{}", graph_count);
+        let signature = BlueprintFunctionSignature {
+            name: function_name.clone(),
+            parameters: Vec::new(),
+            return_type: BlueprintPinType::Void,
+            is_public: true,
+        };
+        let entry = BlueprintNode::function_entry(signature.clone());
+        let mut graph = BlueprintGraph::new(function_name, BlueprintGraphKind::FunctionGraph);
+        graph.entrypoints.push(entry.id);
+        graph.nodes.push(entry);
+        let graph_id = graph.id;
+        let document = self.active_blueprint_document_mut()?;
+        document.graphs.push(graph);
+        document.sync_exports();
+        Some(graph_id)
+    }
+
+    pub fn ensure_element_event_nodes_on_active_page_blueprint(
+        &mut self,
+        element_id: Uuid,
+    ) -> bool {
+        let Some(element) = self.get_element_on_active_page(element_id) else {
+            return false;
+        };
+        let events = blueprint_events_for_element_type(&element.element_type);
+        if events.is_empty() {
+            return false;
+        }
+
+        let Some(document_ref) = self.page_blueprint_document_ref(self.active_page_index()) else {
+            return false;
+        };
+        if !self.open_document(document_ref) {
+            return false;
+        }
+
+        let Some(graph) = self.active_blueprint_graph_mut() else {
+            return false;
+        };
+        let mut changed = false;
+        for (idx, event) in events.iter().enumerate() {
+            let exists = graph.nodes.iter().any(|node| {
+                matches!(
+                    &node.kind,
+                    core_blueprint::BlueprintNodeKind::UiEvent {
+                        element_id: node_element_id,
+                        event_name
+                    } if *node_element_id == element_id && event_name == &event.name
+                )
+            });
+            if exists {
+                continue;
+            }
+
+            let mut node = BlueprintNode::ui_event(element_id, event.name.clone());
+            node.title = format!("{} {}", element.element_type, event.display_name);
+            node.position = BlueprintPoint {
+                x: 80,
+                y: 80 + idx as i32 * 120,
+            };
+            graph.entrypoints.push(node.id);
+            graph.nodes.push(node);
+            changed = true;
+        }
+        changed
+    }
+
     pub fn compile_blueprints(&mut self) -> BlueprintCompilationResult {
         self.sync_document_model();
         let api = self.build_blueprint_api();
@@ -1742,6 +2090,39 @@ impl Project {
             .documents
             .iter()
             .find(|document| document.id == document_id)
+    }
+
+    fn active_blueprint_document(&self) -> Option<&BlueprintDocument> {
+        let document_id = match self.active_document()? {
+            EditorDocumentRef::PageBlueprint { document_id }
+            | EditorDocumentRef::ServerBlueprint { document_id } => *document_id,
+            EditorDocumentRef::PageUi { .. } => return None,
+        };
+        self.blueprint_document(document_id)
+    }
+
+    fn active_blueprint_document_mut(&mut self) -> Option<&mut BlueprintDocument> {
+        let document_id = match self.project_file.workspace_data.active_document.as_ref()? {
+            EditorDocumentRef::PageBlueprint { document_id }
+            | EditorDocumentRef::ServerBlueprint { document_id } => *document_id,
+            EditorDocumentRef::PageUi { .. } => return None,
+        };
+        self.project_file
+            .logic_data
+            .documents
+            .iter_mut()
+            .find(|document| document.id == document_id)
+    }
+
+    fn active_blueprint_graph_mut(&mut self) -> Option<&mut BlueprintGraph> {
+        let document = self.active_blueprint_document_mut()?;
+        if document.graphs.is_empty() {
+            document.graphs.push(BlueprintGraph::new(
+                "Events",
+                BlueprintGraphKind::EventGraph,
+            ));
+        }
+        document.graphs.first_mut()
     }
 
     fn page_blueprint_document(&self, page_id: Uuid) -> Option<&BlueprintDocument> {
@@ -1894,7 +2275,10 @@ impl Project {
                 .open_documents
                 .contains(&active)
             {
-                self.project_file.workspace_data.open_documents.push(active.clone());
+                self.project_file
+                    .workspace_data
+                    .open_documents
+                    .push(active.clone());
             }
             self.align_active_page_with_document(&active);
         }
@@ -1923,7 +2307,10 @@ impl Project {
     }
 
     fn active_page_mut(&mut self) -> Option<&mut CorePage> {
-        self.project_file.ui_data.pages.get_mut(self.active_page_index)
+        self.project_file
+            .ui_data
+            .pages
+            .get_mut(self.active_page_index)
     }
 
     fn project_root_dir(&self) -> PathBuf {
@@ -2001,10 +2388,11 @@ impl Project {
         title: &str,
         body: &str,
     ) -> bool {
-        let Some(comment) = self
-            .active_page_mut()
-            .and_then(|page| page.comments.iter_mut().find(|comment| comment.id == comment_id))
-        else {
+        let Some(comment) = self.active_page_mut().and_then(|page| {
+            page.comments
+                .iter_mut()
+                .find(|comment| comment.id == comment_id)
+        }) else {
             return false;
         };
 
@@ -2024,10 +2412,11 @@ impl Project {
         x: f32,
         y: f32,
     ) -> bool {
-        let Some(comment) = self
-            .active_page_mut()
-            .and_then(|page| page.comments.iter_mut().find(|comment| comment.id == comment_id))
-        else {
+        let Some(comment) = self.active_page_mut().and_then(|page| {
+            page.comments
+                .iter_mut()
+                .find(|comment| comment.id == comment_id)
+        }) else {
             return false;
         };
 
@@ -2046,10 +2435,11 @@ impl Project {
         title_font_size: f32,
         body_font_size: f32,
     ) -> bool {
-        let Some(comment) = self
-            .active_page_mut()
-            .and_then(|page| page.comments.iter_mut().find(|comment| comment.id == comment_id))
-        else {
+        let Some(comment) = self.active_page_mut().and_then(|page| {
+            page.comments
+                .iter_mut()
+                .find(|comment| comment.id == comment_id)
+        }) else {
             return false;
         };
 
@@ -2068,10 +2458,11 @@ impl Project {
         width: f32,
         body_height: f32,
     ) -> bool {
-        let Some(comment) = self
-            .active_page_mut()
-            .and_then(|page| page.comments.iter_mut().find(|comment| comment.id == comment_id))
-        else {
+        let Some(comment) = self.active_page_mut().and_then(|page| {
+            page.comments
+                .iter_mut()
+                .find(|comment| comment.id == comment_id)
+        }) else {
             return false;
         };
 
@@ -2096,10 +2487,11 @@ impl Project {
             return false;
         }
 
-        let Some(comment) = self
-            .active_page_mut()
-            .and_then(|page| page.comments.iter_mut().find(|comment| comment.id == comment_id))
-        else {
+        let Some(comment) = self.active_page_mut().and_then(|page| {
+            page.comments
+                .iter_mut()
+                .find(|comment| comment.id == comment_id)
+        }) else {
             return false;
         };
 
@@ -2114,17 +2506,18 @@ impl Project {
         });
         if let Some(previous) = previous_path {
             if previous != normalized_path {
-                self.prune_unused_image_assets(&vec![previous]);
+                self.prune_unused_image_assets(&[previous]);
             }
         }
         true
     }
 
     pub fn clear_comment_image_on_active_page(&mut self, comment_id: Uuid) -> bool {
-        let Some(comment) = self
-            .active_page_mut()
-            .and_then(|page| page.comments.iter_mut().find(|comment| comment.id == comment_id))
-        else {
+        let Some(comment) = self.active_page_mut().and_then(|page| {
+            page.comments
+                .iter_mut()
+                .find(|comment| comment.id == comment_id)
+        }) else {
             return false;
         };
 
@@ -2135,7 +2528,7 @@ impl Project {
         let previous_path = comment.image.as_ref().map(|image| image.path.clone());
         comment.image = None;
         if let Some(previous) = previous_path {
-            self.prune_unused_image_assets(&vec![previous]);
+            self.prune_unused_image_assets(&[previous]);
         }
         true
     }
@@ -2156,7 +2549,7 @@ impl Project {
         let removed = before != page.comments.len();
         if removed {
             if let Some(previous) = removed_image {
-                self.prune_unused_image_assets(&vec![previous]);
+                self.prune_unused_image_assets(&[previous]);
             }
         }
         removed
@@ -2315,12 +2708,12 @@ impl Project {
             }
         }
 
-        let padding = canvas_prop_f32(&parent, "layout_padding", 8.0).max(0.0);
+        let padding = LayoutEdges::from_canvas(&parent, "layout_padding", 8.0);
         let gap = canvas_prop_f32(&parent, "layout_spacing", 8.0).max(0.0);
-        let content_x = parent.x + padding;
-        let content_y = parent.y + padding;
-        let content_w = (parent.width - padding * 2.0).max(1.0);
-        let content_h = (parent.height - padding * 2.0).max(1.0);
+        let content_x = parent.x + padding.left;
+        let content_y = parent.y + padding.top;
+        let content_w = (parent.width - padding.left - padding.right).max(1.0);
+        let content_h = (parent.height - padding.top - padding.bottom).max(1.0);
 
         let mut changed = false;
         for child in absolute_children {
@@ -2342,13 +2735,18 @@ impl Project {
 
         match container_mode {
             ContainerMode::Stack => {
-                let stack_alignment =
-                    normalize_stack_alignment(&canvas_prop_str(&parent, "stack_alignment", "stretch"));
+                let stack_alignment = normalize_stack_alignment(&canvas_prop_str(
+                    &parent,
+                    "stack_alignment",
+                    "stretch",
+                ));
                 let mut cursor_y = content_y;
                 for child in flow_children {
-                    let margin = canvas_prop_f32(&child, "layout_margin", 0.0).max(0.0);
-                    let available_w = (content_w - margin * 2.0).max(1.0);
-                    let child_h = child.height.max(1.0);
+                    let margin = LayoutEdges::from_canvas(&child, "layout_margin", 0.0);
+                    let available_w = (content_w - margin.horizontal()).max(1.0);
+                    let remaining_h =
+                        (content_y + content_h - cursor_y - margin.vertical()).max(1.0);
+                    let child_h = child.height.max(1.0).min(remaining_h);
                     let child_w = if stack_alignment == "stretch" {
                         available_w
                     } else {
@@ -2356,10 +2754,10 @@ impl Project {
                     };
                     let child_x = match stack_alignment.as_str() {
                         "center" => content_x + (content_w - child_w) / 2.0,
-                        "end" => content_x + content_w - child_w - margin,
-                        _ => content_x + margin,
+                        "end" => content_x + content_w - child_w - margin.right,
+                        _ => content_x + margin.left,
                     };
-                    cursor_y += margin;
+                    cursor_y += margin.top;
                     changed |= self.update_element_geometry_on_active_page(
                         child.id,
                         child_x,
@@ -2371,7 +2769,7 @@ impl Project {
                     if effective_container_mode_for_canvas(&child).is_managed() {
                         changed |= self.layout_children_in_parent_on_active_page(child.id);
                     }
-                    cursor_y += child_h + margin + gap;
+                    cursor_y += child_h + margin.bottom + gap;
                 }
                 changed
             }
@@ -2392,16 +2790,10 @@ impl Project {
                     "justify_content",
                     "flex-start",
                 ));
-                let mut align_items = normalize_item_alignment(&canvas_prop_str(
-                    &parent,
-                    "align_items",
-                    "stretch",
-                ));
-                let align_content = normalize_align_content(&canvas_prop_str(
-                    &parent,
-                    "align_content",
-                    "stretch",
-                ));
+                let mut align_items =
+                    normalize_item_alignment(&canvas_prop_str(&parent, "align_items", "stretch"));
+                let align_content =
+                    normalize_align_content(&canvas_prop_str(&parent, "align_content", "stretch"));
                 let place_items_raw = canvas_prop_str(&parent, "place_items", "");
                 if !place_items_raw.trim().is_empty() {
                     let (_, place_align) =
@@ -2418,27 +2810,29 @@ impl Project {
                 };
 
                 for child in flow_children {
-                    let margin = canvas_prop_f32(&child, "layout_margin", 0.0).max(0.0);
+                    let margin = LayoutEdges::from_canvas(&child, "layout_margin", 0.0);
                     let outer_main = if flex_direction == "row" {
-                        child.width.max(1.0) + margin * 2.0
+                        child.width.max(1.0) + margin.horizontal()
                     } else {
-                        child.height.max(1.0) + margin * 2.0
+                        child.height.max(1.0) + margin.vertical()
                     };
                     let outer_cross = if flex_direction == "row" {
-                        child.height.max(1.0) + margin * 2.0
+                        child.height.max(1.0) + margin.vertical()
                     } else {
-                        child.width.max(1.0) + margin * 2.0
+                        child.width.max(1.0) + margin.horizontal()
                     };
-                    let main_limit = if flex_direction == "row" { content_w } else { content_h };
+                    let main_limit = if flex_direction == "row" {
+                        content_w
+                    } else {
+                        content_h
+                    };
                     let projected_main = if current_line.items.is_empty() {
                         outer_main
                     } else {
                         current_line.main_size + gap + outer_main
                     };
 
-                    if wrap_enabled
-                        && !current_line.items.is_empty()
-                        && projected_main > main_limit
+                    if wrap_enabled && !current_line.items.is_empty() && projected_main > main_limit
                     {
                         lines.push(current_line);
                         current_line = FlexLine {
@@ -2467,10 +2861,19 @@ impl Project {
                     lines.reverse();
                 }
 
-                let total_cross_before_stretch = lines.iter().map(|line| line.cross_size).sum::<f32>()
-                    + gap * lines.len().saturating_sub(1) as f32;
-                let available_cross = if flex_direction == "row" { content_h } else { content_w };
-                if align_content == "stretch" && total_cross_before_stretch < available_cross {
+                let total_cross_before_stretch =
+                    lines.iter().map(|line| line.cross_size).sum::<f32>()
+                        + gap * lines.len().saturating_sub(1) as f32;
+                let available_cross = if flex_direction == "row" {
+                    content_h
+                } else {
+                    content_w
+                };
+                if wrap_enabled
+                    && lines.len() > 1
+                    && align_content == "stretch"
+                    && total_cross_before_stretch < available_cross
+                {
                     let extra = (available_cross - total_cross_before_stretch) / lines.len() as f32;
                     for line in &mut lines {
                         line.cross_size += extra;
@@ -2498,7 +2901,11 @@ impl Project {
                 };
 
                 for line in lines {
-                    let main_limit = if flex_direction == "row" { content_w } else { content_h };
+                    let main_limit = if flex_direction == "row" {
+                        content_w
+                    } else {
+                        content_h
+                    };
                     let remaining_main = (main_limit - line.main_size).max(0.0);
                     let (item_start, item_gap) = layout_sequence_offsets(
                         justify_content.as_str(),
@@ -2513,46 +2920,50 @@ impl Project {
                     };
 
                     for child in line.items {
-                        let margin = canvas_prop_f32(&child, "layout_margin", 0.0).max(0.0);
-                        let max_cross_size = (line.cross_size - margin * 2.0).max(1.0);
-                        let (child_x, child_y, child_w, child_h, advance) = if flex_direction == "row"
+                        let margin = LayoutEdges::from_canvas(&child, "layout_margin", 0.0);
+                        let (child_x, child_y, child_w, child_h, advance) = if flex_direction
+                            == "row"
                         {
-                            let child_w = child.width.max(1.0).min((content_w - margin * 2.0).max(1.0));
-                            let child_h = if align_items == "stretch" {
-                                max_cross_size
-                            } else {
-                                child.height.max(1.0).min(max_cross_size)
-                            };
+                            let used_main = (cursor_main - content_x).max(0.0);
+                            let available_main =
+                                (main_limit - used_main - margin.horizontal()).max(1.0);
+                            let child_w = child.width.max(1.0).min(available_main);
+                            let max_cross_size = (line.cross_size - margin.vertical()).max(1.0);
+                            let child_h = child.height.max(1.0).min(max_cross_size);
                             let child_y = match align_items.as_str() {
                                 "center" => cursor_cross + (line.cross_size - child_h) / 2.0,
-                                "flex-end" => cursor_cross + line.cross_size - child_h - margin,
-                                _ => cursor_cross + margin,
+                                "flex-end" => {
+                                    cursor_cross + line.cross_size - child_h - margin.bottom
+                                }
+                                _ => cursor_cross + margin.top,
                             };
                             (
-                                cursor_main + margin,
+                                cursor_main + margin.left,
                                 child_y,
                                 child_w,
                                 child_h,
-                                child_w + margin * 2.0 + item_gap,
+                                child_w + margin.horizontal() + item_gap,
                             )
                         } else {
-                            let child_h = child.height.max(1.0).min((content_h - margin * 2.0).max(1.0));
-                            let child_w = if align_items == "stretch" {
-                                max_cross_size
-                            } else {
-                                child.width.max(1.0).min(max_cross_size)
-                            };
+                            let used_main = (cursor_main - content_y).max(0.0);
+                            let available_main =
+                                (main_limit - used_main - margin.vertical()).max(1.0);
+                            let child_h = child.height.max(1.0).min(available_main);
+                            let max_cross_size = (line.cross_size - margin.horizontal()).max(1.0);
+                            let child_w = child.width.max(1.0).min(max_cross_size);
                             let child_x = match align_items.as_str() {
                                 "center" => cursor_cross + (line.cross_size - child_w) / 2.0,
-                                "flex-end" => cursor_cross + line.cross_size - child_w - margin,
-                                _ => cursor_cross + margin,
+                                "flex-end" => {
+                                    cursor_cross + line.cross_size - child_w - margin.right
+                                }
+                                _ => cursor_cross + margin.left,
                             };
                             (
                                 child_x,
-                                cursor_main + margin,
+                                cursor_main + margin.top,
                                 child_w,
                                 child_h,
-                                child_h + margin * 2.0 + item_gap,
+                                child_h + margin.vertical() + item_gap,
                             )
                         };
 
@@ -2586,16 +2997,10 @@ impl Project {
                     "align_content",
                     "flex-start",
                 ));
-                let base_justify_items = normalize_item_alignment(&canvas_prop_str(
-                    &parent,
-                    "justify_items",
-                    "stretch",
-                ));
-                let base_align_items = normalize_item_alignment(&canvas_prop_str(
-                    &parent,
-                    "align_items",
-                    "stretch",
-                ));
+                let base_justify_items =
+                    normalize_item_alignment(&canvas_prop_str(&parent, "justify_items", "stretch"));
+                let base_align_items =
+                    normalize_item_alignment(&canvas_prop_str(&parent, "align_items", "stretch"));
                 let place_items_raw = canvas_prop_str(&parent, "place_items", "");
                 let (justify_items, align_items) = if place_items_raw.trim().is_empty() {
                     (base_justify_items, base_align_items)
@@ -2627,7 +3032,7 @@ impl Project {
                 let column_tracks = parse_grid_tracks(&columns_value, "1fr 1fr");
                 let column_count = column_tracks.len().max(1);
                 let mut row_tracks = parse_grid_tracks(&rows_value, "auto auto");
-                let required_rows = ((flow_children.len() + column_count - 1) / column_count).max(1);
+                let required_rows = flow_children.len().div_ceil(column_count).max(1);
                 if row_tracks.len() < required_rows {
                     row_tracks.resize(required_rows, GridTrack::Auto);
                 }
@@ -2638,9 +3043,9 @@ impl Project {
                     if row >= row_auto_mins.len() {
                         break;
                     }
-                    let margin = canvas_prop_f32(child, "layout_margin", 0.0).max(0.0);
-                    row_auto_mins[row] = row_auto_mins[row]
-                        .max(child.height.max(1.0) + margin * 2.0);
+                    let margin = LayoutEdges::from_canvas(child, "layout_margin", 0.0);
+                    row_auto_mins[row] =
+                        row_auto_mins[row].max(child.height.max(1.0) + margin.vertical());
                 }
 
                 let column_widths = resolve_grid_tracks(
@@ -2683,9 +3088,9 @@ impl Project {
                             continue;
                         };
 
-                        let margin = canvas_prop_f32(&child, "layout_margin", 0.0).max(0.0);
-                        let max_w = (*column_width - margin * 2.0).max(1.0);
-                        let max_h = (*row_height - margin * 2.0).max(1.0);
+                        let margin = LayoutEdges::from_canvas(&child, "layout_margin", 0.0);
+                        let max_w = (*column_width - margin.horizontal()).max(1.0);
+                        let max_h = (*row_height - margin.vertical()).max(1.0);
                         let child_w = if justify_items == "stretch" {
                             max_w
                         } else {
@@ -2698,13 +3103,13 @@ impl Project {
                         };
                         let child_x = match justify_items.as_str() {
                             "center" => column_x + (*column_width - child_w) / 2.0,
-                            "flex-end" => column_x + *column_width - child_w - margin,
-                            _ => column_x + margin,
+                            "flex-end" => column_x + *column_width - child_w - margin.right,
+                            _ => column_x + margin.left,
                         };
                         let child_y = match align_items.as_str() {
                             "center" => row_y + (*row_height - child_h) / 2.0,
-                            "flex-end" => row_y + *row_height - child_h - margin,
-                            _ => row_y + margin,
+                            "flex-end" => row_y + *row_height - child_h - margin.bottom,
+                            _ => row_y + margin.top,
                         };
 
                         changed |= self.update_element_geometry_on_active_page(
@@ -3028,6 +3433,33 @@ impl Project {
         any_updated
     }
 
+    pub fn toggle_element_flip_on_active_page(
+        &mut self,
+        element_id: Uuid,
+        horizontal: bool,
+    ) -> bool {
+        let Some(root) = self.active_page_root_mut() else {
+            return false;
+        };
+        let Some(element) = find_element_recursive_mut(&mut root.children, element_id) else {
+            return false;
+        };
+        let key = if horizontal {
+            "flip_horizontal"
+        } else {
+            "flip_vertical"
+        };
+        let next = !element
+            .properties
+            .get(key)
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
+        element
+            .properties
+            .insert(key.to_string(), serde_json::json!(next));
+        true
+    }
+
     pub fn update_element_text_on_active_page(&mut self, element_id: Uuid, text: &str) -> bool {
         let Some(root) = self.active_page_root_mut() else {
             return false;
@@ -3120,36 +3552,34 @@ impl Project {
         } else {
             "left".to_string()
         };
-        let normalized_checkbox_check_color = if is_checkbox_component
-            && !checkbox_check_color.trim().is_empty()
-        {
-            checkbox_check_color.trim().to_string()
-        } else {
-            "#f5f5f5".to_string()
-        };
-        let normalized_checkbox_box_color = if is_checkbox_component
-            && !checkbox_box_color.trim().is_empty()
-        {
-            checkbox_box_color.trim().to_string()
-        } else {
-            "#151515".to_string()
-        };
-        let normalized_checkbox_box_border_color = if is_checkbox_component
-            && !checkbox_box_border_color.trim().is_empty()
-        {
-            checkbox_box_border_color.trim().to_string()
-        } else {
-            "#4a4a4a".to_string()
-        };
+        let normalized_checkbox_check_color =
+            if is_checkbox_component && !checkbox_check_color.trim().is_empty() {
+                checkbox_check_color.trim().to_string()
+            } else {
+                "#f5f5f5".to_string()
+            };
+        let normalized_checkbox_box_color =
+            if is_checkbox_component && !checkbox_box_color.trim().is_empty() {
+                checkbox_box_color.trim().to_string()
+            } else {
+                "#151515".to_string()
+            };
+        let normalized_checkbox_box_border_color =
+            if is_checkbox_component && !checkbox_box_border_color.trim().is_empty() {
+                checkbox_box_border_color.trim().to_string()
+            } else {
+                "#4a4a4a".to_string()
+            };
         let normalized_checkbox_box_border_width = if is_checkbox_component {
             checkbox_box_border_width.max(0.0)
         } else {
             1.0
         };
 
-        element
-            .properties
-            .insert("background".to_string(), serde_json::json!(normalized_background));
+        element.properties.insert(
+            "background".to_string(),
+            serde_json::json!(normalized_background),
+        );
         element
             .properties
             .insert("border_color".to_string(), serde_json::json!(border_color));
@@ -3258,8 +3688,16 @@ impl Project {
         container_mode: &str,
         allow_absolute_children: bool,
         layout_padding: f32,
+        layout_padding_left: f32,
+        layout_padding_right: f32,
+        layout_padding_top: f32,
+        layout_padding_bottom: f32,
         layout_spacing: f32,
         layout_margin: f32,
+        layout_margin_left: f32,
+        layout_margin_right: f32,
+        layout_margin_top: f32,
+        layout_margin_bottom: f32,
         layout_order: f32,
         stack_alignment: &str,
         flex_direction: &str,
@@ -3275,8 +3713,16 @@ impl Project {
         grid_template_areas: &str,
     ) -> bool {
         if !layout_padding.is_finite()
+            || !layout_padding_left.is_finite()
+            || !layout_padding_right.is_finite()
+            || !layout_padding_top.is_finite()
+            || !layout_padding_bottom.is_finite()
             || !layout_spacing.is_finite()
             || !layout_margin.is_finite()
+            || !layout_margin_left.is_finite()
+            || !layout_margin_right.is_finite()
+            || !layout_margin_top.is_finite()
+            || !layout_margin_bottom.is_finite()
             || !layout_order.is_finite()
         {
             return false;
@@ -3293,9 +3739,17 @@ impl Project {
         } else {
             effective_container_mode_for_canvas(&current)
         };
-        let normalized_layout_padding = layout_padding.max(0.0).min(2_000.0);
-        let normalized_layout_spacing = layout_spacing.max(0.0).min(2_000.0);
-        let normalized_layout_margin = layout_margin.max(0.0).min(2_000.0);
+        let normalized_layout_padding = layout_padding.clamp(0.0, 2_000.0);
+        let normalized_layout_padding_left = layout_padding_left.clamp(0.0, 2_000.0);
+        let normalized_layout_padding_right = layout_padding_right.clamp(0.0, 2_000.0);
+        let normalized_layout_padding_top = layout_padding_top.clamp(0.0, 2_000.0);
+        let normalized_layout_padding_bottom = layout_padding_bottom.clamp(0.0, 2_000.0);
+        let normalized_layout_spacing = layout_spacing.clamp(0.0, 2_000.0);
+        let normalized_layout_margin = layout_margin.clamp(0.0, 2_000.0);
+        let normalized_layout_margin_left = layout_margin_left.clamp(0.0, 2_000.0);
+        let normalized_layout_margin_right = layout_margin_right.clamp(0.0, 2_000.0);
+        let normalized_layout_margin_top = layout_margin_top.clamp(0.0, 2_000.0);
+        let normalized_layout_margin_bottom = layout_margin_bottom.clamp(0.0, 2_000.0);
         let normalized_layout_order = layout_order.clamp(-9_999.0, 9_999.0);
         let normalized_stack_alignment = normalize_stack_alignment(stack_alignment);
         let mut normalized_flex_direction = normalize_flex_direction(flex_direction);
@@ -3307,8 +3761,7 @@ impl Project {
         );
         normalized_flex_direction = flow_direction;
         normalized_flex_wrap = flow_wrap;
-        let normalized_flex_flow =
-            format!("{normalized_flex_direction} {normalized_flex_wrap}");
+        let normalized_flex_flow = format!("{normalized_flex_direction} {normalized_flex_wrap}");
         let normalized_justify_items = normalize_item_alignment(justify_items);
         let normalized_justify_content = normalize_justify_content(justify_content);
         let normalized_align_items = normalize_item_alignment(align_items);
@@ -3318,8 +3771,7 @@ impl Project {
             normalized_justify_items.as_str(),
             normalized_align_items.as_str(),
         );
-        let normalized_place_items =
-            format!("{place_justify_items} {place_align_items}");
+        let normalized_place_items = format!("{place_justify_items} {place_align_items}");
         let normalized_grid_template_columns = if grid_template_columns.trim().is_empty() {
             "1fr 1fr".to_string()
         } else {
@@ -3347,12 +3799,44 @@ impl Project {
                 serde_json::json!(normalized_layout_padding),
             );
             element.properties.insert(
+                "layout_padding_left".to_string(),
+                serde_json::json!(normalized_layout_padding_left),
+            );
+            element.properties.insert(
+                "layout_padding_right".to_string(),
+                serde_json::json!(normalized_layout_padding_right),
+            );
+            element.properties.insert(
+                "layout_padding_top".to_string(),
+                serde_json::json!(normalized_layout_padding_top),
+            );
+            element.properties.insert(
+                "layout_padding_bottom".to_string(),
+                serde_json::json!(normalized_layout_padding_bottom),
+            );
+            element.properties.insert(
                 "layout_spacing".to_string(),
                 serde_json::json!(normalized_layout_spacing),
             );
             element.properties.insert(
                 "layout_margin".to_string(),
                 serde_json::json!(normalized_layout_margin),
+            );
+            element.properties.insert(
+                "layout_margin_left".to_string(),
+                serde_json::json!(normalized_layout_margin_left),
+            );
+            element.properties.insert(
+                "layout_margin_right".to_string(),
+                serde_json::json!(normalized_layout_margin_right),
+            );
+            element.properties.insert(
+                "layout_margin_top".to_string(),
+                serde_json::json!(normalized_layout_margin_top),
+            );
+            element.properties.insert(
+                "layout_margin_bottom".to_string(),
+                serde_json::json!(normalized_layout_margin_bottom),
             );
             element.properties.insert(
                 "layout_order".to_string(),
@@ -3370,10 +3854,9 @@ impl Project {
                 match normalized_container_mode {
                     ContainerMode::Absolute => {
                         element.properties.remove("display");
-                        element.properties.insert(
-                            "responsive_mode".to_string(),
-                            serde_json::json!("manual"),
-                        );
+                        element
+                            .properties
+                            .insert("responsive_mode".to_string(), serde_json::json!("manual"));
                         element.properties.insert(
                             "positioning_mode".to_string(),
                             serde_json::json!("absolute-children"),
@@ -3531,7 +4014,7 @@ impl Project {
         );
         if let Some(previous) = previous_path {
             if previous != normalized {
-                self.prune_unused_image_assets(&vec![previous]);
+                self.prune_unused_image_assets(&[previous]);
             }
         }
         true
@@ -3718,10 +4201,7 @@ impl Project {
         let Some(root) = self.active_page_root_mut() else {
             return false;
         };
-        let before = root.children.len();
-        root.children
-            .retain(|element| !remove_set.contains(&element.id));
-        let removed = before != root.children.len();
+        let removed = retain_elements_recursive(&mut root.children, &remove_set);
         if removed {
             if let Some(parent_id) = parent_id {
                 let _ = self.layout_children_in_parent_on_active_page(parent_id);
@@ -3826,10 +4306,9 @@ impl Project {
     /// Save project to .spx archive file.
     pub fn save(&self) -> Result<(), Box<dyn std::error::Error>> {
         let path = Path::new(&self.file_path);
-        operations::save_project_with_assets(&self.project_file, path, &self.assets_root)
-            .map_err(|e| {
-            Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>
-        })
+        operations::save_project_with_assets(&self.project_file, path, &self.assets_root).map_err(
+            |e| Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>,
+        )
     }
 
     /// Load project from .spx archive file.
@@ -3841,14 +4320,9 @@ impl Project {
             Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error>
         })?;
 
-        let active_page_index = if project_file.ui_data.pages.is_empty() {
-            0
-        } else {
-            0
-        };
+        let active_page_index = 0;
 
-        let assets_root =
-            std::env::temp_dir().join(format!("snappix-assets-{}", Uuid::new_v4()));
+        let assets_root = std::env::temp_dir().join(format!("snappix-assets-{}", Uuid::new_v4()));
         if let Err(err) = operations::extract_project_assets(path_ref, &assets_root) {
             eprintln!("Failed to extract project assets: {err}");
         }
@@ -3863,6 +4337,99 @@ impl Project {
         project.sync_document_model();
         Ok(project)
     }
+}
+
+fn sanitize_blueprint_symbol(name: &str) -> String {
+    let mut result = String::new();
+    for ch in name.trim().chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            result.push(ch);
+        } else if ch.is_whitespace() || ch == '-' {
+            result.push('_');
+        }
+    }
+    result.trim_matches('_').to_string()
+}
+
+fn parse_blueprint_pin_type_name(type_name: &str) -> Option<BlueprintPinType> {
+    match type_name.trim().to_ascii_lowercase().as_str() {
+        "bool" => Some(BlueprintPinType::Bool),
+        "i64" | "int" | "integer" => Some(BlueprintPinType::Int),
+        "f64" | "float" | "number" => Some(BlueprintPinType::Float),
+        "string" | "str" => Some(BlueprintPinType::String),
+        "color" => Some(BlueprintPinType::Color),
+        "array" => Some(BlueprintPinType::Array),
+        "vector" | "vec" => Some(BlueprintPinType::Vector),
+        "set" | "hashset" => Some(BlueprintPinType::HashSet),
+        "hashmap" | "map" => Some(BlueprintPinType::HashMap),
+        "element" | "uielement" => Some(BlueprintPinType::UiElementRef),
+        "page" => Some(BlueprintPinType::PageRef),
+        "api" => Some(BlueprintPinType::ApiRef),
+        _ => None,
+    }
+}
+
+fn blueprint_node_size(kind: &BlueprintNodeKind) -> (i32, i32) {
+    match kind {
+        BlueprintNodeKind::VariableGet { .. } => (190, 48),
+        BlueprintNodeKind::VariableSet { .. } => (210, 96),
+        BlueprintNodeKind::Functional { node_id } if node_id == "if_statement" => (230, 128),
+        BlueprintNodeKind::UiEvent { .. } => (190, 112),
+        _ => (220, 112),
+    }
+}
+
+fn nearest_free_blueprint_position(
+    nodes: &[BlueprintNode],
+    preferred: BlueprintPoint,
+    size: (i32, i32),
+) -> BlueprintPoint {
+    let step_x = 260;
+    let step_y = 150;
+    let margin = 24;
+
+    for radius in 0i32..12 {
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                if radius > 0 && dx.abs() != radius && dy.abs() != radius {
+                    continue;
+                }
+                let candidate = BlueprintPoint {
+                    x: preferred.x + dx * step_x,
+                    y: preferred.y + dy * step_y,
+                };
+                if !blueprint_position_overlaps(nodes, candidate, size, margin) {
+                    return candidate;
+                }
+            }
+        }
+    }
+
+    BlueprintPoint {
+        x: preferred.x + step_x,
+        y: preferred.y,
+    }
+}
+
+fn blueprint_position_overlaps(
+    nodes: &[BlueprintNode],
+    candidate: BlueprintPoint,
+    size: (i32, i32),
+    margin: i32,
+) -> bool {
+    let left = candidate.x - margin;
+    let top = candidate.y - margin;
+    let right = candidate.x + size.0 + margin;
+    let bottom = candidate.y + size.1 + margin;
+
+    nodes.iter().any(|node| {
+        let node_size = blueprint_node_size(&node.kind);
+        let node_left = node.position.x;
+        let node_top = node.position.y;
+        let node_right = node.position.x + node_size.0;
+        let node_bottom = node.position.y + node_size.1;
+        right > node_left && left < node_right && bottom > node_top && top < node_bottom
+    })
 }
 
 /// Project manager singleton.
@@ -3906,11 +4473,6 @@ impl ProjectManager {
         let project = Project::load(path)?;
         self.current_project = Some(project);
         Ok(self.current_project.as_ref().expect("project just set"))
-    }
-
-    pub fn set_project(&mut self, project: Project) -> &Project {
-        self.current_project = Some(project);
-        self.current_project.as_ref().expect("project just set")
     }
 
     pub fn current_project_mut(&mut self) -> Option<&mut Project> {
@@ -4158,5 +4720,52 @@ mod tests {
             .spans
             .iter()
             .any(|span| span.node_id == set_text.id));
+    }
+
+    #[test]
+    fn project_creates_variable_getter_and_setter_nodes_from_sidebar_requests() {
+        let temp = tempdir().expect("tempdir");
+        let project_dir = temp.path().to_string_lossy().to_string();
+        let mut project = Project::new(
+            "SnappixVariables",
+            &project_dir,
+            Platform::Desktop,
+            DevMode::Nodes,
+            PageSize::Desktop,
+            0,
+            0,
+        );
+
+        let blueprint_ref = project
+            .page_blueprint_document_ref(project.active_page_index())
+            .expect("page blueprint");
+        assert!(project.open_document(blueprint_ref));
+
+        let variable_id = project
+            .add_local_variable_to_active_blueprint()
+            .expect("variable");
+        let getter_id = project
+            .add_variable_node_to_active_blueprint(variable_id, "get", 0.0, 0.0)
+            .expect("getter");
+        let setter_id = project
+            .add_variable_node_to_active_blueprint(variable_id, "set", 0.0, 0.0)
+            .expect("setter");
+
+        let nodes = project.active_blueprint_nodes();
+        let getter = nodes.iter().find(|node| node.id == getter_id).unwrap();
+        let setter = nodes.iter().find(|node| node.id == setter_id).unwrap();
+        assert!(matches!(getter.kind, BlueprintNodeKind::VariableGet { .. }));
+        assert!(matches!(setter.kind, BlueprintNodeKind::VariableSet { .. }));
+        assert_ne!(getter.position, setter.position);
+
+        assert!(project.rename_local_variable_in_active_blueprint(variable_id, "is_ready"));
+        assert!(project.set_local_variable_type_in_active_blueprint(variable_id, "String"));
+        let nodes = project.active_blueprint_nodes();
+        let getter = nodes.iter().find(|node| node.id == getter_id).unwrap();
+        assert_eq!(getter.title, "is_ready");
+        assert_eq!(
+            getter.pin_named("value").expect("getter value").data_type,
+            BlueprintPinType::String
+        );
     }
 }

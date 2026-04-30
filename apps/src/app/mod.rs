@@ -1,7 +1,7 @@
 //! Модули логики приложения
 
-pub mod auth;
 pub mod associations;
+pub mod auth;
 pub mod navigation;
 pub mod project;
 

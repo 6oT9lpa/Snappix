@@ -65,7 +65,13 @@ pub fn find_drop_parent(project: &Project, canvas_x: f32, canvas_y: f32) -> Opti
     for element in elements.iter().rev() {
         let is_container = matches!(
             element.element_type.as_str(),
-            "div" | "stack-container" | "stack" | "flex-container" | "flex" | "grid-container" | "grid"
+            "div"
+                | "stack-container"
+                | "stack"
+                | "flex-container"
+                | "flex"
+                | "grid-container"
+                | "grid"
         );
         if !is_container {
             continue;

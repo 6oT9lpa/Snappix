@@ -4,12 +4,15 @@ use std::path::Path;
 use std::rc::Rc;
 use uuid::Uuid;
 
+use core_blueprint::BlueprintPinType;
+
 use crate::app::project::{CanvasElementData, Project};
 use crate::config;
 use crate::editor_runtime::history::HistoryManager;
 use crate::{
-    AppWindow, CanvasBounds, CanvasCommentInfo, CanvasPosition, CanvasSize, EditorDocumentInfo,
-    ProjectPageInfo, RecentProjectData, SelectionInfo, TimelineEntry,
+    AppWindow, BlueprintFunctionInfo, BlueprintVariableInfo, CanvasBounds, CanvasCommentInfo,
+    CanvasPosition, CanvasSize, EditorDocumentInfo, ProjectPageInfo, RecentProjectData,
+    SelectionInfo, TimelineEntry,
 };
 
 #[derive(Clone)]
@@ -45,6 +48,12 @@ pub fn sync_editor_models(ui: &AppWindow, project: &Project) {
     if page_count == 0 {
         ui.set_editor_documents(Rc::new(VecModel::from(Vec::<EditorDocumentInfo>::new())).into());
         ui.set_project_page_items(Rc::new(VecModel::from(Vec::<ProjectPageInfo>::new())).into());
+        ui.set_blueprint_variable_items(
+            Rc::new(VecModel::from(Vec::<BlueprintVariableInfo>::new())).into(),
+        );
+        ui.set_blueprint_function_items(
+            Rc::new(VecModel::from(Vec::<BlueprintFunctionInfo>::new())).into(),
+        );
         ui.set_active_document_index(0);
         return;
     }
@@ -103,10 +112,73 @@ pub fn sync_editor_models(ui: &AppWindow, project: &Project) {
         })
         .collect();
     ui.set_project_page_items(Rc::new(VecModel::from(page_items)).into());
+    sync_blueprint_models(ui, project);
 
     let (width, height) = project.active_page_size();
     ui.set_page_width(width as f32);
     ui.set_page_height(height as f32);
+}
+
+pub fn sync_blueprint_models(ui: &AppWindow, project: &Project) {
+    let variables: Vec<BlueprintVariableInfo> = project
+        .active_blueprint_local_variables()
+        .into_iter()
+        .map(|variable| BlueprintVariableInfo {
+            variable_id: SharedString::from(variable.id.to_string()),
+            name: SharedString::from(variable.name),
+            type_name: SharedString::from(pin_type_label(variable.data_type)),
+            color: pin_type_color(variable.data_type),
+        })
+        .collect();
+    ui.set_blueprint_variable_items(Rc::new(VecModel::from(variables)).into());
+
+    let functions: Vec<BlueprintFunctionInfo> = project
+        .active_blueprint_functions()
+        .into_iter()
+        .map(|function| BlueprintFunctionInfo {
+            function_id: SharedString::from(function.name.clone()),
+            name: SharedString::from(function.name),
+            return_type: SharedString::from(pin_type_label(function.return_type)),
+        })
+        .collect();
+    ui.set_blueprint_function_items(Rc::new(VecModel::from(functions)).into());
+}
+
+fn pin_type_label(pin_type: BlueprintPinType) -> &'static str {
+    match pin_type {
+        BlueprintPinType::Exec => "exec",
+        BlueprintPinType::Any => "any",
+        BlueprintPinType::Bool => "bool",
+        BlueprintPinType::Int => "i64",
+        BlueprintPinType::Float => "f64",
+        BlueprintPinType::String => "String",
+        BlueprintPinType::Color => "Color",
+        BlueprintPinType::Array => "Array",
+        BlueprintPinType::Vector => "Vector",
+        BlueprintPinType::HashSet => "Set",
+        BlueprintPinType::HashMap => "HashMap",
+        BlueprintPinType::UiElementRef => "Element",
+        BlueprintPinType::PageRef => "Page",
+        BlueprintPinType::ApiRef => "Api",
+        BlueprintPinType::Void => "void",
+    }
+}
+
+fn pin_type_color(pin_type: BlueprintPinType) -> Color {
+    match pin_type {
+        BlueprintPinType::Bool => Color::from_rgb_u8(220, 68, 79),
+        BlueprintPinType::Int | BlueprintPinType::Float => Color::from_rgb_u8(76, 137, 219),
+        BlueprintPinType::String => Color::from_rgb_u8(218, 171, 64),
+        BlueprintPinType::Color => Color::from_rgb_u8(181, 93, 205),
+        BlueprintPinType::Array
+        | BlueprintPinType::Vector
+        | BlueprintPinType::HashSet
+        | BlueprintPinType::HashMap => Color::from_rgb_u8(225, 128, 65),
+        BlueprintPinType::UiElementRef => Color::from_rgb_u8(62, 168, 137),
+        BlueprintPinType::PageRef | BlueprintPinType::ApiRef => Color::from_rgb_u8(70, 137, 145),
+        BlueprintPinType::Any => Color::from_rgb_u8(132, 139, 150),
+        BlueprintPinType::Exec | BlueprintPinType::Void => Color::from_rgb_u8(235, 235, 235),
+    }
 }
 
 pub fn sync_canvas(
@@ -142,12 +214,7 @@ pub fn sync_canvas_comments(ui: &AppWindow, project: &Project) {
                     } else {
                         Image::default()
                     };
-                    (
-                        loaded,
-                        image.width as i32,
-                        image.height as i32,
-                        has_image,
-                    )
+                    (loaded, image.width as i32, image.height as i32, has_image)
                 })
                 .unwrap_or_else(|| (Image::default(), 0, 0, false));
 
@@ -530,7 +597,6 @@ fn asset_display_name(path: &str) -> String {
         .to_string()
 }
 
-
 fn prop_uuid(
     props: Option<&serde_json::Map<String, serde_json::Value>>,
     key: &str,
@@ -663,6 +729,8 @@ fn to_selection_info(
             },
         },
         rotation: element.rotation,
+        flip_horizontal: prop_bool(props, "flip_horizontal", false),
+        flip_vertical: prop_bool(props, "flip_vertical", false),
         text_content: SharedString::from(text_content),
         placeholder: SharedString::from(prop_str(props, "placeholder", "")),
         checked: prop_bool(props, "checked", false),
@@ -672,8 +740,48 @@ fn to_selection_info(
         )),
         allow_absolute_children: prop_bool(props, "allow_absolute_children", false),
         layout_padding: prop_f32(props, "layout_padding", 8.0),
+        layout_padding_left: prop_f32(
+            props,
+            "layout_padding_left",
+            prop_f32(props, "layout_padding", 8.0),
+        ),
+        layout_padding_right: prop_f32(
+            props,
+            "layout_padding_right",
+            prop_f32(props, "layout_padding", 8.0),
+        ),
+        layout_padding_top: prop_f32(
+            props,
+            "layout_padding_top",
+            prop_f32(props, "layout_padding", 8.0),
+        ),
+        layout_padding_bottom: prop_f32(
+            props,
+            "layout_padding_bottom",
+            prop_f32(props, "layout_padding", 8.0),
+        ),
         layout_spacing: prop_f32(props, "layout_spacing", 8.0),
         layout_margin: prop_f32(props, "layout_margin", 0.0),
+        layout_margin_left: prop_f32(
+            props,
+            "layout_margin_left",
+            prop_f32(props, "layout_margin", 0.0),
+        ),
+        layout_margin_right: prop_f32(
+            props,
+            "layout_margin_right",
+            prop_f32(props, "layout_margin", 0.0),
+        ),
+        layout_margin_top: prop_f32(
+            props,
+            "layout_margin_top",
+            prop_f32(props, "layout_margin", 0.0),
+        ),
+        layout_margin_bottom: prop_f32(
+            props,
+            "layout_margin_bottom",
+            prop_f32(props, "layout_margin", 0.0),
+        ),
         layout_order: prop_f32(props, "layout_order", 0.0),
         stack_alignment: SharedString::from(prop_str(props, "stack_alignment", "stretch")),
         flex_direction: SharedString::from(prop_str(props, "flex_direction", "column")),
@@ -702,7 +810,11 @@ fn to_selection_info(
         }),
         grid_template_areas: SharedString::from(prop_str(props, "grid_template_areas", "")),
         checkbox_box_side: SharedString::from(prop_str(props, "checkbox_box_side", "left")),
-        checkbox_check_color: prop_color(props, "checkbox_check_color", Color::from_rgb_u8(245, 245, 245)),
+        checkbox_check_color: prop_color(
+            props,
+            "checkbox_check_color",
+            Color::from_rgb_u8(245, 245, 245),
+        ),
         checkbox_box_color: prop_color(props, "checkbox_box_color", Color::from_rgb_u8(21, 21, 21)),
         checkbox_box_border_color: prop_color(
             props,
@@ -741,8 +853,16 @@ fn set_selected_defaults(ui: &AppWindow) {
     ui.set_selected_element_container_mode(SharedString::from("absolute"));
     ui.set_selected_element_allow_absolute_children(false);
     ui.set_selected_element_layout_padding(8.0);
+    ui.set_selected_element_layout_padding_left(8.0);
+    ui.set_selected_element_layout_padding_right(8.0);
+    ui.set_selected_element_layout_padding_top(8.0);
+    ui.set_selected_element_layout_padding_bottom(8.0);
     ui.set_selected_element_layout_spacing(8.0);
     ui.set_selected_element_layout_margin(0.0);
+    ui.set_selected_element_layout_margin_left(0.0);
+    ui.set_selected_element_layout_margin_right(0.0);
+    ui.set_selected_element_layout_margin_top(0.0);
+    ui.set_selected_element_layout_margin_bottom(0.0);
     ui.set_selected_element_layout_order(0.0);
     ui.set_selected_element_stack_alignment(SharedString::from("stretch"));
     ui.set_selected_element_flex_direction(SharedString::from("column"));
@@ -799,13 +919,13 @@ fn set_selected_element(
         .unwrap_or(14.0);
     let resolved_text_color = resolved_text_style
         .map(|style| style.text_color)
-        .and_then(|color| {
-            Some(format!(
+        .map(|color| {
+            format!(
                 "#{:02x}{:02x}{:02x}",
                 color.red(),
                 color.green(),
                 color.blue()
-            ))
+            )
         })
         .unwrap_or_else(|| "#f5f5f5".to_string());
     let resolved_font_family = resolved_text_style
@@ -850,8 +970,48 @@ fn set_selected_element(
         false,
     ));
     ui.set_selected_element_layout_padding(prop_f32(props, "layout_padding", 8.0));
+    ui.set_selected_element_layout_padding_left(prop_f32(
+        props,
+        "layout_padding_left",
+        prop_f32(props, "layout_padding", 8.0),
+    ));
+    ui.set_selected_element_layout_padding_right(prop_f32(
+        props,
+        "layout_padding_right",
+        prop_f32(props, "layout_padding", 8.0),
+    ));
+    ui.set_selected_element_layout_padding_top(prop_f32(
+        props,
+        "layout_padding_top",
+        prop_f32(props, "layout_padding", 8.0),
+    ));
+    ui.set_selected_element_layout_padding_bottom(prop_f32(
+        props,
+        "layout_padding_bottom",
+        prop_f32(props, "layout_padding", 8.0),
+    ));
     ui.set_selected_element_layout_spacing(prop_f32(props, "layout_spacing", 8.0));
     ui.set_selected_element_layout_margin(prop_f32(props, "layout_margin", 0.0));
+    ui.set_selected_element_layout_margin_left(prop_f32(
+        props,
+        "layout_margin_left",
+        prop_f32(props, "layout_margin", 0.0),
+    ));
+    ui.set_selected_element_layout_margin_right(prop_f32(
+        props,
+        "layout_margin_right",
+        prop_f32(props, "layout_margin", 0.0),
+    ));
+    ui.set_selected_element_layout_margin_top(prop_f32(
+        props,
+        "layout_margin_top",
+        prop_f32(props, "layout_margin", 0.0),
+    ));
+    ui.set_selected_element_layout_margin_bottom(prop_f32(
+        props,
+        "layout_margin_bottom",
+        prop_f32(props, "layout_margin", 0.0),
+    ));
     ui.set_selected_element_layout_order(prop_f32(props, "layout_order", 0.0));
     ui.set_selected_element_stack_alignment(SharedString::from(prop_str(
         props,
@@ -863,11 +1023,7 @@ fn set_selected_element(
         "flex_direction",
         "column",
     )));
-    ui.set_selected_element_flex_wrap(SharedString::from(prop_str(
-        props,
-        "flex_wrap",
-        "nowrap",
-    )));
+    ui.set_selected_element_flex_wrap(SharedString::from(prop_str(props, "flex_wrap", "nowrap")));
     ui.set_selected_element_justify_items(SharedString::from(prop_str(
         props,
         "justify_items",
