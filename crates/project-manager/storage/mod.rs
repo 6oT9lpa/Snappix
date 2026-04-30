@@ -1,17 +1,18 @@
 //! Хранилище проектов для Snappix.
 
+use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::format::{
     BlueprintIndex, BlueprintPageIndex, ProjectArchiveHeader, ProjectFile, ARCHIVE_VERSION,
 };
 use core_blueprint::{BlueprintDocument, BlueprintDocumentKind, BlueprintOwner};
 use shared::{from_msgpack, to_msgpack, Result, SnappixError};
+use walkdir::WalkDir;
 use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
-use walkdir::WalkDir;
 
 const PROJECT_BIN_PATH: &str = "project.bin";
 const UI_BIN_PATH: &str = "ui.bin";
@@ -103,12 +104,7 @@ impl ProjectStorage {
             workspace_data: project.workspace_data.clone(),
             icon_path: Some(ICON_PATH.to_string()),
         };
-        write_zip_entry(
-            &mut zip,
-            PROJECT_BIN_PATH,
-            &to_msgpack(&header)?,
-            options,
-        )?;
+        write_zip_entry(&mut zip, PROJECT_BIN_PATH, &to_msgpack(&header)?, options)?;
         write_zip_entry(
             &mut zip,
             UI_BIN_PATH,
@@ -220,7 +216,7 @@ impl ProjectStorage {
             let entry = entry?;
             let path = entry.path();
 
-            if path.extension().map_or(false, |ext| ext == "spx") {
+            if path.extension().is_some_and(|ext| ext == "spx") {
                 if let Some(name) = path.file_stem() {
                     projects.push(name.to_string_lossy().to_string());
                 }
@@ -381,14 +377,14 @@ fn add_assets_to_archive(
         return Ok(());
     }
 
-    for entry in WalkDir::new(&assets_dir).into_iter().filter_map(|entry| entry.ok()) {
+    for entry in WalkDir::new(&assets_dir)
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+    {
         if !entry.file_type().is_file() {
             continue;
         }
-        let relative = entry
-            .path()
-            .strip_prefix(root_dir)
-            .unwrap_or(entry.path());
+        let relative = entry.path().strip_prefix(root_dir).unwrap_or(entry.path());
         let name = relative.to_string_lossy().replace('\\', "/");
         let bytes = fs::read(entry.path())?;
         write_zip_entry(zip, &name, &bytes, options)?;
@@ -396,10 +392,7 @@ fn add_assets_to_archive(
     Ok(())
 }
 
-pub fn extract_assets_from_archive(
-    archive: &mut ZipArchive<File>,
-    root_dir: &Path,
-) -> Result<()> {
+pub fn extract_assets_from_archive(archive: &mut ZipArchive<File>, root_dir: &Path) -> Result<()> {
     let assets_dir = root_dir.join("assets");
     if assets_dir.exists() {
         fs::remove_dir_all(&assets_dir)?;
@@ -413,7 +406,9 @@ pub fn extract_assets_from_archive(
         if !name.starts_with("assets/") || entry.is_dir() {
             continue;
         }
-        let output_path = root_dir.join(&name);
+        let Some(output_path) = safe_archive_asset_path(root_dir, &name) else {
+            continue;
+        };
         if let Some(parent) = output_path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -424,6 +419,48 @@ pub fn extract_assets_from_archive(
 }
 
 /// Ошибки хранилища проектов
+fn safe_archive_asset_path(root_dir: &Path, name: &str) -> Option<PathBuf> {
+    let mut components = Path::new(name).components();
+    match components.next()? {
+        Component::Normal(first) if first == OsStr::new("assets") => {}
+        _ => return None,
+    }
+
+    let mut output_path = root_dir.join("assets");
+    for component in components {
+        match component {
+            Component::Normal(part) => output_path.push(part),
+            _ => return None,
+        }
+    }
+    Some(output_path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::safe_archive_asset_path;
+    use std::path::Path;
+
+    #[test]
+    fn safe_archive_asset_path_accepts_nested_assets() {
+        let root = Path::new("root");
+
+        assert_eq!(
+            safe_archive_asset_path(root, "assets/images/icon.png"),
+            Some(root.join("assets").join("images").join("icon.png"))
+        );
+    }
+
+    #[test]
+    fn safe_archive_asset_path_rejects_traversal() {
+        let root = Path::new("root");
+
+        assert!(safe_archive_asset_path(root, "assets/../../outside.txt").is_none());
+        assert!(safe_archive_asset_path(root, "../assets/outside.txt").is_none());
+        assert!(safe_archive_asset_path(root, "/assets/outside.txt").is_none());
+    }
+}
+
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum StorageError {
     #[error("IO error: {0}")]

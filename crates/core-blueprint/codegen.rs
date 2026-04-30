@@ -36,10 +36,7 @@ pub struct GeneratedNodeSpan {
     pub column: usize,
 }
 
-pub fn generate_project(
-    project_name: &str,
-    ir: &BlueprintIrProject,
-) -> GeneratedBlueprintProject {
+pub fn generate_project(project_name: &str, ir: &BlueprintIrProject) -> GeneratedBlueprintProject {
     let mut files = Vec::new();
     let mut source_map = BlueprintSourceMap::default();
 
@@ -106,6 +103,22 @@ pub enum BlueprintValue {
 
 pub trait BlueprintRuntime {
     fn set_element_text(&mut self, page_id: &str, element_id: &str, value: String);
+    fn get_blueprint_variable(
+        &mut self,
+        variable_id: &str,
+        variable_name: &str,
+    ) -> BlueprintValue {
+        let _ = (variable_id, variable_name);
+        BlueprintValue::Void
+    }
+    fn set_blueprint_variable(
+        &mut self,
+        variable_id: &str,
+        variable_name: &str,
+        value: BlueprintValue,
+    ) {
+        let _ = (variable_id, variable_name, value);
+    }
     fn call_server_function(
         &mut self,
         function_name: &str,
@@ -117,6 +130,14 @@ pub trait BlueprintRuntime {
         function_name: &str,
         arguments: &[BlueprintValue],
     ) -> BlueprintValue;
+    fn execute_functional_node(
+        &mut self,
+        node_id: &str,
+        arguments: &[BlueprintValue],
+    ) -> BlueprintValue {
+        let _ = (node_id, arguments);
+        BlueprintValue::Void
+    }
 }
 
 pub fn value_to_string(value: &BlueprintValue) -> String {
@@ -130,6 +151,20 @@ pub fn value_to_string(value: &BlueprintValue) -> String {
         BlueprintValue::UiElementRef(value) => value.clone(),
         BlueprintValue::PageRef(value) => value.clone(),
         BlueprintValue::ApiRef(value) => value.clone(),
+    }
+}
+
+pub fn value_to_bool(value: &BlueprintValue) -> bool {
+    match value {
+        BlueprintValue::Bool(value) => *value,
+        BlueprintValue::Int(value) => *value != 0,
+        BlueprintValue::Float(value) => *value != 0.0,
+        BlueprintValue::String(value) => !value.is_empty(),
+        BlueprintValue::Color(value)
+        | BlueprintValue::UiElementRef(value)
+        | BlueprintValue::PageRef(value)
+        | BlueprintValue::ApiRef(value) => !value.is_empty(),
+        BlueprintValue::Void => false,
     }
 }
 "#
@@ -179,7 +214,9 @@ fn build_document_module(
         .map(|function| (function.name.as_str(), function.rust_name.as_str()))
         .collect();
 
-    writer.push_line("use crate::runtime::{value_to_string, BlueprintRuntime, BlueprintValue};");
+    writer.push_line(
+        "use crate::runtime::{value_to_bool, value_to_string, BlueprintRuntime, BlueprintValue};",
+    );
     writer.push_line("");
     writer.push_line(format!(
         "pub const DOCUMENT_NAME: &str = {:?};",
@@ -211,9 +248,13 @@ fn build_function(
     spans: &mut Vec<GeneratedNodeSpan>,
 ) {
     let mut parameters = vec!["runtime: &mut dyn BlueprintRuntime".to_string()];
-    parameters.extend(function.signature.parameters.iter().map(|parameter| {
-        format!("{}: BlueprintValue", sanitize_ident(parameter.name.clone()))
-    }));
+    parameters.extend(
+        function
+            .signature
+            .parameters
+            .iter()
+            .map(|parameter| format!("{}: BlueprintValue", sanitize_ident(parameter.name.clone()))),
+    );
 
     writer.push_line(format!(
         "pub fn {}({}) -> BlueprintValue {{",
@@ -226,120 +267,243 @@ fn build_function(
         BlueprintIrFunctionTrigger::Event {
             element_id,
             event_name,
-        } => writer.push_line(format!(
-            "// Event trigger: {event_name} on {element_id}"
-        )),
+        } => writer.push_line(format!("// Event trigger: {event_name} on {element_id}")),
         BlueprintIrFunctionTrigger::Function => writer.push_line("// User function entry"),
     }
 
     let mut temp_index = 0usize;
     for statement in &function.statements {
-        let line_before = writer.current_line();
-        match statement {
-            BlueprintIrStatement::SetElementText {
-                node_id,
-                value_pin_id,
-                element_id,
-                page_id,
-                value,
-            } => {
-                let value_expr = value_expr(value);
-                writer.push_line(format!(
-                    "runtime.set_element_text({:?}, {:?}, value_to_string(&{}));",
-                    page_id.to_string(),
-                    element_id.to_string(),
-                    value_expr
-                ));
-                spans.push(GeneratedNodeSpan {
-                    document_id: document.id,
-                    graph_id: function.graph_id,
-                    node_id: *node_id,
-                    pin_id: *value_pin_id,
-                    file: path.to_string(),
-                    line: line_before,
-                    column: 1,
-                });
-            }
-            BlueprintIrStatement::CallDocumentFunction {
-                node_id,
-                target,
-                function_name,
-                arguments,
-            } => {
-                let args_expr = format!(
-                    "&[{}]",
-                    arguments
-                        .iter()
-                        .map(value_expr)
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
-                let temp_name = format!("call_result_{temp_index}");
-                temp_index += 1;
-                let statement = match target {
-                    BlueprintFunctionTarget::ThisDocument => {
-                        let target_name = function_name_map
-                            .get(function_name.as_str())
-                            .copied()
-                            .unwrap_or(function_name.as_str());
-                        let direct_args = arguments
-                            .iter()
-                            .map(value_expr)
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        format!(
-                            "let _{} = {}(runtime{}{});",
-                            temp_name,
-                            target_name,
-                            if direct_args.is_empty() { "" } else { ", " },
-                            direct_args
-                        )
-                    }
-                    BlueprintFunctionTarget::Server => format!(
-                        "let _{} = runtime.call_server_function({:?}, {});",
-                        temp_name, function_name, args_expr
-                    ),
-                    BlueprintFunctionTarget::Page { page_id } => format!(
-                        "let _{} = runtime.call_page_function({:?}, {:?}, {});",
-                        temp_name,
-                        page_id.to_string(),
-                        function_name,
-                        args_expr
-                    ),
-                };
-                writer.push_line(statement);
-                spans.push(GeneratedNodeSpan {
-                    document_id: document.id,
-                    graph_id: function.graph_id,
-                    node_id: *node_id,
-                    pin_id: None,
-                    file: path.to_string(),
-                    line: line_before,
-                    column: 1,
-                });
-            }
-            BlueprintIrStatement::Return { node_id, value } => {
-                let expr = value
-                    .as_ref()
-                    .map(value_expr)
-                    .unwrap_or_else(|| "BlueprintValue::Void".to_string());
-                writer.push_line(format!("return {expr};"));
-                spans.push(GeneratedNodeSpan {
-                    document_id: document.id,
-                    graph_id: function.graph_id,
-                    node_id: *node_id,
-                    pin_id: None,
-                    file: path.to_string(),
-                    line: line_before,
-                    column: 1,
-                });
-            }
-        }
+        build_statement(
+            writer,
+            document,
+            function,
+            statement,
+            path,
+            function_name_map,
+            spans,
+            &mut temp_index,
+        );
     }
 
     writer.push_line("BlueprintValue::Void");
     writer.indent -= 1;
     writer.push_line("}");
+}
+
+fn build_statement(
+    writer: &mut RustWriter,
+    document: &BlueprintIrDocument,
+    function: &BlueprintIrFunction,
+    statement: &BlueprintIrStatement,
+    path: &str,
+    function_name_map: &HashMap<&str, &str>,
+    spans: &mut Vec<GeneratedNodeSpan>,
+    temp_index: &mut usize,
+) {
+    let line_before = writer.current_line();
+    match statement {
+        BlueprintIrStatement::SetElementText {
+            node_id,
+            value_pin_id,
+            element_id,
+            page_id,
+            value,
+        } => {
+            let value_expr = value_expr(value);
+            writer.push_line(format!(
+                "runtime.set_element_text({:?}, {:?}, value_to_string(&{}));",
+                page_id.to_string(),
+                element_id.to_string(),
+                value_expr
+            ));
+            spans.push(GeneratedNodeSpan {
+                document_id: document.id,
+                graph_id: function.graph_id,
+                node_id: *node_id,
+                pin_id: *value_pin_id,
+                file: path.to_string(),
+                line: line_before,
+                column: 1,
+            });
+        }
+        BlueprintIrStatement::SetVariable {
+            node_id,
+            variable_id,
+            variable_name,
+            value,
+        } => {
+            let temp_name = format!("variable_value_{}", *temp_index);
+            *temp_index += 1;
+            writer.push_line(format!("let {} = {};", temp_name, value_expr(value)));
+            writer.push_line(format!(
+                "runtime.set_blueprint_variable({:?}, {:?}, {});",
+                variable_id.to_string(),
+                variable_name,
+                temp_name
+            ));
+            spans.push(GeneratedNodeSpan {
+                document_id: document.id,
+                graph_id: function.graph_id,
+                node_id: *node_id,
+                pin_id: None,
+                file: path.to_string(),
+                line: line_before,
+                column: 1,
+            });
+        }
+        BlueprintIrStatement::Branch {
+            node_id,
+            condition_pin_id,
+            condition,
+            true_statements,
+            false_statements,
+        } => {
+            let condition_expr = value_expr(condition);
+            writer.push_line(format!("if value_to_bool(&{}) {{", condition_expr));
+            spans.push(GeneratedNodeSpan {
+                document_id: document.id,
+                graph_id: function.graph_id,
+                node_id: *node_id,
+                pin_id: *condition_pin_id,
+                file: path.to_string(),
+                line: line_before,
+                column: 1,
+            });
+            writer.indent += 1;
+            for statement in true_statements {
+                build_statement(
+                    writer,
+                    document,
+                    function,
+                    statement,
+                    path,
+                    function_name_map,
+                    spans,
+                    temp_index,
+                );
+            }
+            writer.indent -= 1;
+            writer.push_line("} else {");
+            writer.indent += 1;
+            for statement in false_statements {
+                build_statement(
+                    writer,
+                    document,
+                    function,
+                    statement,
+                    path,
+                    function_name_map,
+                    spans,
+                    temp_index,
+                );
+            }
+            writer.indent -= 1;
+            writer.push_line("}");
+        }
+        BlueprintIrStatement::CallDocumentFunction {
+            node_id,
+            target,
+            function_name,
+            arguments,
+        } => {
+            let args_expr = format!(
+                "&[{}]",
+                arguments
+                    .iter()
+                    .map(value_expr)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            let temp_name = format!("call_result_{}", *temp_index);
+            *temp_index += 1;
+            let statement = match target {
+                BlueprintFunctionTarget::ThisDocument => {
+                    let target_name = function_name_map
+                        .get(function_name.as_str())
+                        .copied()
+                        .unwrap_or(function_name.as_str());
+                    let direct_args = arguments
+                        .iter()
+                        .map(value_expr)
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!(
+                        "let _{} = {}(runtime{}{});",
+                        temp_name,
+                        target_name,
+                        if direct_args.is_empty() { "" } else { ", " },
+                        direct_args
+                    )
+                }
+                BlueprintFunctionTarget::Server => format!(
+                    "let _{} = runtime.call_server_function({:?}, {});",
+                    temp_name, function_name, args_expr
+                ),
+                BlueprintFunctionTarget::Page { page_id } => format!(
+                    "let _{} = runtime.call_page_function({:?}, {:?}, {});",
+                    temp_name,
+                    page_id.to_string(),
+                    function_name,
+                    args_expr
+                ),
+            };
+            writer.push_line(statement);
+            spans.push(GeneratedNodeSpan {
+                document_id: document.id,
+                graph_id: function.graph_id,
+                node_id: *node_id,
+                pin_id: None,
+                file: path.to_string(),
+                line: line_before,
+                column: 1,
+            });
+        }
+        BlueprintIrStatement::FunctionalNode {
+            node_id,
+            functional_node_id,
+            arguments,
+        } => {
+            let args_expr = format!(
+                "&[{}]",
+                arguments
+                    .iter()
+                    .map(value_expr)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            let temp_name = format!("functional_result_{}", *temp_index);
+            *temp_index += 1;
+            writer.push_line(format!(
+                "let _{} = runtime.execute_functional_node({:?}, {});",
+                temp_name, functional_node_id, args_expr
+            ));
+            spans.push(GeneratedNodeSpan {
+                document_id: document.id,
+                graph_id: function.graph_id,
+                node_id: *node_id,
+                pin_id: None,
+                file: path.to_string(),
+                line: line_before,
+                column: 1,
+            });
+        }
+        BlueprintIrStatement::Return { node_id, value } => {
+            let expr = value
+                .as_ref()
+                .map(value_expr)
+                .unwrap_or_else(|| "BlueprintValue::Void".to_string());
+            writer.push_line(format!("return {expr};"));
+            spans.push(GeneratedNodeSpan {
+                document_id: document.id,
+                graph_id: function.graph_id,
+                node_id: *node_id,
+                pin_id: None,
+                file: path.to_string(),
+                line: line_before,
+                column: 1,
+            });
+        }
+    }
 }
 
 fn value_expr(value: &BlueprintIrValue) -> String {
@@ -348,6 +512,15 @@ fn value_expr(value: &BlueprintIrValue) -> String {
             format!("BlueprintValue::String({value:?}.to_string())")
         }
         BlueprintIrValue::Parameter { name, .. } => sanitize_ident(name.clone()),
+        BlueprintIrValue::Variable {
+            variable_id,
+            variable_name,
+            ..
+        } => format!(
+            "runtime.get_blueprint_variable({:?}, {:?})",
+            variable_id.to_string(),
+            variable_name
+        ),
         BlueprintIrValue::Default(pin_type) => default_value_expr(*pin_type),
     }
 }
@@ -355,14 +528,17 @@ fn value_expr(value: &BlueprintIrValue) -> String {
 fn default_value_expr(pin_type: BlueprintPinType) -> String {
     match pin_type {
         BlueprintPinType::Exec | BlueprintPinType::Void => "BlueprintValue::Void".to_string(),
+        BlueprintPinType::Any => "BlueprintValue::Void".to_string(),
         BlueprintPinType::Bool => "BlueprintValue::Bool(false)".to_string(),
         BlueprintPinType::Int => "BlueprintValue::Int(0)".to_string(),
         BlueprintPinType::Float => "BlueprintValue::Float(0.0)".to_string(),
         BlueprintPinType::String => "BlueprintValue::String(String::new())".to_string(),
         BlueprintPinType::Color => "BlueprintValue::Color(String::new())".to_string(),
-        BlueprintPinType::UiElementRef => {
-            "BlueprintValue::UiElementRef(String::new())".to_string()
-        }
+        BlueprintPinType::Array
+        | BlueprintPinType::Vector
+        | BlueprintPinType::HashSet
+        | BlueprintPinType::HashMap => "BlueprintValue::Void".to_string(),
+        BlueprintPinType::UiElementRef => "BlueprintValue::UiElementRef(String::new())".to_string(),
         BlueprintPinType::PageRef => "BlueprintValue::PageRef(String::new())".to_string(),
         BlueprintPinType::ApiRef => "BlueprintValue::ApiRef(String::new())".to_string(),
     }

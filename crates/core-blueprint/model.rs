@@ -40,7 +40,10 @@ impl BlueprintDocument {
             name: blueprint_name_for_page(page_name),
             kind: BlueprintDocumentKind::PageBlueprint,
             owner: BlueprintOwner::Page { page_id },
-            graphs: vec![BlueprintGraph::new("Events", BlueprintGraphKind::EventGraph)],
+            graphs: vec![BlueprintGraph::new(
+                "Events",
+                BlueprintGraphKind::EventGraph,
+            )],
             exports: Vec::new(),
         }
     }
@@ -183,6 +186,34 @@ impl BlueprintNode {
         }
     }
 
+    pub fn variable_get(variable: &BlueprintLocalVariable) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            title: variable.name.clone(),
+            kind: BlueprintNodeKind::VariableGet {
+                variable_id: variable.id,
+            },
+            pins: vec![BlueprintPin::data_output("value", variable.data_type)],
+            position: BlueprintPoint::default(),
+        }
+    }
+
+    pub fn variable_set(variable: &BlueprintLocalVariable) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            title: format!("Set {}", variable.name),
+            kind: BlueprintNodeKind::VariableSet {
+                variable_id: variable.id,
+            },
+            pins: vec![
+                BlueprintPin::exec_input("in"),
+                BlueprintPin::data_input("value", variable.data_type),
+                BlueprintPin::exec_output("then"),
+            ],
+            position: BlueprintPoint::default(),
+        }
+    }
+
     pub fn function_entry(signature: BlueprintFunctionSignature) -> Self {
         let mut pins = vec![BlueprintPin::exec_output("then")];
         pins.extend(signature.parameters.iter().map(|parameter| {
@@ -223,10 +254,7 @@ impl BlueprintNode {
             BlueprintPin::data_input(parameter.name.clone(), parameter.data_type)
         }));
         if signature.return_type != BlueprintPinType::Void {
-            pins.push(BlueprintPin::data_output(
-                "result",
-                signature.return_type,
-            ));
+            pins.push(BlueprintPin::data_output("result", signature.return_type));
         }
         Self {
             id: Uuid::new_v4(),
@@ -245,14 +273,34 @@ impl BlueprintNode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum BlueprintNodeKind {
-    UiEvent { element_id: Uuid, event_name: String },
-    SetElementText { element_id: Uuid },
-    LiteralString { value: String },
-    FunctionEntry { signature: BlueprintFunctionSignature },
-    FunctionResult { return_type: BlueprintPinType },
+    UiEvent {
+        element_id: Uuid,
+        event_name: String,
+    },
+    SetElementText {
+        element_id: Uuid,
+    },
+    LiteralString {
+        value: String,
+    },
+    VariableGet {
+        variable_id: Uuid,
+    },
+    VariableSet {
+        variable_id: Uuid,
+    },
+    FunctionEntry {
+        signature: BlueprintFunctionSignature,
+    },
+    FunctionResult {
+        return_type: BlueprintPinType,
+    },
     CallDocumentFunction {
         target: BlueprintFunctionTarget,
         signature: BlueprintFunctionSignature,
+    },
+    Functional {
+        node_id: String,
     },
 }
 
@@ -325,11 +373,16 @@ pub enum BlueprintPinKind {
 #[serde(rename_all = "snake_case")]
 pub enum BlueprintPinType {
     Exec,
+    Any,
     Bool,
     Int,
     Float,
     String,
     Color,
+    Array,
+    Vector,
+    HashSet,
+    HashMap,
     UiElementRef,
     PageRef,
     ApiRef,

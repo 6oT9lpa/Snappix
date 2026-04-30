@@ -186,7 +186,9 @@ fn cargo_check_diagnostics(
     diagnostics
 }
 
-fn build_source_lookup(source_map: &BlueprintSourceMap) -> HashMap<(String, usize), &GeneratedNodeSpan> {
+fn build_source_lookup(
+    source_map: &BlueprintSourceMap,
+) -> HashMap<(String, usize), &GeneratedNodeSpan> {
     let mut lookup = HashMap::new();
     for span in &source_map.spans {
         lookup.insert((normalize_path(&span.file), span.line), span);

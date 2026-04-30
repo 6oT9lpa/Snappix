@@ -10,8 +10,10 @@ use crate::storage::{extract_assets, load_history, save_history, ProjectStorage}
 
 /// Создание нового проекта с заданным именем.
 pub fn create_project(name: &str) -> Result<ProjectFile> {
-    let mut manifest = ProjectManifest::default();
-    manifest.project_name = name.to_string();
+    let manifest = ProjectManifest {
+        project_name: name.to_string(),
+        ..ProjectManifest::default()
+    };
 
     // Создание с базовой страницей
     let default_page = Page::new("Main".to_string());

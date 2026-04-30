@@ -57,8 +57,10 @@ pub fn validate_project(
     documents: &[BlueprintDocument],
     api: &BlueprintProjectApi,
 ) -> Vec<BlueprintDiagnostic> {
-    let document_map: HashMap<Uuid, &BlueprintDocument> =
-        documents.iter().map(|document| (document.id, document)).collect();
+    let document_map: HashMap<Uuid, &BlueprintDocument> = documents
+        .iter()
+        .map(|document| (document.id, document))
+        .collect();
 
     let mut diagnostics = Vec::new();
     for document in documents {
@@ -184,7 +186,9 @@ fn validate_graph(
             ));
         }
 
-        if from_pin.kind != to_pin.kind || from_pin.data_type != to_pin.data_type {
+        if from_pin.kind != to_pin.kind
+            || !pin_types_are_compatible(from_pin.data_type, to_pin.data_type)
+        {
             diagnostics.push(BlueprintDiagnostic::error(
                 "link_type_mismatch",
                 format!(
@@ -328,6 +332,23 @@ fn validate_node(
                 ));
             }
         }
+        BlueprintNodeKind::VariableGet { variable_id }
+        | BlueprintNodeKind::VariableSet { variable_id } => {
+            if graph
+                .local_variables
+                .iter()
+                .all(|variable| variable.id != *variable_id)
+            {
+                diagnostics.push(BlueprintDiagnostic::error(
+                    "variable_missing",
+                    "Variable node references a missing local variable.",
+                    Some(document.id),
+                    Some(graph.id),
+                    Some(node.id),
+                    None,
+                ));
+            }
+        }
         BlueprintNodeKind::FunctionResult { return_type } => {
             let expected_return = graph
                 .function_signature()
@@ -345,9 +366,14 @@ fn validate_node(
             }
         }
         BlueprintNodeKind::CallDocumentFunction { target, signature } => {
-            if let Some(expected) =
-                resolve_function_target(document, target, signature.name.as_str(), documents, api, document_map)
-            {
+            if let Some(expected) = resolve_function_target(
+                document,
+                target,
+                signature.name.as_str(),
+                documents,
+                api,
+                document_map,
+            ) {
                 diagnostics.extend(compare_signatures(
                     document.id,
                     graph.id,
@@ -358,7 +384,10 @@ fn validate_node(
             } else {
                 diagnostics.push(BlueprintDiagnostic::error(
                     "function_target_missing",
-                    format!("Function '{}' is not available at the selected target.", signature.name),
+                    format!(
+                        "Function '{}' is not available at the selected target.",
+                        signature.name
+                    ),
                     Some(document.id),
                     Some(graph.id),
                     Some(node.id),
@@ -379,10 +408,27 @@ fn validate_node(
                 ));
             }
         }
+        BlueprintNodeKind::Functional { node_id } => {
+            diagnostics.push(BlueprintDiagnostic::error(
+                "functional_node_unavailable",
+                format!(
+                    "Functional node '{}' is not available in the current blueprint implementation.",
+                    node_id
+                ),
+                Some(document.id),
+                Some(graph.id),
+                Some(node.id),
+                None,
+            ));
+        }
         BlueprintNodeKind::LiteralString { .. } => {}
     }
 
     diagnostics
+}
+
+fn pin_types_are_compatible(from: BlueprintPinType, to: BlueprintPinType) -> bool {
+    from == to || from == BlueprintPinType::Any || to == BlueprintPinType::Any
 }
 
 fn resolve_function_target(
@@ -476,7 +522,10 @@ fn compare_signatures(
                 "function_param_type_mismatch",
                 format!(
                     "Param '{}' for function '{}' has type {:?}, expected {:?}.",
-                    actual_param.name, expected.name, actual_param.data_type, expected_param.data_type
+                    actual_param.name,
+                    expected.name,
+                    actual_param.data_type,
+                    expected_param.data_type
                 ),
                 Some(document_id),
                 Some(graph_id),
@@ -496,7 +545,7 @@ mod tests {
     use crate::api::{BlueprintProjectApi, PageApiDescriptor, ServerApiDescriptor};
     use crate::model::{
         BlueprintDocument, BlueprintFunctionSignature, BlueprintGraph, BlueprintGraphKind,
-        BlueprintLink, BlueprintNode, BlueprintPinType,
+        BlueprintLink, BlueprintNode, BlueprintNodeKind, BlueprintPinType, BlueprintPoint,
     };
 
     use super::validate_project;
@@ -521,7 +570,9 @@ mod tests {
         };
 
         let diagnostics = validate_project(&[document], &api);
-        assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "ui_element_missing"));
+        assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "ui_element_missing"));
     }
 
     #[test]
@@ -585,5 +636,35 @@ mod tests {
         assert!(diagnostics
             .iter()
             .any(|diagnostic| diagnostic.code == "link_type_mismatch"));
+    }
+
+    #[test]
+    fn rejects_functional_nodes_without_catalog() {
+        let page_id = Uuid::new_v4();
+        let mut document = BlueprintDocument::new_page(page_id, "Main");
+        document.graphs[0].nodes.push(BlueprintNode {
+            id: Uuid::new_v4(),
+            title: "Old Functional Node".to_string(),
+            kind: BlueprintNodeKind::Functional {
+                node_id: "old_node".to_string(),
+            },
+            pins: Vec::new(),
+            position: BlueprintPoint::default(),
+        });
+
+        let api = BlueprintProjectApi {
+            pages: vec![PageApiDescriptor {
+                page_id,
+                page_name: "Main".to_string(),
+                elements: Vec::new(),
+                exported_functions: Vec::new(),
+            }],
+            server: ServerApiDescriptor::default(),
+        };
+
+        let diagnostics = validate_project(&[document], &api);
+        assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "functional_node_unavailable"));
     }
 }

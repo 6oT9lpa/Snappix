@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Единица измерения размера.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(tag = "unit", content = "value")]
 pub enum SizeValue {
     Pixels(f32),
@@ -9,6 +9,74 @@ pub enum SizeValue {
     Fraction(f32),
     Auto,
     FitContent,
+}
+
+impl<'de> Deserialize<'de> for SizeValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct SizeValueVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for SizeValueVisitor {
+            type Value = SizeValue;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a size value")
+            }
+
+            fn visit_str<E>(self, unit: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                size_value_from_parts(unit, None).map_err(E::custom)
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let unit: String = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+                let value = seq.next_element::<f32>()?;
+                size_value_from_parts(&unit, value).map_err(serde::de::Error::custom)
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let mut unit = None;
+                let mut value = None;
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "unit" => unit = Some(map.next_value::<String>()?),
+                        "value" => value = Some(map.next_value::<f32>()?),
+                        _ => {
+                            let _: serde::de::IgnoredAny = map.next_value()?;
+                        }
+                    }
+                }
+                let unit = unit.ok_or_else(|| serde::de::Error::missing_field("unit"))?;
+                size_value_from_parts(&unit, value).map_err(serde::de::Error::custom)
+            }
+        }
+
+        fn size_value_from_parts(unit: &str, value: Option<f32>) -> Result<SizeValue, String> {
+            let normalized = unit.trim().to_ascii_lowercase().replace(['-', '_'], "");
+            match normalized.as_str() {
+                "pixels" => Ok(SizeValue::Pixels(value.unwrap_or(0.0))),
+                "percent" => Ok(SizeValue::Percent(value.unwrap_or(0.0))),
+                "fraction" => Ok(SizeValue::Fraction(value.unwrap_or(0.0))),
+                "auto" => Ok(SizeValue::Auto),
+                "fitcontent" => Ok(SizeValue::FitContent),
+                _ => Err(format!("unknown size unit: {unit}")),
+            }
+        }
+
+        deserializer.deserialize_any(SizeValueVisitor)
+    }
 }
 
 /// Направление Flex.
@@ -133,5 +201,24 @@ pub enum LayoutStyles {
 impl Default for LayoutStyles {
     fn default() -> Self {
         Self::Block { overflow: None }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SizeValue;
+
+    #[test]
+    fn size_value_reads_legacy_msgpack_tuple_variant() {
+        let bytes = shared::to_msgpack(&("Pixels", 8.0f32)).expect("encode legacy shape");
+        let decoded: SizeValue = shared::from_msgpack(&bytes).expect("decode legacy shape");
+        assert_eq!(decoded, SizeValue::Pixels(8.0));
+    }
+
+    #[test]
+    fn size_value_reads_legacy_msgpack_unit_variant() {
+        let bytes = shared::to_msgpack(&"Auto").expect("encode legacy unit shape");
+        let decoded: SizeValue = shared::from_msgpack(&bytes).expect("decode legacy unit shape");
+        assert_eq!(decoded, SizeValue::Auto);
     }
 }

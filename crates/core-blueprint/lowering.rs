@@ -5,8 +5,8 @@ use uuid::Uuid;
 use crate::api::BlueprintProjectApi;
 use crate::model::{
     BlueprintDocument, BlueprintDocumentKind, BlueprintFunctionSignature, BlueprintFunctionTarget,
-    BlueprintGraph, BlueprintLink, BlueprintNode, BlueprintNodeKind, BlueprintOwner,
-    BlueprintPinDirection, BlueprintPinType,
+    BlueprintGraph, BlueprintLink, BlueprintLocalVariable, BlueprintNode, BlueprintNodeKind,
+    BlueprintOwner, BlueprintPinDirection, BlueprintPinType,
 };
 use crate::validate::{validate_project, BlueprintDiagnostic, BlueprintDiagnosticSeverity};
 
@@ -37,7 +37,10 @@ pub struct BlueprintIrFunction {
 
 #[derive(Debug, Clone)]
 pub enum BlueprintIrFunctionTrigger {
-    Event { element_id: Uuid, event_name: String },
+    Event {
+        element_id: Uuid,
+        event_name: String,
+    },
     Function,
 }
 
@@ -50,10 +53,28 @@ pub enum BlueprintIrStatement {
         page_id: Uuid,
         value: BlueprintIrValue,
     },
+    SetVariable {
+        node_id: Uuid,
+        variable_id: Uuid,
+        variable_name: String,
+        value: BlueprintIrValue,
+    },
+    Branch {
+        node_id: Uuid,
+        condition_pin_id: Option<Uuid>,
+        condition: BlueprintIrValue,
+        true_statements: Vec<BlueprintIrStatement>,
+        false_statements: Vec<BlueprintIrStatement>,
+    },
     CallDocumentFunction {
         node_id: Uuid,
         target: BlueprintFunctionTarget,
         function_name: String,
+        arguments: Vec<BlueprintIrValue>,
+    },
+    FunctionalNode {
+        node_id: Uuid,
+        functional_node_id: String,
         arguments: Vec<BlueprintIrValue>,
     },
     Return {
@@ -73,6 +94,13 @@ pub enum BlueprintIrValue {
         node_id: Uuid,
         pin_id: Uuid,
         name: String,
+    },
+    Variable {
+        node_id: Uuid,
+        pin_id: Uuid,
+        variable_id: Uuid,
+        variable_name: String,
+        data_type: BlueprintPinType,
     },
     Default(BlueprintPinType),
 }
@@ -111,6 +139,11 @@ fn lower_document(document: &BlueprintDocument) -> BlueprintIrDocument {
 fn lower_graph(document: &BlueprintDocument, graph: &BlueprintGraph) -> Vec<BlueprintIrFunction> {
     let node_map: HashMap<Uuid, &BlueprintNode> =
         graph.nodes.iter().map(|node| (node.id, node)).collect();
+    let variable_map: HashMap<Uuid, &BlueprintLocalVariable> = graph
+        .local_variables
+        .iter()
+        .map(|variable| (variable.id, variable))
+        .collect();
     let exec_links = build_exec_links(graph, &node_map);
     let data_links = build_data_links(graph);
 
@@ -127,7 +160,10 @@ fn lower_graph(document: &BlueprintDocument, graph: &BlueprintGraph) -> Vec<Blue
             let start_pin_id = node
                 .pins
                 .iter()
-                .find(|pin| pin.direction == BlueprintPinDirection::Output && pin.data_type == BlueprintPinType::Exec)
+                .find(|pin| {
+                    pin.direction == BlueprintPinDirection::Output
+                        && pin.data_type == BlueprintPinType::Exec
+                })
                 .map(|pin| pin.id);
             let signature = BlueprintFunctionSignature {
                 name: format!("{}_{}", node.title.replace(' ', "_"), event_name),
@@ -152,8 +188,10 @@ fn lower_graph(document: &BlueprintDocument, graph: &BlueprintGraph) -> Vec<Blue
                     document,
                     start_pin_id,
                     &node_map,
+                    &variable_map,
                     &exec_links,
                     &data_links,
+                    HashSet::new(),
                 ),
             });
         }
@@ -164,7 +202,10 @@ fn lower_graph(document: &BlueprintDocument, graph: &BlueprintGraph) -> Vec<Blue
             let start_pin_id = node
                 .pins
                 .iter()
-                .find(|pin| pin.direction == BlueprintPinDirection::Output && pin.data_type == BlueprintPinType::Exec)
+                .find(|pin| {
+                    pin.direction == BlueprintPinDirection::Output
+                        && pin.data_type == BlueprintPinType::Exec
+                })
                 .map(|pin| pin.id);
             functions.push(BlueprintIrFunction {
                 graph_id: graph.id,
@@ -177,8 +218,10 @@ fn lower_graph(document: &BlueprintDocument, graph: &BlueprintGraph) -> Vec<Blue
                     document,
                     start_pin_id,
                     &node_map,
+                    &variable_map,
                     &exec_links,
                     &data_links,
+                    HashSet::new(),
                 ),
             });
         }
@@ -210,19 +253,25 @@ fn build_exec_links<'a>(
 }
 
 fn build_data_links(graph: &BlueprintGraph) -> HashMap<Uuid, &BlueprintLink> {
-    graph.links.iter().map(|link| (link.to_pin_id, link)).collect()
+    graph
+        .links
+        .iter()
+        .map(|link| (link.to_pin_id, link))
+        .collect()
 }
 
 fn follow_exec_chain(
     document: &BlueprintDocument,
     start_exec_pin: Option<Uuid>,
     node_map: &HashMap<Uuid, &BlueprintNode>,
+    variable_map: &HashMap<Uuid, &BlueprintLocalVariable>,
     exec_links: &HashMap<Uuid, &BlueprintLink>,
     data_links: &HashMap<Uuid, &BlueprintLink>,
+    visited_nodes: HashSet<Uuid>,
 ) -> Vec<BlueprintIrStatement> {
     let mut statements = Vec::new();
     let mut current_exec_pin = start_exec_pin;
-    let mut visited_nodes = HashSet::new();
+    let mut visited_nodes = visited_nodes;
 
     while let Some(exec_pin_id) = current_exec_pin {
         let Some(link) = exec_links.get(&exec_pin_id).copied() else {
@@ -239,7 +288,7 @@ fn follow_exec_chain(
             BlueprintNodeKind::SetElementText { element_id } => {
                 let value_pin = node.pin_named("text");
                 let value = value_pin
-                    .map(|pin| resolve_value(node, pin.id, node_map, data_links))
+                    .map(|pin| resolve_value(node, pin.id, node_map, variable_map, data_links))
                     .unwrap_or(BlueprintIrValue::Default(BlueprintPinType::String));
                 let value_pin_id = value_pin.map(|pin| pin.id);
                 let page_id = match document.owner {
@@ -260,7 +309,13 @@ fn follow_exec_chain(
                     .iter()
                     .filter_map(|parameter| {
                         let pin = node.pin_named(parameter.name.as_str())?;
-                        Some(resolve_value(node, pin.id, node_map, data_links))
+                        Some(resolve_value(
+                            node,
+                            pin.id,
+                            node_map,
+                            variable_map,
+                            data_links,
+                        ))
                     })
                     .collect();
                 statements.push(BlueprintIrStatement::CallDocumentFunction {
@@ -275,11 +330,78 @@ fn follow_exec_chain(
                     None
                 } else {
                     node.pin_named("result")
-                        .map(|pin| resolve_value(node, pin.id, node_map, data_links))
+                        .map(|pin| resolve_value(node, pin.id, node_map, variable_map, data_links))
                 };
                 statements.push(BlueprintIrStatement::Return {
                     node_id: node.id,
                     value,
+                });
+            }
+            BlueprintNodeKind::VariableSet { variable_id } => {
+                if let Some(variable) = variable_map.get(variable_id).copied() {
+                    let value_pin = node.pin_named("value");
+                    let value = value_pin
+                        .map(|pin| {
+                            resolve_value(node, pin.id, node_map, variable_map, data_links)
+                        })
+                        .unwrap_or(BlueprintIrValue::Default(variable.data_type));
+                    statements.push(BlueprintIrStatement::SetVariable {
+                        node_id: node.id,
+                        variable_id: variable.id,
+                        variable_name: variable.name.clone(),
+                        value,
+                    });
+                }
+            }
+            BlueprintNodeKind::Functional { node_id } => {
+                if node_id == "if_statement" {
+                    let condition_pin = node.pin_named("condition");
+                    let condition = condition_pin
+                        .map(|pin| {
+                            resolve_value(node, pin.id, node_map, variable_map, data_links)
+                        })
+                        .unwrap_or(BlueprintIrValue::Default(BlueprintPinType::Bool));
+                    let true_pin = node.pin_named("true").map(|pin| pin.id);
+                    let false_pin = node.pin_named("false").map(|pin| pin.id);
+                    statements.push(BlueprintIrStatement::Branch {
+                        node_id: node.id,
+                        condition_pin_id: condition_pin.map(|pin| pin.id),
+                        condition,
+                        true_statements: follow_exec_chain(
+                            document,
+                            true_pin,
+                            node_map,
+                            variable_map,
+                            exec_links,
+                            data_links,
+                            visited_nodes.clone(),
+                        ),
+                        false_statements: follow_exec_chain(
+                            document,
+                            false_pin,
+                            node_map,
+                            variable_map,
+                            exec_links,
+                            data_links,
+                            visited_nodes.clone(),
+                        ),
+                    });
+                    break;
+                }
+
+                let arguments = node
+                    .pins
+                    .iter()
+                    .filter(|pin| {
+                        pin.direction == BlueprintPinDirection::Input
+                            && pin.data_type != BlueprintPinType::Exec
+                    })
+                    .map(|pin| resolve_value(node, pin.id, node_map, variable_map, data_links))
+                    .collect();
+                statements.push(BlueprintIrStatement::FunctionalNode {
+                    node_id: node.id,
+                    functional_node_id: node_id.clone(),
+                    arguments,
                 });
             }
             _ => {}
@@ -288,7 +410,10 @@ fn follow_exec_chain(
         current_exec_pin = node
             .pins
             .iter()
-            .find(|pin| pin.direction == BlueprintPinDirection::Output && pin.data_type == BlueprintPinType::Exec)
+            .find(|pin| {
+                pin.direction == BlueprintPinDirection::Output
+                    && pin.data_type == BlueprintPinType::Exec
+            })
             .map(|pin| pin.id);
     }
 
@@ -299,6 +424,7 @@ fn resolve_value(
     current_node: &BlueprintNode,
     target_pin_id: Uuid,
     node_map: &HashMap<Uuid, &BlueprintNode>,
+    variable_map: &HashMap<Uuid, &BlueprintLocalVariable>,
     data_links: &HashMap<Uuid, &BlueprintLink>,
 ) -> BlueprintIrValue {
     let Some(link) = data_links.get(&target_pin_id).copied() else {
@@ -339,6 +465,19 @@ fn resolve_value(
                     node_id: source_node.id,
                     pin_id: source_pin_id,
                     name,
+                }
+            } else {
+                BlueprintIrValue::Default(BlueprintPinType::Void)
+            }
+        }
+        BlueprintNodeKind::VariableGet { variable_id } => {
+            if let Some(variable) = variable_map.get(variable_id).copied() {
+                BlueprintIrValue::Variable {
+                    node_id: source_node.id,
+                    pin_id: source_pin_id,
+                    variable_id: variable.id,
+                    variable_name: variable.name.clone(),
+                    data_type: variable.data_type,
                 }
             } else {
                 BlueprintIrValue::Default(BlueprintPinType::Void)

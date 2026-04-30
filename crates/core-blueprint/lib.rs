@@ -25,6 +25,4 @@ pub use model::{
     BlueprintNodeKind, BlueprintOwner, BlueprintPin, BlueprintPinDirection, BlueprintPinKind,
     BlueprintPinType, BlueprintPoint, LogicData,
 };
-pub use validate::{
-    validate_project, BlueprintDiagnostic, BlueprintDiagnosticSeverity,
-};
+pub use validate::{validate_project, BlueprintDiagnostic, BlueprintDiagnosticSeverity};

@@ -38,7 +38,9 @@ pub struct PageApiDescriptor {
 
 impl PageApiDescriptor {
     pub fn element(&self, element_id: Uuid) -> Option<&UiElementApiDescriptor> {
-        self.elements.iter().find(|element| element.element_id == element_id)
+        self.elements
+            .iter()
+            .find(|element| element.element_id == element_id)
     }
 }
 
@@ -62,7 +64,9 @@ impl UiElementApiDescriptor {
     }
 
     pub fn action(&self, action_name: &str) -> Option<&UiActionDescriptor> {
-        self.actions.iter().find(|action| action.name == action_name)
+        self.actions
+            .iter()
+            .find(|action| action.name == action_name)
     }
 }
 
