@@ -2,81 +2,98 @@ import { HorizontalBox, VerticalBox } from "std-widgets.slint";
 import { I18n } from "../../components/I18n.slint";
 import { Themes, Separator-H } from "../../components/Themes.slint";
 import { Tooltip } from "../../components/Tooltip.slint";
-import { BlueprintFunctionInfo, BlueprintVariableInfo, ProjectPageInfo } from "../../models/EditorModels.slint";
+import { BlueprintFunctionInfo, BlueprintVariableInfo, ProjectPageInfo, SelectionInfo } from "../../models/EditorModels.slint";
 import { StringSearch } from "../../utils/StringSearch.slint";
 
 component SidebarSectionHeader inherits Rectangle {
-    in property <string> title: "";
+    in property <string> title: "VARIABLES";
     in property <bool> expanded: true;
+    in property <string> add-tooltip: "";
     callback add-clicked();
     callback toggle-clicked();
+    callback add-hovered(bool);
 
     height: 28px;
     background: transparent;
 
     HorizontalBox {
+        padding: 0px;
         spacing: 6px;
 
-        Rectangle {
-            width: 22px;
-            height: 22px;
-            border-radius: 4px;
-            background: add-touch.has-hover ? Themes.current.hover-color : Themes.current.primary-bg;
-
-            add-touch := TouchArea {
-                mouse-cursor: MouseCursor.pointer;
-                clicked => { root.add-clicked(); }
+        dropdown-touch := TouchArea {
+            height: 30px;
+            mouse-cursor: MouseCursor.pointer;
+            property <bool> active-button: false;
+            clicked => {
+                root.toggle-clicked();
+                active-button = !active-button;
             }
 
-            Text {
-                text: "+";
-                color: Themes.current.primary-text;
-                font-size: 15px;
-                font-weight: 700;
-                horizontal-alignment: TextHorizontalAlignment.center;
-                vertical-alignment: TextVerticalAlignment.center;
-            }
-        }
+            HorizontalBox {
+                padding-left: 10px;
 
-        Rectangle {
-            width: 18px;
-            height: 22px;
-            background: toggle-touch.has-hover ? Themes.current.hover-color : transparent;
-            border-radius: 4px;
+                Path {
+                    stroke: Themes.current.secondary-text;
+                    stroke-width: 1.5px;
+                    transform-rotation: active-button ? 90deg : 0deg;
+                    fill: transparent;
+                    width: 10px;
+                    height: 12px;
+                    commands: "M 0 0 L 6 6 L 0 12";
+                    animate transform-rotation { duration: 150ms; }
+                }
 
-            toggle-touch := TouchArea {
-                mouse-cursor: MouseCursor.pointer;
-                clicked => { root.toggle-clicked(); }
-            }
-
-            Text {
-                text: root.expanded ? "v" : ">";
-                color: Themes.current.secondary-text;
-                font-size: 11px;
-                font-weight: 700;
-                horizontal-alignment: TextHorizontalAlignment.center;
-                vertical-alignment: TextVerticalAlignment.center;
+                Text {
+                    text: root.title;
+                    font-size: 12px;
+                    color: Themes.current.secondary-text;
+                    font-weight: 700;
+                    vertical-alignment: TextVerticalAlignment.center;
+                    horizontal-stretch: 1;
+                }
             }
         }
 
-        Text {
-            text: root.title;
-            font-size: 12px;
-            color: Themes.current.secondary-text;
-            font-weight: 700;
-            vertical-alignment: TextVerticalAlignment.center;
-            horizontal-stretch: 1;
+        VerticalBox {
+            padding: 3px;
+            Rectangle {
+                width: 22px;
+                height: 22px;
+                border-radius: 4px;
+                background: add-touch.has-hover ? Themes.current.hover-color : Themes.current.primary-bg;
+
+                add-touch := TouchArea {
+                    mouse-cursor: MouseCursor.pointer;
+                    clicked => { root.add-clicked(); }
+                    changed has-hover => {
+                        root.add-hovered(self.has-hover);
+                    }
+                }
+
+                Text {
+                    text: "+";
+                    color: Themes.current.primary-text;
+                    font-size: 15px;
+                    font-weight: 700;
+                    horizontal-alignment: TextHorizontalAlignment.center;
+                    vertical-alignment: TextVerticalAlignment.center;
+                }
+            }
         }
     }
 }
 
 component MenuActionRow inherits Rectangle {
     in property <string> label: "";
+    in property <string> secondary: "";
+    in property <color> accent: transparent;
+    in property <bool> show-accent: false;
+    in property <bool> selected-row: false;
     callback selected();
 
     height: 28px;
     border-radius: 4px;
-    background: touch.has-hover ? Themes.current.hover-color : transparent;
+    background: root.selected-row ? Themes.current.active-color : (touch.has-hover ? Themes.current.hover-color : transparent);
 
     touch := TouchArea {
         mouse-cursor: MouseCursor.pointer;
@@ -84,13 +101,129 @@ component MenuActionRow inherits Rectangle {
     }
 
     Text {
-        x: 8px;
-        width: parent.width - 16px;
+        x: root.show-accent ? 28px : 8px;
+        width: parent.width - self.x - (root.selected-row ? 24px : 8px);
         height: parent.height;
         text: root.label;
-        color: Themes.current.primary-text;
+        color: root.selected-row ? Themes.on-accent-text : Themes.current.primary-text;
         font-size: 12px;
         vertical-alignment: TextVerticalAlignment.center;
+        overflow: elide;
+    }
+
+    if root.show-accent: Rectangle {
+        x: 8px;
+        y: 8px;
+        width: 12px;
+        height: 12px;
+        border-radius: 6px;
+        background: root.accent;
+    }
+
+    if root.selected-row: Text {
+        x: parent.width - 22px;
+        width: 16px;
+        height: parent.height;
+        text: "*";
+        color: Themes.on-accent-text;
+        font-size: 12px;
+        horizontal-alignment: TextHorizontalAlignment.center;
+        vertical-alignment: TextVerticalAlignment.center;
+    }
+}
+
+component VariableTypeDropdown inherits Rectangle {
+    in property <string> variable-id: "";
+    in property <string> current-type: "";
+    callback type-selected(string, string);
+
+    function type-color(type-name: string) -> color {
+        type-name == "bool" ? #dc444f
+            : type-name == "int" || type-name == "float" ? #4c89db
+            : type-name == "Object" ? #46be7c
+            : type-name == "String" ? #daab40
+            : type-name == "Color" ? #b55dcd
+            : #e18041;
+    }
+
+    function is-current-type(type-name: string) -> bool {
+        root.current-type == type-name || StringSearch.contains(root.current-type, type-name + "<");
+    }
+
+    width: 118px;
+    height: 288px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: Themes.current.divider-color;
+    background: Themes.current.secondary-bg;
+
+    VerticalBox {
+        padding: 4px;
+        spacing: 2px;
+
+        for type-option in [
+            { label: "bool" },
+            { label: "int" },
+            { label: "float" },
+            { label: "Object" },
+            { label: "String" },
+            { label: "Color" },
+            { label: "Array" },
+            { label: "Vector" },
+            { label: "Set" },
+            { label: "HashMap" },
+        ]: MenuActionRow {
+            label: type-option.label;
+            show-accent: true;
+            accent: root.type-color(type-option.label);
+            selected-row: root.is-current-type(type-option.label);
+            selected => {
+                root.type-selected(root.variable-id, type-option.label);
+            }
+        }
+    }
+}
+
+component VariableItemTypeDropdown inherits Rectangle {
+    in property <string> variable-id: "";
+    in property <string> current-type: "";
+    callback type-selected(string, string);
+
+    function type-color(type-name: string) -> color {
+        type-name == "bool" ? #dc444f
+            : type-name == "int" || type-name == "float" ? #4c89db
+            : type-name == "Object" ? #46be7c
+            : type-name == "String" ? #daab40
+            : #b55dcd;
+    }
+
+    width: 118px;
+    height: 180px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: Themes.current.divider-color;
+    background: Themes.current.secondary-bg;
+
+    VerticalBox {
+        padding: 4px;
+        spacing: 2px;
+
+        for type-option in [
+            { label: "bool" },
+            { label: "int" },
+            { label: "float" },
+            { label: "Object" },
+            { label: "String" },
+            { label: "Color" },
+        ]: MenuActionRow {
+            label: type-option.label;
+            show-accent: true;
+            accent: root.type-color(type-option.label);
+            selected-row: root.current-type == type-option.label;
+            selected => {
+                root.type-selected(root.variable-id, type-option.label);
+            }
+        }
     }
 }
 
@@ -99,6 +232,7 @@ export component BlueprintSidebar inherits Rectangle {
     in property <[ProjectPageInfo]> project-page-items: [];
     in property <[BlueprintVariableInfo]> blueprint-variable-items: [];
     in property <[BlueprintFunctionInfo]> blueprint-function-items: [];
+    in property <[SelectionInfo]> outline-elements: [];
 
     callback open-project-page(int);
     callback open-page-blueprint(int);
@@ -108,6 +242,8 @@ export component BlueprintSidebar inherits Rectangle {
     callback add-blueprint-variable-node(string, string);
     callback rename-blueprint-variable(string, string);
     callback set-blueprint-variable-type(string, string);
+    callback set-blueprint-variable-item-type(string, string);
+    callback set-blueprint-variable-object(string, string, string, string);
 
     property <string> search-query: "";
     property <bool> structs-open: true;
@@ -115,13 +251,26 @@ export component BlueprintSidebar inherits Rectangle {
     property <bool> macros-open: true;
     property <bool> variables-open: true;
     property <string> variable-context-id: "";
+    property <length> variable-context-menu-y: 0px;
+    property <bool> variable-context-is-object: false;
+    property <bool> variable-context-object-open: false;
+    property <string> variable-context-value-label: "";
     property <string> variable-type-menu-id: "";
+    property <string> variable-item-type-menu-id: "";
+    property <length> variable-type-menu-y: 0px;
+    property <string> variable-type-menu-current-type: "";
+    property <string> variable-item-type-menu-current-type: "";
     property <string> editing-variable-id: "";
     property <string> editing-variable-name: "";
+    property <bool> add-tooltip-open: false;
+    property <string> add-tooltip-text: "";
+    property <length> add-tooltip-y: 0px;
 
     function close-floating-menus() {
         root.variable-context-id = "";
+        root.variable-context-object-open = false;
         root.variable-type-menu-id = "";
+        root.variable-item-type-menu-id = "";
     }
 
     function begin-variable-rename(variable-id: string, name: string) {
@@ -138,8 +287,48 @@ export component BlueprintSidebar inherits Rectangle {
         }
     }
 
+    function is-collection-type(type-name: string) -> bool {
+        type-name == "Array" || type-name == "Vector" || type-name == "Set" || type-name == "HashMap";
+    }
+
+    function choose-variable-type(variable-id: string, type-name: string) {
+        if root.is-collection-type(type-name) {
+            root.variable-type-menu-id = variable-id;
+            root.variable-item-type-menu-id = variable-id;
+            root.variable-type-menu-current-type = type-name + "<String>";
+            root.variable-item-type-menu-current-type = "String";
+        } else {
+            root.variable-type-menu-id = "";
+            root.variable-item-type-menu-id = "";
+            root.variable-type-menu-current-type = type-name;
+        }
+        root.set-blueprint-variable-type(variable-id, type-name);
+    }
+
+    function open-variable-context-menu(
+        variable-id: string,
+        y: length,
+        is-object: bool,
+        value-label: string
+    ) {
+        root.variable-context-id = variable-id;
+        root.variable-context-menu-y = Math.max(8px, Math.min(root.height - 310px - 8px, y));
+        root.variable-context-is-object = is-object;
+        root.variable-context-object-open = false;
+        root.variable-context-value-label = value-label;
+        root.variable-type-menu-id = "";
+        root.variable-item-type-menu-id = "";
+    }
+
+    function show-add-tooltip(show: bool, text: string, y: length) {
+        root.add-tooltip-open = show && text != "";
+        root.add-tooltip-text = text;
+        root.add-tooltip-y = Math.max(8px, Math.min(root.height - 36px, y));
+    }
+
     width: 280px;
     background: Themes.current.secondary-bg;
+    clip: false;
 
     VerticalBox {
         padding: 14px;
@@ -149,6 +338,7 @@ export component BlueprintSidebar inherits Rectangle {
             text: root.project-name == "" ? I18n.t("Editor Blueprint") : root.project-name + " / Blueprint";
             font-size: 15px;
             font-weight: 700;
+            height: 20px;
             color: Themes.current.primary-text;
             font-family: Themes.font-family-display;
         }
@@ -191,7 +381,7 @@ export component BlueprintSidebar inherits Rectangle {
 
         Separator-H {}
 
-        Flickable {
+        sidebar-flickable := Flickable {
             horizontal-stretch: 1;
             vertical-stretch: 1;
             viewport-width: self.width;
@@ -201,26 +391,27 @@ export component BlueprintSidebar inherits Rectangle {
                 padding: 0;
                 spacing: 8px;
 
-                SidebarSectionHeader {
-                    title: "Struct/Enum";
+                structs-header := SidebarSectionHeader {
+                    title: "Struct & Enum";
                     expanded: root.structs-open;
+                    add-tooltip: "Add struct or enum";
                     add-clicked => { root.structs-open = true; }
                     toggle-clicked => { root.structs-open = !root.structs-open; }
+                    add-hovered(hovered) => {
+                        root.show-add-tooltip(hovered, "Add struct or enum", sidebar-flickable.y + sidebar-content.y + structs-header.y - sidebar-flickable.viewport-y + 3px);
+                    }
                 }
 
-                if root.structs-open: Text {
-                    height: root.search-query == "" ? 24px : 0px;
-                    text: "No structs yet";
-                    color: Themes.current.secondary-text;
-                    font-size: 11px;
-                    vertical-alignment: TextVerticalAlignment.center;
-                }
-
-                SidebarSectionHeader {
+                functions-header := SidebarSectionHeader {
                     title: "Function";
                     expanded: root.functions-open;
+                    height: 20px;
+                    add-tooltip: "Add function";
                     add-clicked => { root.add-blueprint-function(); }
                     toggle-clicked => { root.functions-open = !root.functions-open; }
+                    add-hovered(hovered) => {
+                        root.show-add-tooltip(hovered, "Add function", sidebar-flickable.y + sidebar-content.y + functions-header.y - sidebar-flickable.viewport-y + 3px);
+                    }
                 }
 
                 if root.functions-open: VerticalBox {
@@ -245,34 +436,34 @@ export component BlueprintSidebar inherits Rectangle {
                     }
                 }
 
-                SidebarSectionHeader {
+                macros-header := SidebarSectionHeader {
                     title: "Macros";
                     expanded: root.macros-open;
+                    add-tooltip: "Add macros";
                     add-clicked => { root.macros-open = true; }
                     toggle-clicked => { root.macros-open = !root.macros-open; }
+                    add-hovered(hovered) => {
+                        root.show-add-tooltip(hovered, "Add macros", sidebar-flickable.y + sidebar-content.y + macros-header.y - sidebar-flickable.viewport-y + 3px);
+                    }
                 }
 
-                if root.macros-open: Text {
-                    height: root.search-query == "" ? 24px : 0px;
-                    text: "No macros yet";
-                    color: Themes.current.secondary-text;
-                    font-size: 11px;
-                    vertical-alignment: TextVerticalAlignment.center;
-                }
-
-                SidebarSectionHeader {
+                variables-header := SidebarSectionHeader {
                     title: "Variables";
                     expanded: root.variables-open;
+                    add-tooltip: "Add variable";
                     add-clicked => { root.add-blueprint-variable(); }
                     toggle-clicked => { root.variables-open = !root.variables-open; }
+                    add-hovered(hovered) => {
+                        root.show-add-tooltip(hovered, "Add variable", sidebar-flickable.y + sidebar-content.y + variables-header.y - sidebar-flickable.viewport-y + 3px);
+                    }
                 }
 
-                if root.variables-open: VerticalBox {
+                if root.variables-open: variables-list := VerticalBox {
                     spacing: 4px;
 
-                    for variable in root.blueprint-variable-items: Rectangle {
+                    for variable in root.blueprint-variable-items: variable-row := Rectangle {
                         visible: root.search-query == "" || StringSearch.contains(variable.name, root.search-query) || StringSearch.contains(variable.type-name, root.search-query);
-                        height: self.visible ? 30px : 0px;
+                        height: self.visible ? (variable.value-label != "" ? 42px : 30px) : 0px;
                         border-radius: 4px;
                         background: variable-row-touch.has-hover ? Themes.current.hover-color : Themes.current.primary-bg;
 
@@ -282,8 +473,12 @@ export component BlueprintSidebar inherits Rectangle {
                             double-clicked => { root.begin-variable-rename(variable.variable-id, variable.name); }
                             pointer-event(ev) => {
                                 if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right {
-                                    root.variable-context-id = variable.variable-id;
-                                    root.variable-type-menu-id = "";
+                                    root.open-variable-context-menu(
+                                        variable.variable-id,
+                                        sidebar-flickable.y + variables-list.y + variable-row.y - sidebar-flickable.viewport-y + variable-row.height + 2px,
+                                        variable.type-name == "Object",
+                                        variable.value-label
+                                    );
                                 }
                             }
                         }
@@ -321,10 +516,22 @@ export component BlueprintSidebar inherits Rectangle {
                         if root.editing-variable-id != variable.variable-id: Text {
                             x: 12px;
                             width: parent.width - 92px;
-                            height: parent.height;
+                            height: variable.value-label == "" ? parent.height : 24px;
                             text: variable.name;
                             color: Themes.current.primary-text;
                             font-size: 12px;
+                            vertical-alignment: TextVerticalAlignment.center;
+                            overflow: elide;
+                        }
+
+                        if root.editing-variable-id != variable.variable-id && variable.value-label != "": Text {
+                            x: 12px;
+                            y: 22px;
+                            width: parent.width - 92px;
+                            height: 16px;
+                            text: variable.value-label;
+                            color: Themes.current.secondary-text;
+                            font-size: 10px;
                             vertical-alignment: TextVerticalAlignment.center;
                             overflow: elide;
                         }
@@ -342,6 +549,16 @@ export component BlueprintSidebar inherits Rectangle {
                                 clicked => {
                                     root.variable-context-id = "";
                                     root.variable-type-menu-id = root.variable-type-menu-id == variable.variable-id ? "" : variable.variable-id;
+                                    root.variable-item-type-menu-id = "";
+                                    root.variable-type-menu-current-type = variable.type-name;
+                                    root.variable-item-type-menu-current-type = variable.item-type-name;
+                                    root.variable-type-menu-y = Math.max(
+                                        8px,
+                                        Math.min(
+                                            root.height - 288px - 8px,
+                                            sidebar-flickable.y + variables-list.y + variable-row.y - sidebar-flickable.viewport-y + variable-row.height + 2px
+                                        )
+                                    );
                                 }
                             }
 
@@ -358,164 +575,131 @@ export component BlueprintSidebar inherits Rectangle {
                             }
                         }
 
-                        if root.variable-context-id == variable.variable-id: Rectangle {
-                            z: 50;
-                            x: parent.width - 126px;
-                            y: parent.height + 2px;
-                            width: 126px;
-                            height: 64px;
-                            border-radius: 6px;
-                            border-width: 1px;
-                            border-color: Themes.current.divider-color;
-                            background: Themes.current.secondary-bg;
-
-                            VerticalBox {
-                                padding: 4px;
-                                spacing: 2px;
-
-                                MenuActionRow {
-                                    label: "Getter";
-                                    selected => {
-                                        root.variable-context-id = "";
-                                        root.add-blueprint-variable-node(variable.variable-id, "get");
-                                    }
-                                }
-
-                                MenuActionRow {
-                                    label: "Setter";
-                                    selected => {
-                                        root.variable-context-id = "";
-                                        root.add-blueprint-variable-node(variable.variable-id, "set");
-                                    }
-                                }
-                            }
-                        }
-
-                        if root.variable-type-menu-id == variable.variable-id: Rectangle {
-                            z: 50;
-                            x: parent.width - 96px;
-                            y: parent.height + 2px;
-                            width: 96px;
-                            height: 224px;
-                            border-radius: 6px;
-                            border-width: 1px;
-                            border-color: Themes.current.divider-color;
-                            background: Themes.current.secondary-bg;
-
-                            VerticalBox {
-                                padding: 4px;
-                                spacing: 2px;
-
-                                for type-option in [
-                                    { label: "bool" },
-                                    { label: "i64" },
-                                    { label: "f64" },
-                                    { label: "String" },
-                                    { label: "Color" },
-                                    { label: "Array" },
-                                    { label: "Vector" },
-                                    { label: "Set" },
-                                    { label: "HashMap" },
-                                ]: MenuActionRow {
-                                    label: type-option.label;
-                                    selected => {
-                                        root.variable-type-menu-id = "";
-                                        root.set-blueprint-variable-type(variable.variable-id, type-option.label);
-                                    }
-                                }
-                            }
-                        }
                     }
                 }
+            }
+        }
+    }
 
-                Separator-H {}
+    if root.variable-type-menu-id != "": VariableTypeDropdown {
+        z: 200;
+        x: root.width - self.width - 20px;
+        y: root.variable-type-menu-y;
+        variable-id: root.variable-type-menu-id;
+        current-type: root.variable-type-menu-current-type;
+        type-selected(variable-id, type-name) => {
+            root.choose-variable-type(variable-id, type-name);
+        }
+    }
 
-                Text {
-                    text: I18n.t("Pages");
-                    font-size: 12px;
-                    color: Themes.current.secondary-text;
-                    font-weight: 600;
+    if root.variable-item-type-menu-id != "": VariableItemTypeDropdown {
+        z: 201;
+        x: root.width - 16px;
+        y: Math.max(8px, Math.min(root.height - self.height - 8px, root.variable-type-menu-y));
+        variable-id: root.variable-item-type-menu-id;
+        current-type: root.variable-item-type-menu-current-type;
+        type-selected(variable-id, type-name) => {
+            root.variable-type-menu-id = "";
+            root.variable-item-type-menu-id = "";
+            root.variable-item-type-menu-current-type = type-name;
+            root.set-blueprint-variable-item-type(variable-id, type-name);
+        }
+    }
+
+    if root.variable-context-id != "": Rectangle {
+        z: 210;
+        x: root.width - 142px;
+        y: root.variable-context-menu-y;
+        width: 134px;
+        height: root.variable-context-is-object && root.variable-context-object-open ? 314px : (root.variable-context-is-object ? 102px : 70px);
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: Themes.current.divider-color;
+        background: Themes.current.secondary-bg;
+        drop-shadow-blur: Themes.shadow-size;
+        drop-shadow-color: Themes.shadow-color;
+
+        VerticalBox {
+            padding: 4px;
+            spacing: 2px;
+
+            MenuActionRow {
+                label: "Getter";
+                selected => {
+                    root.add-blueprint-variable-node(root.variable-context-id, "get");
+                    root.variable-context-id = "";
                 }
+            }
 
-                for page in root.project-page-items: Rectangle {
-                    visible: root.search-query == "" || StringSearch.contains(page.page-name, root.search-query);
-                    height: self.visible ? 68px : 0px;
-                    border-radius: 6px;
-                    background: page.is-active ? Themes.current.hover-color : transparent;
+            MenuActionRow {
+                label: "Setter";
+                selected => {
+                    root.add-blueprint-variable-node(root.variable-context-id, "set");
+                    root.variable-context-id = "";
+                }
+            }
 
-                    VerticalBox {
-                        padding: 8px;
-                        spacing: 6px;
+            if root.variable-context-is-object: MenuActionRow {
+                label: root.variable-context-object-open ? "Hide objects" : "Choose object";
+                selected => {
+                    root.variable-context-object-open = !root.variable-context-object-open;
+                }
+            }
 
-                        Text {
-                            text: page.page-name;
-                            font-size: 13px;
-                            color: Themes.current.primary-text;
-                            font-weight: page.is-active ? 700 : 500;
+            if root.variable-context-is-object && root.variable-context-object-open: Flickable {
+                height: 204px;
+                viewport-width: self.width;
+                viewport-height: object-list.preferred-height;
+
+                object-list := VerticalBox {
+                    spacing: 2px;
+
+                    Text {
+                        height: 20px;
+                        text: "Pages";
+                        color: Themes.current.secondary-text;
+                        font-size: 11px;
+                        font-weight: 700;
+                        vertical-alignment: TextVerticalAlignment.center;
+                    }
+
+                    for page in root.project-page-items: MenuActionRow {
+                        label: page.page-name;
+                        selected => {
+                            root.set-blueprint-variable-object(root.variable-context-id, "page", page.page-name, page.page-name);
+                            root.variable-context-id = "";
                         }
+                    }
 
-                        HorizontalBox {
-                            spacing: 6px;
+                    Text {
+                        height: 20px;
+                        text: "Scene";
+                        color: Themes.current.secondary-text;
+                        font-size: 11px;
+                        font-weight: 700;
+                        vertical-alignment: TextVerticalAlignment.center;
+                    }
 
-                            Rectangle {
-                                height: 24px;
-                                horizontal-stretch: 1;
-                                border-radius: 4px;
-                                background: ui-touch.has-hover ? Themes.current.hover-color : Themes.current.primary-bg;
-
-                                ui-touch := TouchArea {
-                                    mouse-cursor: MouseCursor.pointer;
-                                    clicked => { root.open-project-page(page.page-index); }
-                                }
-
-                                Text {
-                                    text: I18n.t("Open UI");
-                                    color: Themes.current.primary-text;
-                                    font-size: 11px;
-                                    horizontal-alignment: TextHorizontalAlignment.center;
-                                    vertical-alignment: TextVerticalAlignment.center;
-                                }
-
-                                Tooltip {
-                                    x: (parent.width - self.width) / 2;
-                                    y: parent.height + 6px;
-                                    text: "Open page UI document";
-                                    placement: "top";
-                                    show: ui-touch.has-hover;
-                                }
-                            }
-
-                            Rectangle {
-                                height: 24px;
-                                horizontal-stretch: 1;
-                                border-radius: 4px;
-                                background: bp-touch.has-hover ? Themes.current.hover-color : Themes.current.primary-bg;
-
-                                bp-touch := TouchArea {
-                                    mouse-cursor: MouseCursor.pointer;
-                                    clicked => { root.open-page-blueprint(page.page-index); }
-                                }
-
-                                Text {
-                                    text: I18n.t("Open .blp");
-                                    color: Themes.current.primary-text;
-                                    font-size: 11px;
-                                    horizontal-alignment: TextHorizontalAlignment.center;
-                                    vertical-alignment: TextVerticalAlignment.center;
-                                }
-
-                                Tooltip {
-                                    x: (parent.width - self.width) / 2;
-                                    y: parent.height + 6px;
-                                    text: "Open page blueprint";
-                                    placement: "top";
-                                    show: bp-touch.has-hover;
-                                }
-                            }
+                    for element in root.outline-elements: MenuActionRow {
+                        visible: element.element-type != "root";
+                        height: self.visible ? 28px : 0px;
+                        label: element.element-name == "" ? element.element-type : element.element-name;
+                        selected => {
+                            root.set-blueprint-variable-object(root.variable-context-id, "element", element.element-id, element.element-name == "" ? element.element-type : element.element-name);
+                            root.variable-context-id = "";
                         }
                     }
                 }
             }
         }
+    }
+
+    Tooltip {
+        z: 300;
+        x: root.width + 8px;
+        y: root.add-tooltip-y;
+        text: root.add-tooltip-text;
+        placement: "left";
+        show: root.add-tooltip-open;
     }
 }

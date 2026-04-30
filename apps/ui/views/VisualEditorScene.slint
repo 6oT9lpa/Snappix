@@ -95,6 +95,8 @@ export component VisualEditorScene inherits Rectangle {
     in-out property <string> selected-element-background-image: "";
     in-out property <string> selected-element-image-source: "";
     in-out property <string> selected-element-image-source-display: "";
+    in-out property <float> selected-element-opacity: 1.0;
+    in-out property <string> selected-element-display-mode: "visible";
     in-out property <bool> selected-element-inherit-text-style: true;
     in-out property <HotkeyBinding> select-all-hotkey: { key: "a", ctrl: true, shift: false, alt: false };
     in-out property <HotkeyBinding> undo-hotkey: { key: "z", ctrl: true, shift: false, alt: false };
@@ -155,7 +157,7 @@ export component VisualEditorScene inherits Rectangle {
     callback transform-previewed(string, float, float, float, float, float);
     callback transform-finished(string, bool, float, float, float, float, float);
     callback element-text-edited(string, string);
-    callback element-style-updated(string, string, string, float, float, float, string, string, string, string, string, string, bool, bool, string, string, string, string, float, bool);
+    callback element-style-updated(string, string, string, float, float, float, string, string, string, string, string, string, bool, bool, string, string, string, string, float, bool, float, string);
     callback element-container-settings-updated(string, string, bool, float, float, float, float, float, float, float, float, float, float, float, float, string, string, string, string, string, string, string, string, string, string, string, string);
     callback browse-image-source-requested(string);
     callback element-settings-requested(string);
@@ -750,6 +752,8 @@ export component VisualEditorScene inherits Rectangle {
             selected-element-background-image: root.selected-element-background-image;
             selected-element-image-source: root.selected-element-image-source;
             selected-element-image-source-display: root.selected-element-image-source-display;
+            selected-element-opacity: root.selected-element-opacity;
+            selected-element-display-mode: root.selected-element-display-mode;
             selected-element-inherit-text-style: root.selected-element-inherit-text-style;
             dragging-component-id <=> root.dragging-component-id;
             dragging-component-name <=> root.dragging-component-name;
@@ -762,7 +766,7 @@ export component VisualEditorScene inherits Rectangle {
             }
             element-updated(id, x, y, w, h, r) => { root.element-updated(id, x, y, w, h, r); }
             element-text-edited(id, text) => { root.element-text-edited(id, text); }
-            element-style-updated(id, bg, border, bw, br, fs, tc, ff, tw, ph, bg_image, image_src, inherit_text_style, checked, checkbox_box_side, checkbox_check_color, checkbox_box_color, checkbox_box_border_color, checkbox_box_border_width, checkbox_space_between) => {
+            element-style-updated(id, bg, border, bw, br, fs, tc, ff, tw, ph, bg_image, image_src, inherit_text_style, checked, checkbox_box_side, checkbox_check_color, checkbox_box_color, checkbox_box_border_color, checkbox_box_border_width, checkbox_space_between, opacity, display_mode) => {
                 root.element-style-updated(
                     id,
                     bg,
@@ -783,7 +787,9 @@ export component VisualEditorScene inherits Rectangle {
                     checkbox_box_color,
                     checkbox_box_border_color,
                     checkbox_box_border_width,
-                    checkbox_space_between
+                    checkbox_space_between,
+                    opacity,
+                    display_mode
                 );
             }
             element-container-settings-updated(id, container_mode, allow_absolute_children, layout_padding, layout_padding_left, layout_padding_right, layout_padding_top, layout_padding_bottom, layout_spacing, layout_margin, layout_margin_left, layout_margin_right, layout_margin_top, layout_margin_bottom, layout_order, stack_alignment, flex_direction, flex_wrap, justify_items, justify_content, align_items, align_content, place_items, flex_flow, grid_template_columns, grid_template_rows, grid_template_areas) => {

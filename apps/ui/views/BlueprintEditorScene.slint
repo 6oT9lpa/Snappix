@@ -1,9 +1,9 @@
-import { HorizontalBox, VerticalBox } from "std-widgets.slint";
-import { Themes, Separator-H, Separator-V } from "../components/Themes.slint";
+import { HorizontalBox } from "std-widgets.slint";
+import { Themes } from "../components/Themes.slint";
 import { PageTabsBar } from "../editor/PageTabs.slint";
 import { BlueprintCanvas } from "../editor/BlueprintCanvas.slint";
 import { BlueprintSidebar } from "./blueprint/BlueprintSidebar.slint";
-import { BlueprintFunctionInfo, BlueprintVariableInfo, EditorDocumentInfo, HotkeyBinding, ProjectPageInfo } from "../models/EditorModels.slint";
+import { BlueprintFunctionInfo, BlueprintNodeInfo, BlueprintVariableInfo, EditorDocumentInfo, HotkeyBinding, ProjectPageInfo, SelectionInfo } from "../models/EditorModels.slint";
 
 export component BlueprintEditorScene inherits Rectangle {
     background: Themes.current.primary-bg;
@@ -14,13 +14,20 @@ export component BlueprintEditorScene inherits Rectangle {
     in-out property <int> active-document-index: 0;
     in-out property <[BlueprintVariableInfo]> blueprint-variable-items: [];
     in-out property <[BlueprintFunctionInfo]> blueprint-function-items: [];
+    in-out property <[BlueprintNodeInfo]> blueprint-node-items: [];
     in-out property <[ProjectPageInfo]> project-page-items: [];
+    in-out property <[SelectionInfo]> outline-elements: [];
     in-out property <int> active-page-index: 0;
     in-out property <HotkeyBinding> reset-view-hotkey: { key: "0", ctrl: true, shift: false, alt: false };
 
     property <float> blueprint-zoom-level: 1.0;
     property <length> blueprint-offset-x: 0px;
     property <length> blueprint-offset-y: 0px;
+    in-out property <length> sidebar-width: 280px;
+    property <bool> sidebar-resize-active: false;
+    property <length> sidebar-resize-start-pointer-x: 0px;
+    property <length> sidebar-resize-start-width: 280px;
+    property <length> sidebar-resize-pending-width: 280px;
 
     callback document-selected(int);
     callback document-closed(int);
@@ -31,8 +38,30 @@ export component BlueprintEditorScene inherits Rectangle {
     callback add-blueprint-variable();
     callback add-blueprint-function();
     callback add-blueprint-variable-node(string, string, float, float);
+    callback add-blueprint-catalog-node(string, float, float);
+    callback move-blueprint-node(string, float, float);
+    callback delete-blueprint-node(string);
+    callback duplicate-blueprint-node(string, float, float);
     callback rename-blueprint-variable(string, string);
     callback set-blueprint-variable-type(string, string);
+    callback set-blueprint-variable-item-type(string, string);
+    callback set-blueprint-variable-object(string, string, string, string);
+
+    function normalize-control-hotkey(text: string) -> string {
+        text == "\u{3}" ? "c"
+            : text == "\u{16}" ? "v"
+            : text;
+    }
+
+    function normalize-special-hotkey(text: string) -> string {
+        text == "\u{7f}" ? "delete"
+            : text == "\u{8}" ? "backspace"
+            : text;
+    }
+
+    function normalize-hotkey-text(text: string) -> string {
+        root.normalize-control-hotkey(root.normalize-special-hotkey(text.to-lowercase()));
+    }
 
     function matches-hotkey-binding(
         text: string,
@@ -45,7 +74,33 @@ export component BlueprintEditorScene inherits Rectangle {
             && ctrl == binding.ctrl
             && shift == binding.shift
             && alt == binding.alt
-            && text.to-lowercase() == binding.key.to-lowercase();
+            && root.normalize-hotkey-text(text) == binding.key.to-lowercase();
+    }
+
+    function clamp-sidebar-width(next-width: length) -> length {
+        next-width < 220px ? 220px
+            : next-width > 520px ? 520px
+            : next-width;
+    }
+
+    function begin-sidebar-resize(pointer-x: length) {
+        root.sidebar-resize-active = true;
+        root.sidebar-resize-start-pointer-x = pointer-x;
+        root.sidebar-resize-start-width = root.sidebar-width;
+        root.sidebar-resize-pending-width = root.sidebar-width;
+    }
+
+    function update-sidebar-resize(pointer-x: length) {
+        if !root.sidebar-resize-active {
+            return;
+        }
+        let delta = pointer-x - root.sidebar-resize-start-pointer-x;
+        root.sidebar-resize-pending-width = root.clamp-sidebar-width(root.sidebar-resize-start-width + delta);
+        root.sidebar-width = root.sidebar-resize-pending-width;
+    }
+
+    function stop-sidebar-resize() {
+        root.sidebar-resize-active = false;
     }
 
     hotkey-scope := FocusScope {
@@ -65,15 +120,101 @@ export component BlueprintEditorScene inherits Rectangle {
                 blueprint-canvas.reset-view();
                 return accept;
             }
+            if root.normalize-hotkey-text(event.text) == "delete" {
+                blueprint-canvas.delete-selected-node();
+                return accept;
+            }
+            if event.modifiers.control && root.normalize-hotkey-text(event.text) == "c" {
+                blueprint-canvas.copy-selected-node();
+                return accept;
+            }
+            if event.modifiers.control && root.normalize-hotkey-text(event.text) == "v" {
+                blueprint-canvas.paste-node-at-cursor();
+                return accept;
+            }
             reject
         }
     }
 
-    VerticalBox {
-        padding: 0;
-        spacing: 0;
+    sidebar := BlueprintSidebar {
+        x: 0;
+        y: 0;
+        width: root.sidebar-width;
+        height: parent.height;
+        z: 20;
+        project-name: root.project-name;
+        project-page-items: root.project-page-items;
+        blueprint-variable-items: root.blueprint-variable-items;
+        blueprint-function-items: root.blueprint-function-items;
+        outline-elements: root.outline-elements;
+        open-project-page(page-index) => { root.open-project-page(page-index); }
+        open-page-blueprint(page-index) => { root.open-page-blueprint(page-index); }
+        open-server-blueprint => { root.open-server-blueprint(); }
+        add-blueprint-variable => { root.add-blueprint-variable(); }
+        add-blueprint-function => { root.add-blueprint-function(); }
+        add-blueprint-variable-node(variable-id, access-kind) => {
+            root.add-blueprint-variable-node(
+                variable-id,
+                access-kind,
+                blueprint-canvas.visible-center-world-x(),
+                blueprint-canvas.visible-center-world-y()
+            );
+        }
+        rename-blueprint-variable(variable-id, name) => {
+            root.rename-blueprint-variable(variable-id, name);
+        }
+        set-blueprint-variable-type(variable-id, type-name) => {
+            root.set-blueprint-variable-type(variable-id, type-name);
+        }
+        set-blueprint-variable-item-type(variable-id, type-name) => {
+            root.set-blueprint-variable-item-type(variable-id, type-name);
+        }
+        set-blueprint-variable-object(variable-id, object-kind, object-id, object-name) => {
+            root.set-blueprint-variable-object(variable-id, object-kind, object-id, object-name);
+        }
+    }
+
+    resize-handle := Rectangle {
+        x: root.sidebar-width - 2px;
+        y: 0;
+        width: 4px;
+        height: parent.height;
+        z: 500;
+        background: transparent;
+
+        TouchArea {
+            width: parent.width;
+            height: parent.height;
+            mouse-cursor: MouseCursor.col-resize;
+            pointer-event(ev) => {
+                if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                    root.begin-sidebar-resize(resize-handle.x + self.mouse-x);
+                }
+                if ev.kind == PointerEventKind.move {
+                    root.update-sidebar-resize(resize-handle.x + self.mouse-x);
+                }
+                if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left {
+                    root.stop-sidebar-resize();
+                }
+                if ev.kind == PointerEventKind.cancel {
+                    root.stop-sidebar-resize();
+                }
+            }
+        }
+    }
+
+    canvas-region := Rectangle {
+        x: root.sidebar-width;
+        y: 0;
+        width: parent.width - root.sidebar-width;
+        height: parent.height;
+        background: Themes.current.primary-bg;
 
         PageTabsBar {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: 40px;
             documents: root.editor-documents;
             active-document-index: root.active-document-index;
             show-new-button: false;
@@ -81,54 +222,55 @@ export component BlueprintEditorScene inherits Rectangle {
             document-closed(idx) => { root.document-closed(idx); }
         }
 
-        Separator-H {}
+        blueprint-canvas := BlueprintCanvas {
+            x: 0;
+            y: 40px;
+            width: parent.width;
+            height: parent.height - 40px;
+            zoom-level <=> root.blueprint-zoom-level;
+            offset-x <=> root.blueprint-offset-x;
+            offset-y <=> root.blueprint-offset-y;
+            nodes: root.blueprint-node-items;
+            scene-elements: root.outline-elements;
+            grid-visible: true;
+            grid-size: 24px;
+            ui-helpers-visible: true;
 
-        HorizontalBox {
-            padding: 0;
-            spacing: 0;
-
-            BlueprintSidebar {
-                project-name: root.project-name;
-                project-page-items: root.project-page-items;
-                blueprint-variable-items: root.blueprint-variable-items;
-                blueprint-function-items: root.blueprint-function-items;
-                open-project-page(page-index) => { root.open-project-page(page-index); }
-                open-page-blueprint(page-index) => { root.open-page-blueprint(page-index); }
-                open-server-blueprint => { root.open-server-blueprint(); }
-                add-blueprint-variable => { root.add-blueprint-variable(); }
-                add-blueprint-function => { root.add-blueprint-function(); }
-                add-blueprint-variable-node(variable-id, access-kind) => {
-                    root.add-blueprint-variable-node(
-                        variable-id,
-                        access-kind,
-                        blueprint-canvas.visible-center-world-x(),
-                        blueprint-canvas.visible-center-world-y()
-                    );
-                }
-                rename-blueprint-variable(variable-id, name) => {
-                    root.rename-blueprint-variable(variable-id, name);
-                }
-                set-blueprint-variable-type(variable-id, type-name) => {
-                    root.set-blueprint-variable-type(variable-id, type-name);
-                }
+            node-selected(_node-id, _additive) => {
+                hotkey-scope.focus();
             }
+            node-moved(node-id, x, y) => {
+                root.move-blueprint-node(node-id, x, y);
+            }
+            node-delete-requested(node-id) => {
+                root.delete-blueprint-node(node-id);
+            }
+            node-copy-requested(_node-id) => { }
+            node-paste-requested(_x, _y) => { }
+            node-duplicate-requested(node-id, x, y) => {
+                root.duplicate-blueprint-node(node-id, x, y);
+            }
+            node-create-requested(descriptor-id, x, y) => {
+                root.add-blueprint-catalog-node(descriptor-id, x, y);
+            }
+            node-bind-source-requested(_node-id, _element-id) => { }
+        }
+    }
 
-            Separator-V {}
-
-            canvas-host := Rectangle {
-                horizontal-stretch: 1;
-                background: Themes.current.primary-bg;
-
-                blueprint-canvas := BlueprintCanvas {
-                    width: parent.width;
-                    height: parent.height;
-                    zoom-level <=> root.blueprint-zoom-level;
-                    offset-x <=> root.blueprint-offset-x;
-                    offset-y <=> root.blueprint-offset-y;
-                    grid-visible: true;
-                    grid-size: 24px;
-                    ui-helpers-visible: true;
-                }
+    if root.sidebar-resize-active: TouchArea {
+        z: 1000;
+        width: parent.width;
+        height: parent.height;
+        mouse-cursor: MouseCursor.col-resize;
+        pointer-event(ev) => {
+            if ev.kind == PointerEventKind.move {
+                root.update-sidebar-resize(self.mouse-x);
+            }
+            if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left {
+                root.stop-sidebar-resize();
+            }
+            if ev.kind == PointerEventKind.cancel {
+                root.stop-sidebar-resize();
             }
         }
     }

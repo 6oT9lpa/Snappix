@@ -1331,7 +1331,7 @@ export component Canvas inherits Rectangle {
             && screen-y <= root.height + root.viewport-cull-padding
     }
 
-    background: Themes.current.primary-bg;
+    background: Themes.primary-background-transparent;
     clip: true;
 
     viewport := Rectangle {
@@ -1551,12 +1551,15 @@ export component Canvas inherits Rectangle {
                     ? root.live-element-y - root.start-element-y
                     : 0;
             property <bool> should-render-on-canvas:
+                element.display-mode != "none"
+                && (
                 root.is-element-visible-on-screen(
                     element.bounds.position.x,
                     element.bounds.position.y,
                     element.bounds.size.width,
                     element.bounds.size.height
-                ) || is-selected || is-active-transform;
+                ) || is-selected || is-active-transform
+                );
             property <float> display-canvas-x:
                 is-active-transform ? root.live-element-x
                 : is-group-move-preview ? (element.bounds.position.x / 1px) + group-move-dx
@@ -1591,6 +1594,7 @@ export component Canvas inherits Rectangle {
             transform-rotation: display-rotation * 1deg;
             transform-scale-x: element.flip-horizontal ? -1 : 1;
             transform-scale-y: element.flip-vertical ? -1 : 1;
+            opacity: element.opacity;
 
             background: element.background;
 

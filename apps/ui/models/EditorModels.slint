@@ -101,6 +101,8 @@ export struct SelectionInfo {
     image-source-path: string,
     image-source: image,
     text-color: color,
+    opacity: float,
+    display-mode: string,
     is-selected: bool,
     is-group-anchor: bool,
     is-hovered: bool,
@@ -141,6 +143,8 @@ export struct BlueprintVariableInfo {
     variable-id: string,
     name: string,
     type-name: string,
+    item-type-name: string,
+    value-label: string,
     color: color,
 }
 
@@ -148,6 +152,25 @@ export struct BlueprintFunctionInfo {
     function-id: string,
     name: string,
     return-type: string,
+}
+
+export struct BlueprintNodeInfo {
+    node-id: string,
+    title: string,
+    category: string,
+    element-type: string,
+    descriptor-id: string,
+    x: float,
+    y: float,
+    is-event: bool,
+    is-bound-event: bool,
+    has-exec-input: bool,
+    exec-output-1: string,
+    exec-output-2: string,
+    exec-output-3: string,
+    data-input-name: string,
+    data-input-type: string,
+    data-input-color: color,
 }
 
 export enum CanvasCursor {

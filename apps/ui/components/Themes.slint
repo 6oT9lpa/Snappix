@@ -105,11 +105,13 @@ export global Themes {
     in-out property <color> selection-fill: #4EA1FF33;
     in-out property <color> selection-panel-bg: #10203ACC;
     in-out property <color> selection-text: #D9E7FF;
-    in-out property <color> on-accent-color: #fad707;
+    in-out property <color> on-accent-color: #fad507;
     in-out property <color> on-accent-bg: #fad50753; 
     in-out property <color> on-accent-text: #000000;
     in-out property <color> canvas-bg: #0F0F0F;
     in-out property <color> canvas-grid-color: #2B2B2B;
+    in-out property <color> primary-background-transparent: #22222280;
+    in-out property <color> secondary-background-transparent: #2a2a2a80;
 
     in-out property <color> light-overlay-bg: #00000040;
     in-out property <color> light-overlay-strong-bg: #00000066;
@@ -124,11 +126,13 @@ export global Themes {
     in-out property <color> light-selection-fill: #1976D233;
     in-out property <color> light-selection-panel-bg: #E3F2FDCC;
     in-out property <color> light-selection-text: #0D47A1;
-    in-out property <color> light-on-accent-color: #fad707;
+    in-out property <color> light-on-accent-color: #fad507;
     in-out property <color> light-on-accent-bg: #fad50753; 
     in-out property <color> light-on-accent-text: #000000;
     in-out property <color> light-canvas-bg: #F3F5F8;
     in-out property <color> light-canvas-grid-color: #D6DCE5;
+    in-out property <color> light-primary-background-transparent: #ffffff80;
+    in-out property <color> light-secondary-background-transparent: #f5f5f580;
 
     in-out property <color> dark-overlay-bg: #00000066;
     in-out property <color> dark-overlay-strong-bg: #00000090;
@@ -143,11 +147,13 @@ export global Themes {
     in-out property <color> dark-selection-fill: #4EA1FF33;
     in-out property <color> dark-selection-panel-bg: #10203ACC;
     in-out property <color> dark-selection-text: #D9E7FF;
-    in-out property <color> dark-on-accent-color: #fad707;
+    in-out property <color> dark-on-accent-color: #fad507;
     in-out property <color> dark-on-accent-bg: #fad50753; 
     in-out property <color> dark-on-accent-text: #000000;
     in-out property <color> dark-canvas-bg: #0F0F0F;
     in-out property <color> dark-canvas-grid-color: #2B2B2B;
+    in-out property <color> dark-primary-background-transparent: #22222280;
+    in-out property <color> dark-secondary-background-transparent: #2a2a2a80;
 
     public function apply-light-extended() {
         overlay-bg = light-overlay-bg;
@@ -168,6 +174,8 @@ export global Themes {
         on-accent-text = light-on-accent-text;
         canvas-bg = light-canvas-bg;
         canvas-grid-color = light-canvas-grid-color;
+        primary-background-transparent = light-primary-background-transparent;
+        secondary-background-transparent = light-secondary-background-transparent;
     }
 
     public function apply-dark-extended() {
@@ -189,6 +197,8 @@ export global Themes {
         on-accent-text = dark-on-accent-text;
         canvas-bg = dark-canvas-bg;
         canvas-grid-color = dark-canvas-grid-color;
+        primary-background-transparent = dark-primary-background-transparent;
+        secondary-background-transparent = dark-secondary-background-transparent;
     }
 
     function toggle-theme() {

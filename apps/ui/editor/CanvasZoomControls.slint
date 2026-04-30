@@ -11,6 +11,8 @@ component ZoomControlButton inherits Rectangle {
     height: 24px;
     border-radius: 6px;
     background: button-touch.has-hover ? Themes.current.hover-color : Themes.current.primary-bg;
+    border-color: Themes.current.border-color;
+    border-width: 1px;
 
     button-touch := TouchArea {
         mouse-cursor: MouseCursor.pointer;
@@ -45,10 +47,8 @@ export component CanvasZoomControls inherits Rectangle {
 
     width: 122px;
     height: 32px;
-    border-radius: 8px;
-    border-width: 1px;
-    border-color: Themes.current.border-color;
-    background: Themes.current.secondary-bg;
+    border-radius: 4px;
+    background: Themes.primary-background-transparent;
 
     HorizontalBox {
         padding: 4px;
@@ -65,6 +65,8 @@ export component CanvasZoomControls inherits Rectangle {
             height: 24px;
             border-radius: 6px;
             background: reset-touch.has-hover ? Themes.current.hover-color : Themes.current.primary-bg;
+            border-color: Themes.current.border-color;
+            border-width: 1px;
 
             reset-touch := TouchArea {
                 mouse-cursor: MouseCursor.pointer;

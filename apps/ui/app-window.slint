@@ -8,7 +8,7 @@ import { VisualEditorScene } from "./views/VisualEditorScene.slint";
 import { ProjectSelectedScene, RecentProjectData } from "./views/ProjectSelectedScene.slint";
 import { NewProjectDialog } from "./dialogs/NewProjectDialog.slint";
 import { NewPageDialog } from "./editor/PageTabs.slint";
-import { SelectionInfo, CanvasBounds, CanvasCommentInfo, EditorDocumentInfo, ProjectPageInfo, BlueprintVariableInfo, BlueprintFunctionInfo, HotkeyBinding, TimelineEntry, AppErrorNotification } from "./models/EditorModels.slint";
+import { SelectionInfo, CanvasBounds, CanvasCommentInfo, EditorDocumentInfo, ProjectPageInfo, BlueprintVariableInfo, BlueprintFunctionInfo, BlueprintNodeInfo, HotkeyBinding, TimelineEntry, AppErrorNotification } from "./models/EditorModels.slint";
 export { StringSearch } from "./utils/StringSearch.slint";
 
 component Separator inherits Rectangle {
@@ -154,6 +154,7 @@ export component AppWindow inherits Window {
     in-out property <int> active-document-index: 0;
     in-out property <[BlueprintVariableInfo]> blueprint-variable-items: [];
     in-out property <[BlueprintFunctionInfo]> blueprint-function-items: [];
+    in-out property <[BlueprintNodeInfo]> blueprint-node-items: [];
     in-out property <[ProjectPageInfo]> project-page-items: [];
     in-out property <int> active-page-index: 0;
     in-out property <float> zoom-level: 1.0;
@@ -218,6 +219,8 @@ export component AppWindow inherits Window {
     in-out property <string> selected-element-background-image: "";
     in-out property <string> selected-element-image-source: "";
     in-out property <string> selected-element-image-source-display: "";
+    in-out property <float> selected-element-opacity: 1.0;
+    in-out property <string> selected-element-display-mode: "visible";
     in-out property <bool> selected-element-inherit-text-style: true;
     in-out property <HotkeyBinding> select-all-hotkey: { key: "a", ctrl: true, shift: false, alt: false };
     in-out property <HotkeyBinding> undo-hotkey: { key: "z", ctrl: true, shift: false, alt: false };
@@ -272,7 +275,7 @@ export component AppWindow inherits Window {
     callback preview-element-geometry-internal(string, float, float, float, float, float);
     callback finish-element-transform-internal(string, bool, float, float, float, float, float);
     callback update-element-text-internal(string, string);
-    callback update-element-style-internal(string, string, string, float, float, float, string, string, string, string, string, string, bool, bool, string, string, string, string, float, bool);
+    callback update-element-style-internal(string, string, string, float, float, float, string, string, string, string, string, string, bool, bool, string, string, string, string, float, bool, float, string);
     callback update-element-container-settings-internal(string, string, bool, float, float, float, float, float, float, float, float, float, float, float, float, string, string, string, string, string, string, string, string, string, string, string, string);
     callback toggle-outline-node-internal(string);
     callback reparent-element-internal(string, string);
@@ -300,8 +303,14 @@ export component AppWindow inherits Window {
     callback add-blueprint-variable-internal();
     callback add-blueprint-function-internal();
     callback add-blueprint-variable-node-internal(string, string, float, float);
+    callback add-blueprint-catalog-node-internal(string, float, float);
+    callback move-blueprint-node-internal(string, float, float);
+    callback delete-blueprint-node-internal(string);
+    callback duplicate-blueprint-node-internal(string, float, float);
     callback rename-blueprint-variable-internal(string, string);
     callback set-blueprint-variable-type-internal(string, string);
+    callback set-blueprint-variable-item-type-internal(string, string);
+    callback set-blueprint-variable-object-internal(string, string, string, string);
     callback rename-project-page-internal(int, string);
     callback delete-element-internal(string);
     callback delete-project-page-internal(int);
@@ -556,6 +565,8 @@ export component AppWindow inherits Window {
         active-document-index: root.active-document-index;
         blueprint-variable-items: root.blueprint-variable-items;
         blueprint-function-items: root.blueprint-function-items;
+        blueprint-node-items: root.blueprint-node-items;
+        outline-elements: root.outline-elements;
         project-page-items: root.project-page-items;
         active-page-index: root.active-page-index;
         reset-view-hotkey: root.reset-view-hotkey;
@@ -596,12 +607,35 @@ export component AppWindow inherits Window {
             root.add-blueprint-variable-node-internal(variable-id, access-kind, x, y);
         }
 
+        add-blueprint-catalog-node(descriptor-id, x, y) => {
+            root.add-blueprint-catalog-node-internal(descriptor-id, x, y);
+        }
+
+        move-blueprint-node(node-id, x, y) => {
+            root.move-blueprint-node-internal(node-id, x, y);
+        }
+
+        delete-blueprint-node(node-id) => {
+            root.delete-blueprint-node-internal(node-id);
+        }
+
+        duplicate-blueprint-node(node-id, x, y) => {
+            root.duplicate-blueprint-node-internal(node-id, x, y);
+        }
+
         rename-blueprint-variable(variable-id, name) => {
             root.rename-blueprint-variable-internal(variable-id, name);
         }
 
         set-blueprint-variable-type(variable-id, type-name) => {
             root.set-blueprint-variable-type-internal(variable-id, type-name);
+        }
+
+        set-blueprint-variable-item-type(variable-id, type-name) => {
+            root.set-blueprint-variable-item-type-internal(variable-id, type-name);
+        }
+        set-blueprint-variable-object(variable-id, object-kind, object-id, object-name) => {
+            root.set-blueprint-variable-object-internal(variable-id, object-kind, object-id, object-name);
         }
     }
 
@@ -682,6 +716,8 @@ export component AppWindow inherits Window {
             selected-element-background-image: root.selected-element-background-image;
             selected-element-image-source: root.selected-element-image-source;
             selected-element-image-source-display: root.selected-element-image-source-display;
+            selected-element-opacity: root.selected-element-opacity;
+            selected-element-display-mode: root.selected-element-display-mode;
             selected-element-inherit-text-style: root.selected-element-inherit-text-style;
             select-all-hotkey: root.select-all-hotkey;
             undo-hotkey: root.undo-hotkey;
@@ -766,7 +802,9 @@ export component AppWindow inherits Window {
                 checkbox_box_color,
                 checkbox_box_border_color,
                 checkbox_box_border_width,
-                checkbox_space_between
+                checkbox_space_between,
+                opacity,
+                display_mode
             ) => {
                 root.update-element-style-internal(
                     element-id,
@@ -788,7 +826,9 @@ export component AppWindow inherits Window {
                     checkbox_box_color,
                     checkbox_box_border_color,
                     checkbox_box_border_width,
-                    checkbox_space_between
+                    checkbox_space_between,
+                    opacity,
+                    display_mode
                 );
             }
             element-container-settings-updated(element-id, container_mode, allow_absolute_children, layout_padding, layout_padding_left, layout_padding_right, layout_padding_top, layout_padding_bottom, layout_spacing, layout_margin, layout_margin_left, layout_margin_right, layout_margin_top, layout_margin_bottom, layout_order, stack_alignment, flex_direction, flex_wrap, justify_items, justify_content, align_items, align_content, place_items, flex_flow, grid_template_columns, grid_template_rows, grid_template_areas) => {

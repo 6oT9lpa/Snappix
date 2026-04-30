@@ -1,13 +1,366 @@
-import { Themes } from "../components/Themes.slint";
+import { HorizontalBox, VerticalBox } from "std-widgets.slint";
+import { Themes, Separator-H } from "../components/Themes.slint";
 import { CanvasZoomControls } from "./CanvasZoomControls.slint";
+import { BlueprintNodeInfo, SelectionInfo } from "../models/EditorModels.slint";
+import { StringSearch } from "../utils/StringSearch.slint";
+
+component NodeMenuRow inherits Rectangle {
+    in property <string> title: "";
+    in property <string> descriptor-id: "";
+    in property <string> query: "";
+    callback selected(string);
+
+    visible: query == "" || StringSearch.contains(title, query) || StringSearch.contains(descriptor-id, query);
+    height: self.visible ? 28px : 0px;
+    border-radius: 4px;
+    background: touch.has-hover ? Themes.current.hover-color : transparent;
+    clip: true;
+
+    touch := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.selected(root.descriptor-id); }
+    }
+
+    Text {
+        x: 8px;
+        width: parent.width - 16px;
+        height: parent.height;
+        text: root.title;
+        color: Themes.current.primary-text;
+        font-size: 12px;
+        vertical-alignment: TextVerticalAlignment.center;
+        overflow: elide;
+    }
+}
+
+component MenuGroupHeader inherits Rectangle {
+    in property <string> title: "";
+    in-out property <bool> expanded: false;
+
+    height: 30px;
+    border-radius: 4px;
+    background: transparent;
+
+    dropdown-touch := TouchArea {
+        height: 30px;
+        mouse-cursor: MouseCursor.pointer;
+        clicked => {
+            root.expanded = !root.expanded;
+        }
+
+        HorizontalBox {
+            padding-left: 10px;
+
+            Path {
+                stroke: Themes.current.secondary-text;
+                stroke-width: 1.5px;
+                transform-rotation: root.expanded ? 90deg : 0deg;
+                fill: transparent;
+                width: 10px;
+                height: 12px;
+                commands: "M 0 0 L 6 6 L 0 12";
+                animate transform-rotation { duration: 150ms; }
+            }
+
+            Text {
+                text: root.title;
+                font-size: 12px;
+                color: root.expanded || dropdown-touch.has-hover ?  Themes.current.secondary-text: Themes.current.primary-text;
+                font-weight: 700;
+                vertical-alignment: TextVerticalAlignment.center;
+                horizontal-stretch: 1;
+                animate color { duration: 150ms; }
+            }
+        }
+    }
+}
+
+component NodeContextAction inherits Rectangle {
+    in property <string> title: "";
+    callback selected();
+
+    height: 28px;
+    border-radius: 4px;
+    background: touch.has-hover ? Themes.current.hover-color : transparent;
+
+    touch := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.selected(); }
+    }
+
+    Text {
+        x: 8px;
+        width: parent.width - 16px;
+        height: parent.height;
+        text: root.title;
+        color: Themes.current.primary-text;
+        font-size: 12px;
+        vertical-alignment: TextVerticalAlignment.center;
+        overflow: elide;
+    }
+}
+
+component BlueprintNodeCard inherits Rectangle {
+    in property <string> node-id: "";
+    in property <string> title: "";
+    in property <string> element-type: "";
+    in property <bool> is-event: false;
+    in property <bool> is-bound-event: false;
+    in property <bool> has-exec-input: false;
+    in property <string> exec-output-1: "";
+    in property <string> exec-output-2: "";
+    in property <string> exec-output-3: "";
+    in property <string> data-input-name: "";
+    in property <string> data-input-type: "";
+    in property <color> data-input-color: #5ac68b;
+    in property <float> world-x: 0;
+    in property <float> world-y: 0;
+    in property <float> live-world-x: 0;
+    in property <float> live-world-y: 0;
+    in property <length> screen-x: 0px;
+    in property <length> screen-y: 0px;
+    in property <float> zoom-level: 1.0;
+    in property <bool> is-selected: false;
+    in property <float> drag-delta-x: 0;
+    in property <float> drag-delta-y: 0;
+    in property <int> drag-commit-seq: 0;
+    in property <float> marquee-min-x: 0;
+    in property <float> marquee-max-x: 0;
+    in property <float> marquee-min-y: 0;
+    in property <float> marquee-max-y: 0;
+    in property <int> marquee-apply-seq: 0;
+
+    callback consume-canvas-left-down();
+    callback node-select-requested(string, bool);
+    callback node-menu-requested(string, bool, bool, length, length);
+    callback node-drag-started(string, float, float, length, length, bool);
+    callback node-drag-updated(length, length);
+    callback node-drag-finished();
+    callback node-drag-cancelled();
+    callback wire-started(string, float, float, length, length);
+    callback wire-finished();
+    callback node-moved-requested(string, float, float);
+    callback marquee-hit(string);
+
+    property <length> base-node-width: root.is-event ? 250px : 270px;
+    property <length> base-node-height:
+        root.exec-output-3 != "" ? 150px
+        : root.exec-output-2 != "" ? 126px
+        : root.data-input-name != "" ? 118px
+        : 94px;
+    property <length> node-width: root.base-node-width * root.zoom-level;
+    property <length> node-height: root.base-node-height * root.zoom-level;
+    property <float> base-width-world: root.base-node-width / 1px;
+    property <float> base-height-world: root.base-node-height / 1px;
+
+    x: root.screen-x;
+    y: root.screen-y;
+    width: root.node-width;
+    height: root.node-height;
+    border-radius: 7px * root.zoom-level;
+    border-width: root.is-selected ? 2px : 1px;
+    border-color: root.is-selected ? Themes.current.active-color : Themes.current.border-color;
+    background: Themes.current.secondary-bg;
+
+    changed drag-commit-seq => {
+        if root.is-selected && (Math.abs(root.drag-delta-x) > 0.001 || Math.abs(root.drag-delta-y) > 0.001) {
+            root.node-moved-requested(
+                root.node-id,
+                root.world-x + root.drag-delta-x,
+                root.world-y + root.drag-delta-y
+            );
+        }
+    }
+
+    changed marquee-apply-seq => {
+        let node-min-x = root.world-x;
+        let node-max-x = root.world-x + root.base-width-world;
+        let node-min-y = root.world-y;
+        let node-max-y = root.world-y + root.base-height-world;
+        let intersects = node-max-x >= root.marquee-min-x
+            && node-min-x <= root.marquee-max-x
+            && node-max-y >= root.marquee-min-y
+            && node-min-y <= root.marquee-max-y;
+        if intersects {
+            root.marquee-hit(root.node-id);
+        }
+    }
+
+    header := Rectangle {
+        width: parent.width;
+        height: 34px * root.zoom-level;
+        border-radius: 7px * root.zoom-level;
+        background: root.is-event ? #a7373f : Themes.current.primary-bg;
+
+        Text {
+            x: 12px * root.zoom-level;
+            width: parent.width - 24px * root.zoom-level;
+            height: parent.height;
+            text: root.is-event ? root.element-type : root.title;
+            color: Themes.current.primary-text;
+            font-size: 12px * root.zoom-level;
+            font-weight: 700;
+            vertical-alignment: TextVerticalAlignment.center;
+            overflow: elide;
+        }
+
+        TouchArea {
+            mouse-cursor: MouseCursor.move;
+            pointer-event(ev) => {
+                if ev.button == PointerEventButton.left && ev.kind == PointerEventKind.down {
+                    root.consume-canvas-left-down();
+                }
+                let sx = root.x + self.mouse-x;
+                let sy = root.y + self.mouse-y;
+                if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                    root.node-drag-started(root.node-id, root.world-x, root.world-y, sx, sy, ev.modifiers.control);
+                }
+                if ev.kind == PointerEventKind.move {
+                    root.node-drag-updated(sx, sy);
+                }
+                if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left {
+                    root.node-drag-finished();
+                }
+                if ev.kind == PointerEventKind.cancel {
+                    root.node-drag-cancelled();
+                }
+            }
+        }
+    }
+
+    TouchArea {
+        width: parent.width;
+        height: parent.height;
+        mouse-cursor: MouseCursor.pointer;
+        pointer-event(ev) => {
+            if ev.button == PointerEventButton.left && ev.kind == PointerEventKind.down {
+                root.consume-canvas-left-down();
+                root.node-select-requested(root.node-id, ev.modifiers.control);
+            }
+            if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right {
+                root.node-menu-requested(root.node-id, root.is-event, root.is-bound-event, root.x + self.mouse-x, root.y + self.mouse-y);
+            }
+        }
+    }
+
+    if root.has-exec-input: Rectangle {
+        x: -6px * root.zoom-level;
+        y: 52px * root.zoom-level;
+        width: 12px * root.zoom-level;
+        height: 12px * root.zoom-level;
+        border-radius: 6px * root.zoom-level;
+        background: #f5f5f5;
+    }
+
+    if root.exec-output-1 != "": Rectangle {
+        x: parent.width - 6px * root.zoom-level;
+        y: 52px * root.zoom-level;
+        width: 12px * root.zoom-level;
+        height: 12px * root.zoom-level;
+        border-radius: 6px * root.zoom-level;
+        background: #f5f5f5;
+
+        TouchArea {
+            mouse-cursor: MouseCursor.crosshair;
+            pointer-event(ev) => {
+                let sx = root.x + parent.x + self.mouse-x;
+                let sy = root.y + parent.y + self.mouse-y;
+                if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                    root.consume-canvas-left-down();
+                    root.wire-started(
+                        root.node-id,
+                        root.live-world-x + root.base-width-world,
+                        root.live-world-y + 58,
+                        sx,
+                        sy
+                    );
+                }
+                if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left {
+                    root.wire-finished();
+                }
+            }
+        }
+    }
+
+    if root.exec-output-1 != "": Text {
+        x: parent.width - 96px * root.zoom-level;
+        y: 44px * root.zoom-level;
+        width: 78px * root.zoom-level;
+        height: 28px * root.zoom-level;
+        text: root.exec-output-1;
+        color: Themes.current.primary-text;
+        font-size: 11px * root.zoom-level;
+        horizontal-alignment: TextHorizontalAlignment.right;
+        vertical-alignment: TextVerticalAlignment.center;
+        overflow: elide;
+    }
+
+    if root.exec-output-2 != "": Text {
+        x: parent.width - 96px * root.zoom-level;
+        y: 72px * root.zoom-level;
+        width: 78px * root.zoom-level;
+        height: 28px * root.zoom-level;
+        text: root.exec-output-2;
+        color: Themes.current.primary-text;
+        font-size: 11px * root.zoom-level;
+        horizontal-alignment: TextHorizontalAlignment.right;
+        vertical-alignment: TextVerticalAlignment.center;
+        overflow: elide;
+    }
+
+    if root.exec-output-3 != "": Text {
+        x: parent.width - 96px * root.zoom-level;
+        y: 100px * root.zoom-level;
+        width: 78px * root.zoom-level;
+        height: 28px * root.zoom-level;
+        text: root.exec-output-3;
+        color: Themes.current.primary-text;
+        font-size: 11px * root.zoom-level;
+        horizontal-alignment: TextHorizontalAlignment.right;
+        vertical-alignment: TextVerticalAlignment.center;
+        overflow: elide;
+    }
+
+    if root.data-input-name != "": Rectangle {
+        x: -6px * root.zoom-level;
+        y: 82px * root.zoom-level;
+        width: 12px * root.zoom-level;
+        height: 12px * root.zoom-level;
+        border-radius: 6px * root.zoom-level;
+        background: root.data-input-color;
+    }
+
+    if root.data-input-name != "": Text {
+        x: 18px * root.zoom-level;
+        y: 74px * root.zoom-level;
+        width: 140px * root.zoom-level;
+        height: 28px * root.zoom-level;
+        text: root.data-input-name + " : " + root.data-input-type;
+        color: Themes.current.secondary-text;
+        font-size: 11px * root.zoom-level;
+        vertical-alignment: TextVerticalAlignment.center;
+        overflow: elide;
+    }
+}
 
 export component BlueprintCanvas inherits Rectangle {
     in-out property <float> zoom-level: 1.0;
     in-out property <length> offset-x: 0px;
     in-out property <length> offset-y: 0px;
+    in property <[BlueprintNodeInfo]> nodes: [];
+    in property <[SelectionInfo]> scene-elements: [];
     in property <bool> grid-visible: true;
     in property <length> grid-size: 24px;
     in property <bool> ui-helpers-visible: true;
+
+    callback node-selected(string, bool);
+    callback node-moved(string, float, float);
+    callback node-delete-requested(string);
+    callback node-copy-requested(string);
+    callback node-paste-requested(float, float);
+    callback node-duplicate-requested(string, float, float);
+    callback node-create-requested(string, float, float);
+    callback node-bind-source-requested(string, string);
 
     property <bool> is-panning: false;
     property <length> pan-start-x: 0px;
@@ -15,6 +368,64 @@ export component BlueprintCanvas inherits Rectangle {
     property <bool> view-initialized: false;
     property <float> min-zoom: 0.2;
     property <float> max-zoom: 4.0;
+    property <string> selected-node-id: "";
+    property <string> selected-node-ids: "|";
+    property <string> copied-node-id: "";
+    property <float> cursor-world-x: 0;
+    property <float> cursor-world-y: 0;
+
+    property <bool> is-marquee-armed: false;
+    property <bool> is-marquee-active: false;
+    property <float> marquee-start-x: 0;
+    property <float> marquee-start-y: 0;
+    property <float> marquee-current-x: 0;
+    property <float> marquee-current-y: 0;
+
+    property <bool> node-menu-open: false;
+    property <length> node-menu-x: 0px;
+    property <length> node-menu-y: 0px;
+    property <string> node-menu-target-id: "";
+    property <bool> node-menu-target-is-event: false;
+    property <bool> node-menu-target-is-bound: false;
+
+    property <bool> create-menu-open: false;
+    property <length> create-menu-x: 0px;
+    property <length> create-menu-y: 0px;
+    property <float> create-menu-world-x: 0;
+    property <float> create-menu-world-y: 0;
+    property <string> create-menu-search: "";
+    property <bool> all-nodes-open: false;
+    property <bool> events-open: false;
+    property <bool> ui-open: false;
+    property <bool> pages-open: false;
+    property <bool> flow-open: false;
+    property <bool> network-open: false;
+    property <bool> database-open: false;
+
+    property <bool> dragging-node: false;
+    property <string> drag-node-id: "";
+    property <float> drag-start-node-x: 0;
+    property <float> drag-start-node-y: 0;
+    property <length> drag-start-pointer-x: 0px;
+    property <length> drag-start-pointer-y: 0px;
+    property <float> drag-live-x: 0;
+    property <float> drag-live-y: 0;
+    property <float> drag-delta-x: 0;
+    property <float> drag-delta-y: 0;
+    property <int> drag-commit-seq: 0;
+    property <bool> skip-next-canvas-left-down: false;
+    property <int> marquee-apply-seq: 0;
+
+    property <bool> wire-active: false;
+    property <float> wire-start-x: 0;
+    property <float> wire-start-y: 0;
+    property <float> wire-end-x: 0;
+    property <float> wire-end-y: 0;
+    property <bool> wire-has-elbow: false;
+    property <float> wire-elbow-x: 0;
+    property <float> wire-elbow-y: 0;
+    property <bool> dragging-wire-elbow: false;
+    property <string> wire-source-node-id: "";
 
     function world-x(screen-x: length) -> float {
         ((screen-x - root.offset-x) / 1px) / root.zoom-level
@@ -22,6 +433,69 @@ export component BlueprintCanvas inherits Rectangle {
 
     function world-y(screen-y: length) -> float {
         ((screen-y - root.offset-y) / 1px) / root.zoom-level
+    }
+
+    function screen-x(world: float) -> length {
+        root.offset-x + world * root.zoom-level * 1px
+    }
+
+    function screen-y(world: float) -> length {
+        root.offset-y + world * root.zoom-level * 1px
+    }
+
+    function remember-pointer(screen-x: length, screen-y: length) {
+        root.cursor-world-x = root.world-x(screen-x);
+        root.cursor-world-y = root.world-y(screen-y);
+        if root.wire-active {
+            root.wire-end-x = root.cursor-world-x;
+            root.wire-end-y = root.cursor-world-y;
+            if root.dragging-wire-elbow {
+                root.wire-elbow-x = root.cursor-world-x;
+                root.wire-elbow-y = root.cursor-world-y;
+            }
+        }
+    }
+
+    function selection-token(node-id: string) -> string {
+        "|" + node-id + "|"
+    }
+
+    function is-node-selected(node-id: string) -> bool {
+        StringSearch.contains(root.selected-node-ids, root.selection-token(node-id))
+    }
+
+    function clear-selection() {
+        root.selected-node-id = "";
+        root.selected-node-ids = "|";
+        root.node-selected("", false);
+    }
+
+    function append-selected-node(node-id: string) {
+        if !root.is-node-selected(node-id) {
+            root.selected-node-ids += node-id + "|";
+        }
+        if root.selected-node-id == "" {
+            root.selected-node-id = node-id;
+            root.node-selected(node-id, false);
+        }
+    }
+
+    function select-node(node-id: string, additive: bool) {
+        if !additive {
+            root.selected-node-id = node-id;
+            root.selected-node-ids = root.selection-token(node-id);
+            root.node-selected(node-id, false);
+            return;
+        }
+        root.append-selected-node(node-id);
+    }
+
+    function live-node-world-x(node-id: string, node-x: float) -> float {
+        root.dragging-node && root.is-node-selected(node-id) ? node-x + root.drag-delta-x : node-x
+    }
+
+    function live-node-world-y(node-id: string, node-y: float) -> float {
+        root.dragging-node && root.is-node-selected(node-id) ? node-y + root.drag-delta-y : node-y
     }
 
     function grid-spacing() -> length {
@@ -38,6 +512,43 @@ export component BlueprintCanvas inherits Rectangle {
         let spacing = root.grid-spacing();
         let safe-spacing = spacing <= 0px ? 1px : spacing;
         root.offset-y - Math.floor((root.offset-y / 1px) / (safe-spacing / 1px)) * safe-spacing
+    }
+
+    function close-menus() {
+        root.create-menu-open = false;
+        root.node-menu-open = false;
+    }
+
+    function open-create-menu(screen-x: length, screen-y: length) {
+        root.node-menu-open = false;
+        root.create-menu-open = true;
+        root.create-menu-search = "";
+        root.all-nodes-open = false;
+        root.events-open = false;
+        root.ui-open = false;
+        root.pages-open = false;
+        root.flow-open = false;
+        root.network-open = false;
+        root.database-open = false;
+        root.create-menu-x = Math.max(0px, Math.min(root.width - 320px, screen-x));
+        root.create-menu-y = Math.max(0px, Math.min(root.height - 420px, screen-y));
+        root.create-menu-world-x = root.world-x(screen-x);
+        root.create-menu-world-y = root.world-y(screen-y);
+    }
+
+    function create-node(descriptor-id: string) {
+        root.node-create-requested(descriptor-id, root.create-menu-world-x, root.create-menu-world-y);
+        root.create-menu-open = false;
+    }
+
+    function open-node-menu(node-id: string, is-event: bool, is-bound: bool, screen-x: length, screen-y: length) {
+        root.create-menu-open = false;
+        root.node-menu-open = true;
+        root.node-menu-target-id = node-id;
+        root.node-menu-target-is-event = is-event;
+        root.node-menu-target-is-bound = is-bound;
+        root.node-menu-x = Math.max(0px, Math.min(root.width - 230px, screen-x));
+        root.node-menu-y = Math.max(0px, Math.min(root.height - 260px, screen-y));
     }
 
     function start-pan(pointer-x: length, pointer-y: length) {
@@ -96,6 +607,28 @@ export component BlueprintCanvas inherits Rectangle {
         root.world-y(root.height / 2)
     }
 
+    public function delete-selected-node() {
+        if root.selected-node-id != "" {
+            root.node-delete-requested(root.selected-node-id);
+            root.clear-selection();
+        }
+    }
+
+    public function copy-selected-node() {
+        if root.selected-node-id != "" {
+            root.copied-node-id = root.selected-node-id;
+            root.node-copy-requested(root.selected-node-id);
+        }
+    }
+
+    public function paste-node-at-cursor() {
+        if root.copied-node-id != "" {
+            root.node-duplicate-requested(root.copied-node-id, root.cursor-world-x, root.cursor-world-y);
+        } else {
+            root.node-paste-requested(root.cursor-world-x, root.cursor-world-y);
+        }
+    }
+
     changed width => {
         if !root.view-initialized && root.width > 0px && root.height > 0px {
             root.view-initialized = true;
@@ -139,7 +672,15 @@ export component BlueprintCanvas inherits Rectangle {
         z: 1;
         width: parent.width;
         height: parent.height;
-        mouse-cursor: root.is-panning ? MouseCursor.grabbing : MouseCursor.grab;
+        mouse-cursor: root.is-panning ? MouseCursor.grabbing : MouseCursor.default;
+        double-clicked => {
+            if root.wire-active {
+                root.wire-has-elbow = true;
+                root.wire-elbow-x = root.cursor-world-x;
+                root.wire-elbow-y = root.cursor-world-y;
+                root.dragging-wire-elbow = true;
+            }
+        }
 
         scroll-event(event) => {
             if event.modifiers.control {
@@ -150,26 +691,420 @@ export component BlueprintCanvas inherits Rectangle {
         }
 
         pointer-event(ev) => {
+            root.remember-pointer(self.mouse-x, self.mouse-y);
             if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.middle {
                 root.start-pan(self.mouse-x, self.mouse-y);
+                root.close-menus();
+            } else if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right {
+                root.open-create-menu(self.mouse-x, self.mouse-y);
+            } else if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                if root.skip-next-canvas-left-down {
+                    root.skip-next-canvas-left-down = false;
+                    return;
+                }
+                root.close-menus();
+                root.is-marquee-armed = true;
+                root.is-marquee-active = false;
+                root.marquee-start-x = root.cursor-world-x;
+                root.marquee-start-y = root.cursor-world-y;
+                root.marquee-current-x = root.cursor-world-x;
+                root.marquee-current-y = root.cursor-world-y;
+                root.clear-selection();
             }
 
             if ev.kind == PointerEventKind.move {
                 root.update-pan(self.mouse-x, self.mouse-y);
+                if root.is-marquee-armed {
+                    root.marquee-current-x = root.cursor-world-x;
+                    root.marquee-current-y = root.cursor-world-y;
+                    if Math.abs(root.marquee-current-x - root.marquee-start-x) > 4
+                        || Math.abs(root.marquee-current-y - root.marquee-start-y) > 4 {
+                        root.is-marquee-active = true;
+                    }
+                }
             }
 
             if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.middle {
                 root.stop-pan();
             }
-
+            if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left {
+                if root.wire-active {
+                    root.open-create-menu(self.mouse-x, self.mouse-y);
+                    root.wire-active = false;
+                    root.dragging-wire-elbow = false;
+                }
+                if root.is-marquee-active {
+                    root.selected-node-id = "";
+                    root.selected-node-ids = "|";
+                    root.marquee-apply-seq += 1;
+                    if root.selected-node-id == "" {
+                        root.node-selected("", false);
+                    }
+                }
+                root.is-marquee-armed = false;
+                root.is-marquee-active = false;
+            }
             if ev.kind == PointerEventKind.cancel {
                 root.stop-pan();
+                root.is-marquee-armed = false;
+                root.is-marquee-active = false;
+                root.wire-active = false;
+                root.dragging-wire-elbow = false;
+            }
+        }
+    }
+
+    for node in root.nodes: BlueprintNodeCard {
+        z: 20;
+        node-id: node.node-id;
+        title: node.title;
+        element-type: node.element-type;
+        is-event: node.is-event;
+        is-bound-event: node.is-bound-event;
+        has-exec-input: node.has-exec-input;
+        exec-output-1: node.exec-output-1;
+        exec-output-2: node.exec-output-2;
+        exec-output-3: node.exec-output-3;
+        data-input-name: node.data-input-name;
+        data-input-type: node.data-input-type;
+        data-input-color: node.data-input-color;
+        world-x: node.x;
+        world-y: node.y;
+        live-world-x: root.live-node-world-x(node.node-id, node.x);
+        live-world-y: root.live-node-world-y(node.node-id, node.y);
+        screen-x: root.screen-x(root.live-node-world-x(node.node-id, node.x));
+        screen-y: root.screen-y(root.live-node-world-y(node.node-id, node.y));
+        zoom-level: root.zoom-level;
+        is-selected: root.is-node-selected(node.node-id);
+        drag-delta-x: root.drag-delta-x;
+        drag-delta-y: root.drag-delta-y;
+        drag-commit-seq: root.drag-commit-seq;
+        marquee-min-x: Math.min(root.marquee-start-x, root.marquee-current-x);
+        marquee-max-x: Math.max(root.marquee-start-x, root.marquee-current-x);
+        marquee-min-y: Math.min(root.marquee-start-y, root.marquee-current-y);
+        marquee-max-y: Math.max(root.marquee-start-y, root.marquee-current-y);
+        marquee-apply-seq: root.marquee-apply-seq;
+
+        consume-canvas-left-down => {
+            root.skip-next-canvas-left-down = true;
+        }
+        node-select-requested(node-id, additive) => {
+            root.select-node(node-id, additive);
+        }
+        node-menu-requested(node-id, is-event, is-bound, screen-x, screen-y) => {
+            if !root.is-node-selected(node-id) {
+                root.select-node(node-id, false);
+            }
+            root.open-node-menu(node-id, is-event, is-bound, screen-x, screen-y);
+        }
+        node-drag-started(node-id, world-x, world-y, pointer-x, pointer-y, additive) => {
+            root.close-menus();
+            if !root.is-node-selected(node-id) {
+                root.select-node(node-id, additive);
+            }
+            root.dragging-node = true;
+            root.drag-node-id = node-id;
+            root.drag-start-node-x = world-x;
+            root.drag-start-node-y = world-y;
+            root.drag-live-x = world-x;
+            root.drag-live-y = world-y;
+            root.drag-start-pointer-x = pointer-x;
+            root.drag-start-pointer-y = pointer-y;
+            root.drag-delta-x = 0;
+            root.drag-delta-y = 0;
+        }
+        node-drag-updated(pointer-x, pointer-y) => {
+            if !root.dragging-node {
+                return;
+            }
+            root.drag-delta-x = ((pointer-x - root.drag-start-pointer-x) / 1px) / root.zoom-level;
+            root.drag-delta-y = ((pointer-y - root.drag-start-pointer-y) / 1px) / root.zoom-level;
+            root.drag-live-x = root.drag-start-node-x + root.drag-delta-x;
+            root.drag-live-y = root.drag-start-node-y + root.drag-delta-y;
+        }
+        node-drag-finished => {
+            if root.dragging-node {
+                root.drag-commit-seq += 1;
+            }
+            root.dragging-node = false;
+            root.drag-node-id = "";
+        }
+        node-drag-cancelled => {
+            root.dragging-node = false;
+            root.drag-node-id = "";
+            root.drag-delta-x = 0;
+            root.drag-delta-y = 0;
+        }
+        wire-started(node-id, start-x, start-y, pointer-x, pointer-y) => {
+            root.wire-active = true;
+            root.wire-source-node-id = node-id;
+            root.wire-start-x = start-x;
+            root.wire-start-y = start-y;
+            root.wire-has-elbow = false;
+            root.dragging-wire-elbow = false;
+            root.remember-pointer(pointer-x, pointer-y);
+        }
+        wire-finished => {
+            root.wire-active = false;
+            root.dragging-wire-elbow = false;
+        }
+        node-moved-requested(node-id, x, y) => {
+            root.node-moved(node-id, x, y);
+        }
+        marquee-hit(node-id) => {
+            root.append-selected-node(node-id);
+        }
+    }
+
+    if root.wire-active: Path {
+        z: 40;
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        stroke: #ffffff;
+        stroke-width: 2px;
+        fill: transparent;
+        commands: !root.wire-has-elbow
+            ? "M "
+                + (root.screen-x(root.wire-start-x) / 1px) + " "
+                + (root.screen-y(root.wire-start-y) / 1px) + " L "
+                + (root.screen-x(root.wire-end-x) / 1px) + " "
+                + (root.screen-y(root.wire-end-y) / 1px)
+            : "M "
+                + (root.screen-x(root.wire-start-x) / 1px) + " "
+                + (root.screen-y(root.wire-start-y) / 1px) + " L "
+                + (root.screen-x(root.wire-elbow-x) / 1px) + " "
+                + (root.screen-y(root.wire-start-y) / 1px) + " L "
+                + (root.screen-x(root.wire-elbow-x) / 1px) + " "
+                + (root.screen-y(root.wire-elbow-y) / 1px) + " L "
+                + (root.screen-x(root.wire-end-x) / 1px) + " "
+                + (root.screen-y(root.wire-elbow-y) / 1px) + " L "
+                + (root.screen-x(root.wire-end-x) / 1px) + " "
+                + (root.screen-y(root.wire-end-y) / 1px);
+    }
+
+    if root.wire-active && root.wire-has-elbow: Rectangle {
+        z: 41;
+        x: root.screen-x(root.wire-elbow-x) - 5px;
+        y: root.screen-y(root.wire-elbow-y) - 5px;
+        width: 10px;
+        height: 10px;
+        border-radius: 5px;
+        background: #ffffff;
+        border-width: 1px;
+        border-color: Themes.current.border-color;
+
+        TouchArea {
+            mouse-cursor: MouseCursor.move;
+            pointer-event(ev) => {
+                if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                    root.dragging-wire-elbow = true;
+                }
+                if ev.kind == PointerEventKind.move && root.dragging-wire-elbow {
+                    root.remember-pointer(parent.x + self.mouse-x, parent.y + self.mouse-y);
+                }
+                if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left {
+                    root.dragging-wire-elbow = false;
+                }
+                if ev.kind == PointerEventKind.cancel {
+                    root.dragging-wire-elbow = false;
+                }
+            }
+        }
+    }
+
+    if root.is-marquee-active: Rectangle {
+        z: 45;
+        x: root.screen-x(Math.min(root.marquee-start-x, root.marquee-current-x));
+        y: root.screen-y(Math.min(root.marquee-start-y, root.marquee-current-y));
+        width: Math.abs(root.marquee-current-x - root.marquee-start-x) * root.zoom-level * 1px;
+        height: Math.abs(root.marquee-current-y - root.marquee-start-y) * root.zoom-level * 1px;
+        border-width: 1px;
+        border-color: Themes.selection-border;
+        background: Themes.selection-fill;
+        border-radius: 2px;
+    }
+
+    if root.create-menu-open: Rectangle {
+        z: 100;
+        x: root.create-menu-x;
+        y: root.create-menu-y;
+        width: 250px;
+        height: 300px;
+        border-radius: 7px;
+        border-width: 1px;
+        border-color: Themes.current.border-color;
+        background: Themes.secondary-background-transparent;
+        drop-shadow-blur: Themes.shadow-size;
+        drop-shadow-color: Themes.shadow-color;
+
+        VerticalBox {
+            padding: 8px;
+            spacing: 6px;
+
+            Rectangle {
+                height: 32px;
+                border-radius: 5px;
+                border-width: 1px;
+                border-color: Themes.current.border-color;
+                background: Themes.current.primary-bg;
+
+                create-search := TextInput {
+                    x: 8px;
+                    y: 8px;
+                    width: parent.width - 16px;
+                    text <=> root.create-menu-search;
+                    color: Themes.current.primary-text;
+                    font-size: 12px;
+                    height: 20px;
+                    single-line: true;
+                    selection-background-color: Themes.current.active-color;
+                    selection-foreground-color: Themes.on-accent-text;
+                    init => { self.focus(); }
+                }
+            }
+
+            Flickable {
+                vertical-stretch: 1;
+                viewport-width: self.width;
+                viewport-height: menu-content.preferred-height;
+
+                menu-content := VerticalBox {
+                    spacing: 4px;
+                    padding: 0;
+
+                    MenuGroupHeader { title: "All Nodes"; expanded <=> root.all-nodes-open; }
+                    if root.all-nodes-open || root.create-menu-search != "": VerticalBox {
+                        spacing: 2px;
+                        NodeMenuRow { title: "Event Button"; descriptor-id: "event.button"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
+                        NodeMenuRow { title: "Event Input"; descriptor-id: "event.input"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
+                        NodeMenuRow { title: "Event Checkbox"; descriptor-id: "event.checkbox"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
+                        NodeMenuRow { title: "Event Label"; descriptor-id: "event.label"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
+                        NodeMenuRow { title: "Navigate Page"; descriptor-id: "page.navigate"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
+                        NodeMenuRow { title: "Set Opacity"; descriptor-id: "ui.set_opacity"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
+                        NodeMenuRow { title: "Set Display Mode"; descriptor-id: "ui.set_display_mode"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
+                        NodeMenuRow { title: "Branch"; descriptor-id: "flow.branch"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
+                        NodeMenuRow { title: "HTTP Request"; descriptor-id: "network.request"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
+                        NodeMenuRow { title: "Database Query"; descriptor-id: "db.query"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
+                    }
+
+                    Separator-H {}
+
+                    MenuGroupHeader { title: "Events"; expanded <=> root.events-open; }
+                    if root.events-open || root.create-menu-search != "": VerticalBox {
+                        spacing: 2px;
+                        NodeMenuRow { title: "Event Button"; descriptor-id: "event.button"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
+                        NodeMenuRow { title: "Event Input"; descriptor-id: "event.input"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
+                        NodeMenuRow { title: "Event Checkbox"; descriptor-id: "event.checkbox"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
+                        NodeMenuRow { title: "Event Label"; descriptor-id: "event.label"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
+                        NodeMenuRow { title: "Event Fill"; descriptor-id: "event.fill"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
+                        NodeMenuRow { title: "Event App Started"; descriptor-id: "event.app_started"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
+                        NodeMenuRow { title: "Event App Started Delayed"; descriptor-id: "event.app_started_delayed"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
+                        NodeMenuRow { title: "Event Page Changed"; descriptor-id: "event.page_changed"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
+                    }
+
+                    MenuGroupHeader { title: "UI"; expanded <=> root.ui-open; }
+                    if root.ui-open || root.create-menu-search != "": VerticalBox {
+                        spacing: 2px;
+                        NodeMenuRow { title: "Set Opacity"; descriptor-id: "ui.set_opacity"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
+                        NodeMenuRow { title: "Set Display Mode"; descriptor-id: "ui.set_display_mode"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
+                    }
+
+                    MenuGroupHeader { title: "Pages"; expanded <=> root.pages-open; }
+                    if root.pages-open || root.create-menu-search != "": NodeMenuRow { title: "Navigate Page"; descriptor-id: "page.navigate"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
+
+                    MenuGroupHeader { title: "Flow"; expanded <=> root.flow-open; }
+                    if root.flow-open || root.create-menu-search != "": NodeMenuRow { title: "Branch"; descriptor-id: "flow.branch"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
+
+                    MenuGroupHeader { title: "Network"; expanded <=> root.network-open; }
+                    if root.network-open || root.create-menu-search != "": NodeMenuRow { title: "HTTP Request"; descriptor-id: "network.request"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
+
+                    MenuGroupHeader { title: "Database"; expanded <=> root.database-open; }
+                    if root.database-open || root.create-menu-search != "": NodeMenuRow { title: "Database Query"; descriptor-id: "db.query"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
+                }
+            }
+        }
+    }
+
+    if root.node-menu-open: Rectangle {
+        z: 110;
+        x: root.node-menu-x;
+        y: root.node-menu-y;
+        width: 230px;
+        height: root.node-menu-target-is-event && !root.node-menu-target-is-bound ? 252px : 132px;
+        border-radius: 7px;
+        border-width: 1px;
+        border-color: Themes.current.border-color;
+        background: Themes.current.secondary-bg;
+        drop-shadow-blur: Themes.shadow-size;
+        drop-shadow-color: Themes.shadow-color;
+
+        VerticalBox {
+            padding: 6px;
+            spacing: 4px;
+
+            if root.node-menu-target-is-event && root.node-menu-target-is-bound: NodeContextAction {
+                title: "Change event source";
+                selected => { }
+            }
+
+            if root.node-menu-target-is-event && !root.node-menu-target-is-bound: Text {
+                height: 24px;
+                text: "Bind to scene object";
+                color: Themes.current.secondary-text;
+                font-size: 12px;
+                font-weight: 700;
+                vertical-alignment: TextVerticalAlignment.center;
+            }
+
+            if root.node-menu-target-is-event && !root.node-menu-target-is-bound: Flickable {
+                height: 116px;
+                viewport-width: self.width;
+                viewport-height: bind-list.preferred-height;
+
+                bind-list := VerticalBox {
+                    spacing: 2px;
+
+                    for element in root.scene-elements: NodeContextAction {
+                        visible: element.element-type == "button"
+                            || element.element-type == "input"
+                            || element.element-type == "textarea"
+                            || element.element-type == "checkbox"
+                            || element.element-type == "label";
+                        height: self.visible ? 26px : 0px;
+                        title: element.element-name == "" ? element.element-type : element.element-name;
+                        selected => {
+                            root.node-bind-source-requested(root.node-menu-target-id, element.element-id);
+                            root.node-menu-open = false;
+                        }
+                    }
+                }
+            }
+
+            if root.node-menu-target-is-event: Separator-H {}
+
+            NodeContextAction {
+                title: "Copy";
+                selected => {
+                    root.copied-node-id = root.node-menu-target-id;
+                    root.node-copy-requested(root.node-menu-target-id);
+                    root.node-menu-open = false;
+                }
+            }
+
+            NodeContextAction {
+                title: "Delete";
+                selected => {
+                    root.node-delete-requested(root.node-menu-target-id);
+                    root.node-menu-open = false;
+                }
             }
         }
     }
 
     if root.ui-helpers-visible: CanvasZoomControls {
-        z: 10;
+        z: 120;
         x: 12px;
         y: parent.height - self.height - 12px;
         zoom-level: root.zoom-level;

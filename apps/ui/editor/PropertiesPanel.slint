@@ -707,11 +707,13 @@ export component PropertiesPanel inherits Rectangle {
     in property <string> element-background-image: "";
     in property <string> element-image-source: "";
     in property <string> element-image-source-display: "";
+    in property <float> element-opacity: 1.0;
+    in property <string> element-display-mode: "visible";
     in property <bool> element-inherit-text-style: true;
 
     callback bounds-changed(CanvasBounds, float);
     callback text-changed(string);
-    callback style-changed(string, string, float, float, float, string, string, string, string, string, string, bool, bool, string, string, string, string, float, bool);
+    callback style-changed(string, string, float, float, float, string, string, string, string, string, string, bool, bool, string, string, string, string, float, bool, float, string);
     callback container-settings-changed(string, bool, float, float, float, float, float, float, float, float, float, float, float, float, string, string, string, string, string, string, string, string, string, string, string, string);
     callback browse-image-source-requested();
 
@@ -762,6 +764,8 @@ export component PropertiesPanel inherits Rectangle {
     property <string> editing-placeholder: element-placeholder;
     property <string> editing-background-image: element-background-image;
     property <string> editing-image-source: element-image-source;
+    property <float> editing-opacity: element-opacity;
+    property <string> editing-display-mode: element-display-mode;
     property <bool> editing-inherit-text-style: element-inherit-text-style;
     property <bool> is-container:
         selected-element-type == "div"
@@ -971,7 +975,9 @@ export component PropertiesPanel inherits Rectangle {
             editing-checkbox-box-color,
             editing-checkbox-box-border-color,
             editing-checkbox-box-border-width,
-            editing-checkbox-space-between
+            editing-checkbox-space-between,
+            editing-opacity,
+            editing-display-mode
         );
     }
 
@@ -1147,6 +1153,8 @@ export component PropertiesPanel inherits Rectangle {
     changed element-placeholder => { editing-placeholder = element-placeholder; }
     changed element-background-image => { editing-background-image = element-background-image; }
     changed element-image-source => { editing-image-source = element-image-source; }
+    changed element-opacity => { editing-opacity = element-opacity; }
+    changed element-display-mode => { editing-display-mode = element-display-mode; }
     changed element-inherit-text-style => { editing-inherit-text-style = element-inherit-text-style; }
 
     background: Themes.current.primary-bg;
@@ -1289,6 +1297,28 @@ export component PropertiesPanel inherits Rectangle {
             value-changed(v) => {
                 editing-rotation = v;
                 root.bounds-changed(editing-bounds, editing-rotation);
+            }
+        }
+
+        if selected-element-id != "": NumberAdjust {
+            label: "Opacity";
+            value: editing-opacity;
+            min: 0;
+            max: 1;
+            step: 0.01;
+            value-changed(v) => {
+                editing-opacity = Math.max(0, Math.min(1, v));
+                root.emit-style-change();
+            }
+        }
+
+        if root.is-container: ChoiceField {
+            label: "Display";
+            options: ["visible", "none"];
+            value <=> editing-display-mode;
+            value-changed(v) => {
+                editing-display-mode = v;
+                root.emit-style-change();
             }
         }
 
