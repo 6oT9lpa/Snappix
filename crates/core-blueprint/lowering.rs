@@ -341,9 +341,7 @@ fn follow_exec_chain(
                 if let Some(variable) = variable_map.get(variable_id).copied() {
                     let value_pin = node.pin_named("value");
                     let value = value_pin
-                        .map(|pin| {
-                            resolve_value(node, pin.id, node_map, variable_map, data_links)
-                        })
+                        .map(|pin| resolve_value(node, pin.id, node_map, variable_map, data_links))
                         .unwrap_or(BlueprintIrValue::Default(variable.data_type));
                     statements.push(BlueprintIrStatement::SetVariable {
                         node_id: node.id,
@@ -357,9 +355,7 @@ fn follow_exec_chain(
                 if node_id == "if_statement" {
                     let condition_pin = node.pin_named("condition");
                     let condition = condition_pin
-                        .map(|pin| {
-                            resolve_value(node, pin.id, node_map, variable_map, data_links)
-                        })
+                        .map(|pin| resolve_value(node, pin.id, node_map, variable_map, data_links))
                         .unwrap_or(BlueprintIrValue::Default(BlueprintPinType::Bool));
                     let true_pin = node.pin_named("true").map(|pin| pin.id);
                     let false_pin = node.pin_named("false").map(|pin| pin.id);
@@ -401,6 +397,55 @@ fn follow_exec_chain(
                 statements.push(BlueprintIrStatement::FunctionalNode {
                     node_id: node.id,
                     functional_node_id: node_id.clone(),
+                    arguments,
+                });
+            }
+            BlueprintNodeKind::Catalog { descriptor_id } => {
+                if descriptor_id == "flow.branch" {
+                    let condition_pin = node.pin_named("condition");
+                    let condition = condition_pin
+                        .map(|pin| resolve_value(node, pin.id, node_map, variable_map, data_links))
+                        .unwrap_or(BlueprintIrValue::Default(BlueprintPinType::Bool));
+                    let true_pin = node.pin_named("true").map(|pin| pin.id);
+                    let false_pin = node.pin_named("false").map(|pin| pin.id);
+                    statements.push(BlueprintIrStatement::Branch {
+                        node_id: node.id,
+                        condition_pin_id: condition_pin.map(|pin| pin.id),
+                        condition,
+                        true_statements: follow_exec_chain(
+                            document,
+                            true_pin,
+                            node_map,
+                            variable_map,
+                            exec_links,
+                            data_links,
+                            visited_nodes.clone(),
+                        ),
+                        false_statements: follow_exec_chain(
+                            document,
+                            false_pin,
+                            node_map,
+                            variable_map,
+                            exec_links,
+                            data_links,
+                            visited_nodes.clone(),
+                        ),
+                    });
+                    break;
+                }
+
+                let arguments = node
+                    .pins
+                    .iter()
+                    .filter(|pin| {
+                        pin.direction == BlueprintPinDirection::Input
+                            && pin.data_type != BlueprintPinType::Exec
+                    })
+                    .map(|pin| resolve_value(node, pin.id, node_map, variable_map, data_links))
+                    .collect();
+                statements.push(BlueprintIrStatement::FunctionalNode {
+                    node_id: node.id,
+                    functional_node_id: descriptor_id.clone(),
                     arguments,
                 });
             }

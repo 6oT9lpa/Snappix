@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::api::BlueprintProjectApi;
+use crate::catalog::is_builtin_node_descriptor;
 use crate::model::{
     BlueprintDocument, BlueprintDocumentKind, BlueprintFunctionSignature, BlueprintFunctionTarget,
     BlueprintGraph, BlueprintNode, BlueprintNodeKind, BlueprintOwner, BlueprintPin,
@@ -401,6 +402,18 @@ fn validate_node(
                 diagnostics.push(BlueprintDiagnostic::error(
                     "page_to_page_call_forbidden",
                     "Page blueprints may call only server exports directly.",
+                    Some(document.id),
+                    Some(graph.id),
+                    Some(node.id),
+                    None,
+                ));
+            }
+        }
+        BlueprintNodeKind::Catalog { descriptor_id } => {
+            if !is_builtin_node_descriptor(descriptor_id) {
+                diagnostics.push(BlueprintDiagnostic::error(
+                    "catalog_node_missing",
+                    format!("Catalog node '{descriptor_id}' is not registered."),
                     Some(document.id),
                     Some(graph.id),
                     Some(node.id),

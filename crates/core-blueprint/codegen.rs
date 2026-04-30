@@ -82,7 +82,7 @@ fn workspace_manifest() -> String {
 
 fn crate_manifest(project_name: &str) -> String {
     format!(
-        "[package]\nname = \"{}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\npath = \"src/lib.rs\"\n",
+        "[package]\nname = \"{}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nserde_json = \"1\"\n\n[lib]\npath = \"src/lib.rs\"\n",
         sanitize_package_name(project_name)
     )
 }
@@ -96,6 +96,7 @@ pub enum BlueprintValue {
     Float(f64),
     String(String),
     Color(String),
+    Object(serde_json::Value),
     UiElementRef(String),
     PageRef(String),
     ApiRef(String),
@@ -148,6 +149,7 @@ pub fn value_to_string(value: &BlueprintValue) -> String {
         BlueprintValue::Float(value) => value.to_string(),
         BlueprintValue::String(value) => value.clone(),
         BlueprintValue::Color(value) => value.clone(),
+        BlueprintValue::Object(value) => value.to_string(),
         BlueprintValue::UiElementRef(value) => value.clone(),
         BlueprintValue::PageRef(value) => value.clone(),
         BlueprintValue::ApiRef(value) => value.clone(),
@@ -160,6 +162,7 @@ pub fn value_to_bool(value: &BlueprintValue) -> bool {
         BlueprintValue::Int(value) => *value != 0,
         BlueprintValue::Float(value) => *value != 0.0,
         BlueprintValue::String(value) => !value.is_empty(),
+        BlueprintValue::Object(value) => !value.is_null(),
         BlueprintValue::Color(value)
         | BlueprintValue::UiElementRef(value)
         | BlueprintValue::PageRef(value)
@@ -534,6 +537,7 @@ fn default_value_expr(pin_type: BlueprintPinType) -> String {
         BlueprintPinType::Float => "BlueprintValue::Float(0.0)".to_string(),
         BlueprintPinType::String => "BlueprintValue::String(String::new())".to_string(),
         BlueprintPinType::Color => "BlueprintValue::Color(String::new())".to_string(),
+        BlueprintPinType::Object => "BlueprintValue::Object(serde_json::Value::Null)".to_string(),
         BlueprintPinType::Array
         | BlueprintPinType::Vector
         | BlueprintPinType::HashSet

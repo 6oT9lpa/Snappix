@@ -133,6 +133,10 @@ pub struct BlueprintLocalVariable {
     pub id: Uuid,
     pub name: String,
     pub data_type: BlueprintPinType,
+    #[serde(default)]
+    pub item_type: Option<BlueprintPinType>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -299,6 +303,9 @@ pub enum BlueprintNodeKind {
         target: BlueprintFunctionTarget,
         signature: BlueprintFunctionSignature,
     },
+    Catalog {
+        descriptor_id: String,
+    },
     Functional {
         node_id: String,
     },
@@ -383,10 +390,52 @@ pub enum BlueprintPinType {
     Vector,
     HashSet,
     HashMap,
+    Object,
     UiElementRef,
     PageRef,
     ApiRef,
     Void,
+}
+
+impl BlueprintPinType {
+    pub fn is_numeric(self) -> bool {
+        matches!(self, Self::Int | Self::Float)
+    }
+
+    pub fn default_numeric_width(self) -> Option<BlueprintNumericWidth> {
+        self.is_numeric()
+            .then_some(BlueprintNumericPolicy::default().default_width)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BlueprintNumericWidth {
+    Bits16,
+    Bits32,
+    Bits64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BlueprintNumericPromotion {
+    PromoteOnOverflow,
+    Fixed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlueprintNumericPolicy {
+    pub default_width: BlueprintNumericWidth,
+    pub promotion: BlueprintNumericPromotion,
+}
+
+impl Default for BlueprintNumericPolicy {
+    fn default() -> Self {
+        Self {
+            default_width: BlueprintNumericWidth::Bits16,
+            promotion: BlueprintNumericPromotion::PromoteOnOverflow,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
