@@ -51,14 +51,24 @@ export struct SelectionInfo {
     is-outline-expanded: bool,
     bounds: CanvasBounds,
     rotation: float,
+    flip-horizontal: bool,
+    flip-vertical: bool,
     text-content: string,
     placeholder: string,
     checked: bool,
     container-mode: string,
     allow-absolute-children: bool,
     layout-padding: float,
+    layout-padding-left: float,
+    layout-padding-right: float,
+    layout-padding-top: float,
+    layout-padding-bottom: float,
     layout-spacing: float,
     layout-margin: float,
+    layout-margin-left: float,
+    layout-margin-right: float,
+    layout-margin-top: float,
+    layout-margin-bottom: float,
     layout-order: float,
     stack-alignment: string,
     flex-direction: string,
@@ -125,6 +135,19 @@ export struct EditorDocumentInfo {
     linked-page-index: int,
     is-active: bool,
     is-dirty: bool,
+}
+
+export struct BlueprintVariableInfo {
+    variable-id: string,
+    name: string,
+    type-name: string,
+    color: color,
+}
+
+export struct BlueprintFunctionInfo {
+    function-id: string,
+    name: string,
+    return-type: string,
 }
 
 export enum CanvasCursor {

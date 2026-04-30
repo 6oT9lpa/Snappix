@@ -1589,6 +1589,8 @@ export component Canvas inherits Rectangle {
                 : is-selected ? Themes.current.active-color
                 : element.border-color;
             transform-rotation: display-rotation * 1deg;
+            transform-scale-x: element.flip-horizontal ? -1 : 1;
+            transform-scale-y: element.flip-vertical ? -1 : 1;
 
             background: element.background;
 

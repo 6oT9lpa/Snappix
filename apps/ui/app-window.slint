@@ -8,7 +8,7 @@ import { VisualEditorScene } from "./views/VisualEditorScene.slint";
 import { ProjectSelectedScene, RecentProjectData } from "./views/ProjectSelectedScene.slint";
 import { NewProjectDialog } from "./dialogs/NewProjectDialog.slint";
 import { NewPageDialog } from "./editor/PageTabs.slint";
-import { SelectionInfo, CanvasBounds, CanvasCommentInfo, EditorDocumentInfo, ProjectPageInfo, HotkeyBinding, TimelineEntry, AppErrorNotification } from "./models/EditorModels.slint";
+import { SelectionInfo, CanvasBounds, CanvasCommentInfo, EditorDocumentInfo, ProjectPageInfo, BlueprintVariableInfo, BlueprintFunctionInfo, HotkeyBinding, TimelineEntry, AppErrorNotification } from "./models/EditorModels.slint";
 export { StringSearch } from "./utils/StringSearch.slint";
 
 component Separator inherits Rectangle {
@@ -152,6 +152,8 @@ export component AppWindow inherits Window {
     in-out property <string> project-path: "";
     in-out property <[EditorDocumentInfo]> editor-documents: [];
     in-out property <int> active-document-index: 0;
+    in-out property <[BlueprintVariableInfo]> blueprint-variable-items: [];
+    in-out property <[BlueprintFunctionInfo]> blueprint-function-items: [];
     in-out property <[ProjectPageInfo]> project-page-items: [];
     in-out property <int> active-page-index: 0;
     in-out property <float> zoom-level: 1.0;
@@ -175,8 +177,16 @@ export component AppWindow inherits Window {
     in-out property <string> selected-element-container-mode: "absolute";
     in-out property <bool> selected-element-allow-absolute-children: false;
     in-out property <float> selected-element-layout-padding: 8;
+    in-out property <float> selected-element-layout-padding-left: 8;
+    in-out property <float> selected-element-layout-padding-right: 8;
+    in-out property <float> selected-element-layout-padding-top: 8;
+    in-out property <float> selected-element-layout-padding-bottom: 8;
     in-out property <float> selected-element-layout-spacing: 8;
     in-out property <float> selected-element-layout-margin: 0;
+    in-out property <float> selected-element-layout-margin-left: 0;
+    in-out property <float> selected-element-layout-margin-right: 0;
+    in-out property <float> selected-element-layout-margin-top: 0;
+    in-out property <float> selected-element-layout-margin-bottom: 0;
     in-out property <float> selected-element-layout-order: 0;
     in-out property <string> selected-element-stack-alignment: "stretch";
     in-out property <string> selected-element-flex-direction: "column";
@@ -263,7 +273,7 @@ export component AppWindow inherits Window {
     callback finish-element-transform-internal(string, bool, float, float, float, float, float);
     callback update-element-text-internal(string, string);
     callback update-element-style-internal(string, string, string, float, float, float, string, string, string, string, string, string, bool, bool, string, string, string, string, float, bool);
-    callback update-element-container-settings-internal(string, string, bool, float, float, float, float, string, string, string, string, string, string, string, string, string, string, string, string);
+    callback update-element-container-settings-internal(string, string, bool, float, float, float, float, float, float, float, float, float, float, float, float, string, string, string, string, string, string, string, string, string, string, string, string);
     callback toggle-outline-node-internal(string);
     callback reparent-element-internal(string, string);
     callback rename-element-internal(string, string);
@@ -287,6 +297,11 @@ export component AppWindow inherits Window {
     callback open-page-blueprint-internal(int);
     callback open-server-blueprint-internal();
     callback open-selected-element-blueprint-internal(string);
+    callback add-blueprint-variable-internal();
+    callback add-blueprint-function-internal();
+    callback add-blueprint-variable-node-internal(string, string, float, float);
+    callback rename-blueprint-variable-internal(string, string);
+    callback set-blueprint-variable-type-internal(string, string);
     callback rename-project-page-internal(int, string);
     callback delete-element-internal(string);
     callback delete-project-page-internal(int);
@@ -539,6 +554,8 @@ export component AppWindow inherits Window {
         project-name: root.project-name;
         editor-documents: root.editor-documents;
         active-document-index: root.active-document-index;
+        blueprint-variable-items: root.blueprint-variable-items;
+        blueprint-function-items: root.blueprint-function-items;
         project-page-items: root.project-page-items;
         active-page-index: root.active-page-index;
         reset-view-hotkey: root.reset-view-hotkey;
@@ -565,6 +582,26 @@ export component AppWindow inherits Window {
 
         open-server-blueprint => {
             root.open-server-blueprint-internal();
+        }
+
+        add-blueprint-variable => {
+            root.add-blueprint-variable-internal();
+        }
+
+        add-blueprint-function => {
+            root.add-blueprint-function-internal();
+        }
+
+        add-blueprint-variable-node(variable-id, access-kind, x, y) => {
+            root.add-blueprint-variable-node-internal(variable-id, access-kind, x, y);
+        }
+
+        rename-blueprint-variable(variable-id, name) => {
+            root.rename-blueprint-variable-internal(variable-id, name);
+        }
+
+        set-blueprint-variable-type(variable-id, type-name) => {
+            root.set-blueprint-variable-type-internal(variable-id, type-name);
         }
     }
 
@@ -604,8 +641,16 @@ export component AppWindow inherits Window {
             selected-element-container-mode: root.selected-element-container-mode;
             selected-element-allow-absolute-children: root.selected-element-allow-absolute-children;
             selected-element-layout-padding: root.selected-element-layout-padding;
+            selected-element-layout-padding-left: root.selected-element-layout-padding-left;
+            selected-element-layout-padding-right: root.selected-element-layout-padding-right;
+            selected-element-layout-padding-top: root.selected-element-layout-padding-top;
+            selected-element-layout-padding-bottom: root.selected-element-layout-padding-bottom;
             selected-element-layout-spacing: root.selected-element-layout-spacing;
             selected-element-layout-margin: root.selected-element-layout-margin;
+            selected-element-layout-margin-left: root.selected-element-layout-margin-left;
+            selected-element-layout-margin-right: root.selected-element-layout-margin-right;
+            selected-element-layout-margin-top: root.selected-element-layout-margin-top;
+            selected-element-layout-margin-bottom: root.selected-element-layout-margin-bottom;
             selected-element-layout-order: root.selected-element-layout-order;
             selected-element-stack-alignment: root.selected-element-stack-alignment;
             selected-element-flex-direction: root.selected-element-flex-direction;
@@ -746,14 +791,22 @@ export component AppWindow inherits Window {
                     checkbox_space_between
                 );
             }
-            element-container-settings-updated(element-id, container_mode, allow_absolute_children, layout_padding, layout_spacing, layout_margin, layout_order, stack_alignment, flex_direction, flex_wrap, justify_items, justify_content, align_items, align_content, place_items, flex_flow, grid_template_columns, grid_template_rows, grid_template_areas) => {
+            element-container-settings-updated(element-id, container_mode, allow_absolute_children, layout_padding, layout_padding_left, layout_padding_right, layout_padding_top, layout_padding_bottom, layout_spacing, layout_margin, layout_margin_left, layout_margin_right, layout_margin_top, layout_margin_bottom, layout_order, stack_alignment, flex_direction, flex_wrap, justify_items, justify_content, align_items, align_content, place_items, flex_flow, grid_template_columns, grid_template_rows, grid_template_areas) => {
                 root.update-element-container-settings-internal(
                     element-id,
                     container_mode,
                     allow_absolute_children,
                     layout_padding,
+                    layout_padding_left,
+                    layout_padding_right,
+                    layout_padding_top,
+                    layout_padding_bottom,
                     layout_spacing,
                     layout_margin,
+                    layout_margin_left,
+                    layout_margin_right,
+                    layout_margin_top,
+                    layout_margin_bottom,
                     layout_order,
                     stack_alignment,
                     flex_direction,

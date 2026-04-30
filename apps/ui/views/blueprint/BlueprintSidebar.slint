@@ -2,15 +2,141 @@ import { HorizontalBox, VerticalBox } from "std-widgets.slint";
 import { I18n } from "../../components/I18n.slint";
 import { Themes, Separator-H } from "../../components/Themes.slint";
 import { Tooltip } from "../../components/Tooltip.slint";
-import { ProjectPageInfo } from "../../models/EditorModels.slint";
+import { BlueprintFunctionInfo, BlueprintVariableInfo, ProjectPageInfo } from "../../models/EditorModels.slint";
+import { StringSearch } from "../../utils/StringSearch.slint";
+
+component SidebarSectionHeader inherits Rectangle {
+    in property <string> title: "";
+    in property <bool> expanded: true;
+    callback add-clicked();
+    callback toggle-clicked();
+
+    height: 28px;
+    background: transparent;
+
+    HorizontalBox {
+        spacing: 6px;
+
+        Rectangle {
+            width: 22px;
+            height: 22px;
+            border-radius: 4px;
+            background: add-touch.has-hover ? Themes.current.hover-color : Themes.current.primary-bg;
+
+            add-touch := TouchArea {
+                mouse-cursor: MouseCursor.pointer;
+                clicked => { root.add-clicked(); }
+            }
+
+            Text {
+                text: "+";
+                color: Themes.current.primary-text;
+                font-size: 15px;
+                font-weight: 700;
+                horizontal-alignment: TextHorizontalAlignment.center;
+                vertical-alignment: TextVerticalAlignment.center;
+            }
+        }
+
+        Rectangle {
+            width: 18px;
+            height: 22px;
+            background: toggle-touch.has-hover ? Themes.current.hover-color : transparent;
+            border-radius: 4px;
+
+            toggle-touch := TouchArea {
+                mouse-cursor: MouseCursor.pointer;
+                clicked => { root.toggle-clicked(); }
+            }
+
+            Text {
+                text: root.expanded ? "v" : ">";
+                color: Themes.current.secondary-text;
+                font-size: 11px;
+                font-weight: 700;
+                horizontal-alignment: TextHorizontalAlignment.center;
+                vertical-alignment: TextVerticalAlignment.center;
+            }
+        }
+
+        Text {
+            text: root.title;
+            font-size: 12px;
+            color: Themes.current.secondary-text;
+            font-weight: 700;
+            vertical-alignment: TextVerticalAlignment.center;
+            horizontal-stretch: 1;
+        }
+    }
+}
+
+component MenuActionRow inherits Rectangle {
+    in property <string> label: "";
+    callback selected();
+
+    height: 28px;
+    border-radius: 4px;
+    background: touch.has-hover ? Themes.current.hover-color : transparent;
+
+    touch := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.selected(); }
+    }
+
+    Text {
+        x: 8px;
+        width: parent.width - 16px;
+        height: parent.height;
+        text: root.label;
+        color: Themes.current.primary-text;
+        font-size: 12px;
+        vertical-alignment: TextVerticalAlignment.center;
+    }
+}
 
 export component BlueprintSidebar inherits Rectangle {
     in property <string> project-name: "";
     in property <[ProjectPageInfo]> project-page-items: [];
+    in property <[BlueprintVariableInfo]> blueprint-variable-items: [];
+    in property <[BlueprintFunctionInfo]> blueprint-function-items: [];
 
     callback open-project-page(int);
     callback open-page-blueprint(int);
     callback open-server-blueprint();
+    callback add-blueprint-variable();
+    callback add-blueprint-function();
+    callback add-blueprint-variable-node(string, string);
+    callback rename-blueprint-variable(string, string);
+    callback set-blueprint-variable-type(string, string);
+
+    property <string> search-query: "";
+    property <bool> structs-open: true;
+    property <bool> functions-open: true;
+    property <bool> macros-open: true;
+    property <bool> variables-open: true;
+    property <string> variable-context-id: "";
+    property <string> variable-type-menu-id: "";
+    property <string> editing-variable-id: "";
+    property <string> editing-variable-name: "";
+
+    function close-floating-menus() {
+        root.variable-context-id = "";
+        root.variable-type-menu-id = "";
+    }
+
+    function begin-variable-rename(variable-id: string, name: string) {
+        root.close-floating-menus();
+        root.editing-variable-id = variable-id;
+        root.editing-variable-name = name;
+    }
+
+    function commit-variable-rename() {
+        if root.editing-variable-id != "" {
+            root.rename-blueprint-variable(root.editing-variable-id, root.editing-variable-name);
+            root.editing-variable-id = "";
+            root.editing-variable-name = "";
+        }
+    }
 
     width: 280px;
     background: Themes.current.secondary-bg;
@@ -25,6 +151,14 @@ export component BlueprintSidebar inherits Rectangle {
             font-weight: 700;
             color: Themes.current.primary-text;
             font-family: Themes.font-family-display;
+        }
+
+        TextInput {
+            height: 32px;
+            text <=> root.search-query;
+            color: Themes.current.primary-text;
+            selection-background-color: Themes.current.active-color;
+            font-size: 12px;
         }
 
         Rectangle {
@@ -57,94 +191,331 @@ export component BlueprintSidebar inherits Rectangle {
 
         Separator-H {}
 
-        Text {
-            text: I18n.t("Pages");
-            font-size: 12px;
-            color: Themes.current.secondary-text;
-            font-weight: 600;
-        }
+        Flickable {
+            horizontal-stretch: 1;
+            vertical-stretch: 1;
+            viewport-width: self.width;
+            viewport-height: sidebar-content.preferred-height;
 
-        for page in root.project-page-items: Rectangle {
-            height: 68px;
-            border-radius: 6px;
-            background: page.is-active ? Themes.current.hover-color : transparent;
+            sidebar-content := VerticalBox {
+                padding: 0;
+                spacing: 8px;
 
-            VerticalBox {
-                padding: 8px;
-                spacing: 6px;
-
-                Text {
-                    text: page.page-name;
-                    font-size: 13px;
-                    color: Themes.current.primary-text;
-                    font-weight: page.is-active ? 700 : 500;
+                SidebarSectionHeader {
+                    title: "Struct/Enum";
+                    expanded: root.structs-open;
+                    add-clicked => { root.structs-open = true; }
+                    toggle-clicked => { root.structs-open = !root.structs-open; }
                 }
 
-                HorizontalBox {
-                    spacing: 6px;
+                if root.structs-open: Text {
+                    height: root.search-query == "" ? 24px : 0px;
+                    text: "No structs yet";
+                    color: Themes.current.secondary-text;
+                    font-size: 11px;
+                    vertical-alignment: TextVerticalAlignment.center;
+                }
 
-                    Rectangle {
-                        height: 24px;
-                        horizontal-stretch: 1;
+                SidebarSectionHeader {
+                    title: "Function";
+                    expanded: root.functions-open;
+                    add-clicked => { root.add-blueprint-function(); }
+                    toggle-clicked => { root.functions-open = !root.functions-open; }
+                }
+
+                if root.functions-open: VerticalBox {
+                    spacing: 4px;
+
+                    for fn-item in root.blueprint-function-items: Rectangle {
+                        visible: root.search-query == "" || StringSearch.contains(fn-item.name, root.search-query) || StringSearch.contains(fn-item.return-type, root.search-query);
+                        height: self.visible ? 28px : 0px;
                         border-radius: 4px;
-                        background: ui-touch.has-hover ? Themes.current.hover-color : Themes.current.primary-bg;
-
-                        ui-touch := TouchArea {
-                            mouse-cursor: MouseCursor.pointer;
-                            clicked => { root.open-project-page(page.page-index); }
-                        }
+                        background: Themes.current.primary-bg;
 
                         Text {
-                            text: I18n.t("Open UI");
+                            x: 8px;
+                            width: parent.width - 16px;
+                            height: parent.height;
+                            text: fn-item.name + " -> " + fn-item.return-type;
                             color: Themes.current.primary-text;
-                            font-size: 11px;
-                            horizontal-alignment: TextHorizontalAlignment.center;
+                            font-size: 12px;
                             vertical-alignment: TextVerticalAlignment.center;
-                        }
-
-                        Tooltip {
-                            x: (parent.width - self.width) / 2;
-                            y: parent.height + 6px;
-                            text: "Open page UI document";
-                            placement: "top";
-                            show: ui-touch.has-hover;
+                            overflow: elide;
                         }
                     }
+                }
 
-                    Rectangle {
-                        height: 24px;
-                        horizontal-stretch: 1;
+                SidebarSectionHeader {
+                    title: "Macros";
+                    expanded: root.macros-open;
+                    add-clicked => { root.macros-open = true; }
+                    toggle-clicked => { root.macros-open = !root.macros-open; }
+                }
+
+                if root.macros-open: Text {
+                    height: root.search-query == "" ? 24px : 0px;
+                    text: "No macros yet";
+                    color: Themes.current.secondary-text;
+                    font-size: 11px;
+                    vertical-alignment: TextVerticalAlignment.center;
+                }
+
+                SidebarSectionHeader {
+                    title: "Variables";
+                    expanded: root.variables-open;
+                    add-clicked => { root.add-blueprint-variable(); }
+                    toggle-clicked => { root.variables-open = !root.variables-open; }
+                }
+
+                if root.variables-open: VerticalBox {
+                    spacing: 4px;
+
+                    for variable in root.blueprint-variable-items: Rectangle {
+                        visible: root.search-query == "" || StringSearch.contains(variable.name, root.search-query) || StringSearch.contains(variable.type-name, root.search-query);
+                        height: self.visible ? 30px : 0px;
                         border-radius: 4px;
-                        background: bp-touch.has-hover ? Themes.current.hover-color : Themes.current.primary-bg;
+                        background: variable-row-touch.has-hover ? Themes.current.hover-color : Themes.current.primary-bg;
 
-                        bp-touch := TouchArea {
+                        variable-row-touch := TouchArea {
                             mouse-cursor: MouseCursor.pointer;
-                            clicked => { root.open-page-blueprint(page.page-index); }
+                            clicked => { root.close-floating-menus(); }
+                            double-clicked => { root.begin-variable-rename(variable.variable-id, variable.name); }
+                            pointer-event(ev) => {
+                                if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right {
+                                    root.variable-context-id = variable.variable-id;
+                                    root.variable-type-menu-id = "";
+                                }
+                            }
                         }
+
+                        Rectangle {
+                            x: 0;
+                            y: 4px;
+                            width: 4px;
+                            height: parent.height - 8px;
+                            border-radius: 2px;
+                            background: variable.color;
+                        }
+
+                        if root.editing-variable-id == variable.variable-id: TextInput {
+                            x: 12px;
+                            y: 3px;
+                            width: parent.width - 94px;
+                            height: parent.height - 6px;
+                            text <=> root.editing-variable-name;
+                            color: Themes.current.primary-text;
+                            selection-background-color: Themes.current.active-color;
+                            font-size: 12px;
+                            init => {
+                                self.focus();
+                                self.select-all();
+                            }
+                            accepted => { root.commit-variable-rename(); }
+                            changed has-focus => {
+                                if !self.has-focus {
+                                    root.commit-variable-rename();
+                                }
+                            }
+                        }
+
+                        if root.editing-variable-id != variable.variable-id: Text {
+                            x: 12px;
+                            width: parent.width - 92px;
+                            height: parent.height;
+                            text: variable.name;
+                            color: Themes.current.primary-text;
+                            font-size: 12px;
+                            vertical-alignment: TextVerticalAlignment.center;
+                            overflow: elide;
+                        }
+
+                        Rectangle {
+                            x: parent.width - 78px;
+                            y: 3px;
+                            width: 72px;
+                            height: parent.height - 6px;
+                            border-radius: 4px;
+                            background: type-touch.has-hover || root.variable-type-menu-id == variable.variable-id ? Themes.current.hover-color : transparent;
+
+                            type-touch := TouchArea {
+                                mouse-cursor: MouseCursor.pointer;
+                                clicked => {
+                                    root.variable-context-id = "";
+                                    root.variable-type-menu-id = root.variable-type-menu-id == variable.variable-id ? "" : variable.variable-id;
+                                }
+                            }
+
+                            Text {
+                                width: parent.width - 8px;
+                                x: 4px;
+                                height: parent.height;
+                                text: variable.type-name;
+                                color: Themes.current.secondary-text;
+                                font-size: 11px;
+                                horizontal-alignment: TextHorizontalAlignment.right;
+                                vertical-alignment: TextVerticalAlignment.center;
+                                overflow: elide;
+                            }
+                        }
+
+                        if root.variable-context-id == variable.variable-id: Rectangle {
+                            z: 50;
+                            x: parent.width - 126px;
+                            y: parent.height + 2px;
+                            width: 126px;
+                            height: 64px;
+                            border-radius: 6px;
+                            border-width: 1px;
+                            border-color: Themes.current.divider-color;
+                            background: Themes.current.secondary-bg;
+
+                            VerticalBox {
+                                padding: 4px;
+                                spacing: 2px;
+
+                                MenuActionRow {
+                                    label: "Getter";
+                                    selected => {
+                                        root.variable-context-id = "";
+                                        root.add-blueprint-variable-node(variable.variable-id, "get");
+                                    }
+                                }
+
+                                MenuActionRow {
+                                    label: "Setter";
+                                    selected => {
+                                        root.variable-context-id = "";
+                                        root.add-blueprint-variable-node(variable.variable-id, "set");
+                                    }
+                                }
+                            }
+                        }
+
+                        if root.variable-type-menu-id == variable.variable-id: Rectangle {
+                            z: 50;
+                            x: parent.width - 96px;
+                            y: parent.height + 2px;
+                            width: 96px;
+                            height: 224px;
+                            border-radius: 6px;
+                            border-width: 1px;
+                            border-color: Themes.current.divider-color;
+                            background: Themes.current.secondary-bg;
+
+                            VerticalBox {
+                                padding: 4px;
+                                spacing: 2px;
+
+                                for type-option in [
+                                    { label: "bool" },
+                                    { label: "i64" },
+                                    { label: "f64" },
+                                    { label: "String" },
+                                    { label: "Color" },
+                                    { label: "Array" },
+                                    { label: "Vector" },
+                                    { label: "Set" },
+                                    { label: "HashMap" },
+                                ]: MenuActionRow {
+                                    label: type-option.label;
+                                    selected => {
+                                        root.variable-type-menu-id = "";
+                                        root.set-blueprint-variable-type(variable.variable-id, type-option.label);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Separator-H {}
+
+                Text {
+                    text: I18n.t("Pages");
+                    font-size: 12px;
+                    color: Themes.current.secondary-text;
+                    font-weight: 600;
+                }
+
+                for page in root.project-page-items: Rectangle {
+                    visible: root.search-query == "" || StringSearch.contains(page.page-name, root.search-query);
+                    height: self.visible ? 68px : 0px;
+                    border-radius: 6px;
+                    background: page.is-active ? Themes.current.hover-color : transparent;
+
+                    VerticalBox {
+                        padding: 8px;
+                        spacing: 6px;
 
                         Text {
-                            text: I18n.t("Open .blp");
+                            text: page.page-name;
+                            font-size: 13px;
                             color: Themes.current.primary-text;
-                            font-size: 11px;
-                            horizontal-alignment: TextHorizontalAlignment.center;
-                            vertical-alignment: TextVerticalAlignment.center;
+                            font-weight: page.is-active ? 700 : 500;
                         }
 
-                        Tooltip {
-                            x: (parent.width - self.width) / 2;
-                            y: parent.height + 6px;
-                            text: "Open page blueprint";
-                            placement: "top";
-                            show: bp-touch.has-hover;
+                        HorizontalBox {
+                            spacing: 6px;
+
+                            Rectangle {
+                                height: 24px;
+                                horizontal-stretch: 1;
+                                border-radius: 4px;
+                                background: ui-touch.has-hover ? Themes.current.hover-color : Themes.current.primary-bg;
+
+                                ui-touch := TouchArea {
+                                    mouse-cursor: MouseCursor.pointer;
+                                    clicked => { root.open-project-page(page.page-index); }
+                                }
+
+                                Text {
+                                    text: I18n.t("Open UI");
+                                    color: Themes.current.primary-text;
+                                    font-size: 11px;
+                                    horizontal-alignment: TextHorizontalAlignment.center;
+                                    vertical-alignment: TextVerticalAlignment.center;
+                                }
+
+                                Tooltip {
+                                    x: (parent.width - self.width) / 2;
+                                    y: parent.height + 6px;
+                                    text: "Open page UI document";
+                                    placement: "top";
+                                    show: ui-touch.has-hover;
+                                }
+                            }
+
+                            Rectangle {
+                                height: 24px;
+                                horizontal-stretch: 1;
+                                border-radius: 4px;
+                                background: bp-touch.has-hover ? Themes.current.hover-color : Themes.current.primary-bg;
+
+                                bp-touch := TouchArea {
+                                    mouse-cursor: MouseCursor.pointer;
+                                    clicked => { root.open-page-blueprint(page.page-index); }
+                                }
+
+                                Text {
+                                    text: I18n.t("Open .blp");
+                                    color: Themes.current.primary-text;
+                                    font-size: 11px;
+                                    horizontal-alignment: TextHorizontalAlignment.center;
+                                    vertical-alignment: TextVerticalAlignment.center;
+                                }
+
+                                Tooltip {
+                                    x: (parent.width - self.width) / 2;
+                                    y: parent.height + 6px;
+                                    text: "Open page blueprint";
+                                    placement: "top";
+                                    show: bp-touch.has-hover;
+                                }
+                            }
                         }
                     }
                 }
             }
-        }
-
-        Rectangle {
-            vertical-stretch: 1;
-            background: transparent;
         }
     }
 }

@@ -54,8 +54,16 @@ export component VisualEditorScene inherits Rectangle {
     in-out property <string> selected-element-container-mode: "absolute";
     in-out property <bool> selected-element-allow-absolute-children: false;
     in-out property <float> selected-element-layout-padding: 8;
+    in-out property <float> selected-element-layout-padding-left: 8;
+    in-out property <float> selected-element-layout-padding-right: 8;
+    in-out property <float> selected-element-layout-padding-top: 8;
+    in-out property <float> selected-element-layout-padding-bottom: 8;
     in-out property <float> selected-element-layout-spacing: 8;
     in-out property <float> selected-element-layout-margin: 0;
+    in-out property <float> selected-element-layout-margin-left: 0;
+    in-out property <float> selected-element-layout-margin-right: 0;
+    in-out property <float> selected-element-layout-margin-top: 0;
+    in-out property <float> selected-element-layout-margin-bottom: 0;
     in-out property <float> selected-element-layout-order: 0;
     in-out property <string> selected-element-stack-alignment: "stretch";
     in-out property <string> selected-element-flex-direction: "column";
@@ -148,7 +156,7 @@ export component VisualEditorScene inherits Rectangle {
     callback transform-finished(string, bool, float, float, float, float, float);
     callback element-text-edited(string, string);
     callback element-style-updated(string, string, string, float, float, float, string, string, string, string, string, string, bool, bool, string, string, string, string, float, bool);
-    callback element-container-settings-updated(string, string, bool, float, float, float, float, string, string, string, string, string, string, string, string, string, string, string, string);
+    callback element-container-settings-updated(string, string, bool, float, float, float, float, float, float, float, float, float, float, float, float, string, string, string, string, string, string, string, string, string, string, string, string);
     callback browse-image-source-requested(string);
     callback element-settings-requested(string);
     callback toggle-outline-node(string);
@@ -186,9 +194,15 @@ export component VisualEditorScene inherits Rectangle {
     callback clear-comment-image-requested(string);
 
     function normalize-control-hotkey(text: string) -> string {
-        // Keep legacy fix for Ctrl+G only. Mapping all control chars causes false
-        // positives on modifier-only presses (for example Ctrl alone -> Ctrl+Q).
-        text == "\u{7}" ? "g" : text;
+        text == "\u{1}" ? "a"
+            : text == "\u{3}" ? "c"
+            : text == "\u{7}" ? "g"
+            : text == "\u{d}" ? "m"
+            : text == "\u{12}" ? "r"
+            : text == "\u{16}" ? "v"
+            : text == "\u{18}" ? "x"
+            : text == "\u{1a}" ? "z"
+            : text;
     }
 
     function normalize-layout-hotkey(text: string) -> string {
@@ -695,8 +709,16 @@ export component VisualEditorScene inherits Rectangle {
             selected-element-container-mode: root.selected-element-container-mode;
             selected-element-allow-absolute-children: root.selected-element-allow-absolute-children;
             selected-element-layout-padding: root.selected-element-layout-padding;
+            selected-element-layout-padding-left: root.selected-element-layout-padding-left;
+            selected-element-layout-padding-right: root.selected-element-layout-padding-right;
+            selected-element-layout-padding-top: root.selected-element-layout-padding-top;
+            selected-element-layout-padding-bottom: root.selected-element-layout-padding-bottom;
             selected-element-layout-spacing: root.selected-element-layout-spacing;
             selected-element-layout-margin: root.selected-element-layout-margin;
+            selected-element-layout-margin-left: root.selected-element-layout-margin-left;
+            selected-element-layout-margin-right: root.selected-element-layout-margin-right;
+            selected-element-layout-margin-top: root.selected-element-layout-margin-top;
+            selected-element-layout-margin-bottom: root.selected-element-layout-margin-bottom;
             selected-element-layout-order: root.selected-element-layout-order;
             selected-element-stack-alignment: root.selected-element-stack-alignment;
             selected-element-flex-direction: root.selected-element-flex-direction;
@@ -764,14 +786,22 @@ export component VisualEditorScene inherits Rectangle {
                     checkbox_space_between
                 );
             }
-            element-container-settings-updated(id, container_mode, allow_absolute_children, layout_padding, layout_spacing, layout_margin, layout_order, stack_alignment, flex_direction, flex_wrap, justify_items, justify_content, align_items, align_content, place_items, flex_flow, grid_template_columns, grid_template_rows, grid_template_areas) => {
+            element-container-settings-updated(id, container_mode, allow_absolute_children, layout_padding, layout_padding_left, layout_padding_right, layout_padding_top, layout_padding_bottom, layout_spacing, layout_margin, layout_margin_left, layout_margin_right, layout_margin_top, layout_margin_bottom, layout_order, stack_alignment, flex_direction, flex_wrap, justify_items, justify_content, align_items, align_content, place_items, flex_flow, grid_template_columns, grid_template_rows, grid_template_areas) => {
                 root.element-container-settings-updated(
                     id,
                     container_mode,
                     allow_absolute_children,
                     layout_padding,
+                    layout_padding_left,
+                    layout_padding_right,
+                    layout_padding_top,
+                    layout_padding_bottom,
                     layout_spacing,
                     layout_margin,
+                    layout_margin_left,
+                    layout_margin_right,
+                    layout_margin_top,
+                    layout_margin_bottom,
                     layout_order,
                     stack_alignment,
                     flex_direction,

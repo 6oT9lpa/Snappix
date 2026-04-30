@@ -16,6 +16,14 @@ export component BlueprintCanvas inherits Rectangle {
     property <float> min-zoom: 0.2;
     property <float> max-zoom: 4.0;
 
+    function world-x(screen-x: length) -> float {
+        ((screen-x - root.offset-x) / 1px) / root.zoom-level
+    }
+
+    function world-y(screen-y: length) -> float {
+        ((screen-y - root.offset-y) / 1px) / root.zoom-level
+    }
+
     function grid-spacing() -> length {
         root.grid-size * root.zoom-level
     }
@@ -80,6 +88,14 @@ export component BlueprintCanvas inherits Rectangle {
         root.offset-y = root.height / 2;
     }
 
+    public function visible-center-world-x() -> float {
+        root.world-x(root.width / 2)
+    }
+
+    public function visible-center-world-y() -> float {
+        root.world-y(root.height / 2)
+    }
+
     changed width => {
         if !root.view-initialized && root.width > 0px && root.height > 0px {
             root.view-initialized = true;
@@ -120,6 +136,7 @@ export component BlueprintCanvas inherits Rectangle {
     }
 
     TouchArea {
+        z: 1;
         width: parent.width;
         height: parent.height;
         mouse-cursor: root.is-panning ? MouseCursor.grabbing : MouseCursor.grab;

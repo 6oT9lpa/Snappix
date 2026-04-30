@@ -339,6 +339,54 @@ component BrowseStringField inherits Rectangle {
     }
 }
 
+component SummaryField inherits Rectangle {
+    in property <string> label: "";
+    in property <string> value: "";
+
+    height: 28px;
+    horizontal-stretch: 1;
+    background: Themes.current.primary-bg;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: Themes.current.border-color;
+
+    HorizontalBox {
+        padding: 0;
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 6px;
+
+        Rectangle {
+            width: 106px;
+            height: parent.height;
+            background: transparent;
+
+            Text {
+                height: 20px;
+                horizontal-alignment: TextHorizontalAlignment.left;
+                text: root.label == "" ? I18n.t("Value") : root.label;
+                font-size: 12px;
+                color: Themes.current.secondary-text;
+                font-weight: 600;
+                vertical-alignment: TextVerticalAlignment.center;
+                width: parent.width;
+                overflow: elide;
+            }
+        }
+
+        Text {
+            horizontal-stretch: 1;
+            height: parent.height;
+            text: root.value;
+            font-size: 12px;
+            color: Themes.current.primary-text;
+            horizontal-alignment: TextHorizontalAlignment.right;
+            vertical-alignment: TextVerticalAlignment.center;
+            overflow: elide;
+        }
+    }
+}
+
 component ColorField inherits Rectangle {
     in property <string> label: "";
     in-out property <string> value: "";
@@ -618,8 +666,16 @@ export component PropertiesPanel inherits Rectangle {
     in property <string> element-container-mode: "absolute";
     in property <bool> element-allow-absolute-children: false;
     in property <float> element-layout-padding: 8;
+    in property <float> element-layout-padding-left: 8;
+    in property <float> element-layout-padding-right: 8;
+    in property <float> element-layout-padding-top: 8;
+    in property <float> element-layout-padding-bottom: 8;
     in property <float> element-layout-spacing: 8;
     in property <float> element-layout-margin: 0;
+    in property <float> element-layout-margin-left: 0;
+    in property <float> element-layout-margin-right: 0;
+    in property <float> element-layout-margin-top: 0;
+    in property <float> element-layout-margin-bottom: 0;
     in property <float> element-layout-order: 0;
     in property <string> element-stack-alignment: "stretch";
     in property <string> element-flex-direction: "column";
@@ -656,7 +712,7 @@ export component PropertiesPanel inherits Rectangle {
     callback bounds-changed(CanvasBounds, float);
     callback text-changed(string);
     callback style-changed(string, string, float, float, float, string, string, string, string, string, string, bool, bool, string, string, string, string, float, bool);
-    callback container-settings-changed(string, bool, float, float, float, float, string, string, string, string, string, string, string, string, string, string, string, string);
+    callback container-settings-changed(string, bool, float, float, float, float, float, float, float, float, float, float, float, float, string, string, string, string, string, string, string, string, string, string, string, string);
     callback browse-image-source-requested();
 
     property <CanvasBounds> editing-bounds: element-bounds;
@@ -666,8 +722,16 @@ export component PropertiesPanel inherits Rectangle {
     property <string> editing-container-mode: element-container-mode;
     property <bool> editing-allow-absolute-children: element-allow-absolute-children;
     property <float> editing-layout-padding: element-layout-padding;
+    property <float> editing-layout-padding-left: element-layout-padding-left;
+    property <float> editing-layout-padding-right: element-layout-padding-right;
+    property <float> editing-layout-padding-top: element-layout-padding-top;
+    property <float> editing-layout-padding-bottom: element-layout-padding-bottom;
     property <float> editing-layout-spacing: element-layout-spacing;
     property <float> editing-layout-margin: element-layout-margin;
+    property <float> editing-layout-margin-left: element-layout-margin-left;
+    property <float> editing-layout-margin-right: element-layout-margin-right;
+    property <float> editing-layout-margin-top: element-layout-margin-top;
+    property <float> editing-layout-margin-bottom: element-layout-margin-bottom;
     property <float> editing-layout-order: element-layout-order;
     property <string> editing-stack-alignment: element-stack-alignment;
     property <string> editing-flex-direction: element-flex-direction;
@@ -916,8 +980,16 @@ export component PropertiesPanel inherits Rectangle {
             editing-container-mode,
             editing-allow-absolute-children,
             editing-layout-padding,
+            editing-layout-padding-left,
+            editing-layout-padding-right,
+            editing-layout-padding-top,
+            editing-layout-padding-bottom,
             editing-layout-spacing,
             editing-layout-margin,
+            editing-layout-margin-left,
+            editing-layout-margin-right,
+            editing-layout-margin-top,
+            editing-layout-margin-bottom,
             editing-layout-order,
             editing-stack-alignment,
             editing-flex-direction,
@@ -1035,8 +1107,16 @@ export component PropertiesPanel inherits Rectangle {
     changed element-container-mode => { editing-container-mode = element-container-mode; }
     changed element-allow-absolute-children => { editing-allow-absolute-children = element-allow-absolute-children; }
     changed element-layout-padding => { editing-layout-padding = element-layout-padding; }
+    changed element-layout-padding-left => { editing-layout-padding-left = element-layout-padding-left; }
+    changed element-layout-padding-right => { editing-layout-padding-right = element-layout-padding-right; }
+    changed element-layout-padding-top => { editing-layout-padding-top = element-layout-padding-top; }
+    changed element-layout-padding-bottom => { editing-layout-padding-bottom = element-layout-padding-bottom; }
     changed element-layout-spacing => { editing-layout-spacing = element-layout-spacing; }
     changed element-layout-margin => { editing-layout-margin = element-layout-margin; }
+    changed element-layout-margin-left => { editing-layout-margin-left = element-layout-margin-left; }
+    changed element-layout-margin-right => { editing-layout-margin-right = element-layout-margin-right; }
+    changed element-layout-margin-top => { editing-layout-margin-top = element-layout-margin-top; }
+    changed element-layout-margin-bottom => { editing-layout-margin-bottom = element-layout-margin-bottom; }
     changed element-layout-order => { editing-layout-order = element-layout-order; }
     changed element-stack-alignment => { editing-stack-alignment = element-stack-alignment; }
     changed element-flex-direction => { editing-flex-direction = element-flex-direction; }
@@ -1232,13 +1312,62 @@ export component PropertiesPanel inherits Rectangle {
             }
         }
 
-        if root.supports-container-layout-controls: NumberAdjust {
+        if root.supports-container-layout-controls: SummaryField {
             label: "Padding";
-            value: editing-layout-padding;
+            value:
+                (round(editing-layout-padding-top * 100) / 100) + "px "
+                + (round(editing-layout-padding-right * 100) / 100) + "px "
+                + (round(editing-layout-padding-bottom * 100) / 100) + "px "
+                + (round(editing-layout-padding-left * 100) / 100) + "px";
+        }
+
+        if root.supports-container-layout-controls: NumberAdjust {
+            label: "Padding Left";
+            value: editing-layout-padding-left;
             min: 0;
             max: 400;
             step: 1;
             value-changed(v) => {
+                editing-layout-padding-left = v;
+                editing-layout-padding = v;
+                root.emit-container-settings-change();
+            }
+        }
+
+        if root.supports-container-layout-controls: NumberAdjust {
+            label: "Padding Right";
+            value: editing-layout-padding-right;
+            min: 0;
+            max: 400;
+            step: 1;
+            value-changed(v) => {
+                editing-layout-padding-right = v;
+                editing-layout-padding = v;
+                root.emit-container-settings-change();
+            }
+        }
+
+        if root.supports-container-layout-controls: NumberAdjust {
+            label: "Padding Top";
+            value: editing-layout-padding-top;
+            min: 0;
+            max: 400;
+            step: 1;
+            value-changed(v) => {
+                editing-layout-padding-top = v;
+                editing-layout-padding = v;
+                root.emit-container-settings-change();
+            }
+        }
+
+        if root.supports-container-layout-controls: NumberAdjust {
+            label: "Padding Bottom";
+            value: editing-layout-padding-bottom;
+            min: 0;
+            max: 400;
+            step: 1;
+            value-changed(v) => {
+                editing-layout-padding-bottom = v;
                 editing-layout-padding = v;
                 root.emit-container-settings-change();
             }
@@ -1256,13 +1385,62 @@ export component PropertiesPanel inherits Rectangle {
             }
         }
 
-        if selected-element-id != "": NumberAdjust {
+        if selected-element-id != "": SummaryField {
             label: "Margin";
-            value: editing-layout-margin;
+            value:
+                (round(editing-layout-margin-top * 100) / 100) + "px "
+                + (round(editing-layout-margin-right * 100) / 100) + "px "
+                + (round(editing-layout-margin-bottom * 100) / 100) + "px "
+                + (round(editing-layout-margin-left * 100) / 100) + "px";
+        }
+
+        if selected-element-id != "": NumberAdjust {
+            label: "Margin Left";
+            value: editing-layout-margin-left;
             min: 0;
             max: 400;
             step: 1;
             value-changed(v) => {
+                editing-layout-margin-left = v;
+                editing-layout-margin = v;
+                root.emit-container-settings-change();
+            }
+        }
+
+        if selected-element-id != "": NumberAdjust {
+            label: "Margin Right";
+            value: editing-layout-margin-right;
+            min: 0;
+            max: 400;
+            step: 1;
+            value-changed(v) => {
+                editing-layout-margin-right = v;
+                editing-layout-margin = v;
+                root.emit-container-settings-change();
+            }
+        }
+
+        if selected-element-id != "": NumberAdjust {
+            label: "Margin Top";
+            value: editing-layout-margin-top;
+            min: 0;
+            max: 400;
+            step: 1;
+            value-changed(v) => {
+                editing-layout-margin-top = v;
+                editing-layout-margin = v;
+                root.emit-container-settings-change();
+            }
+        }
+
+        if selected-element-id != "": NumberAdjust {
+            label: "Margin Bottom";
+            value: editing-layout-margin-bottom;
+            min: 0;
+            max: 400;
+            step: 1;
+            value-changed(v) => {
+                editing-layout-margin-bottom = v;
                 editing-layout-margin = v;
                 root.emit-container-settings-change();
             }

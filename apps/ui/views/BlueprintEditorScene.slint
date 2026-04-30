@@ -3,7 +3,7 @@ import { Themes, Separator-H, Separator-V } from "../components/Themes.slint";
 import { PageTabsBar } from "../editor/PageTabs.slint";
 import { BlueprintCanvas } from "../editor/BlueprintCanvas.slint";
 import { BlueprintSidebar } from "./blueprint/BlueprintSidebar.slint";
-import { EditorDocumentInfo, HotkeyBinding, ProjectPageInfo } from "../models/EditorModels.slint";
+import { BlueprintFunctionInfo, BlueprintVariableInfo, EditorDocumentInfo, HotkeyBinding, ProjectPageInfo } from "../models/EditorModels.slint";
 
 export component BlueprintEditorScene inherits Rectangle {
     background: Themes.current.primary-bg;
@@ -12,6 +12,8 @@ export component BlueprintEditorScene inherits Rectangle {
     in-out property <string> project-name: "";
     in-out property <[EditorDocumentInfo]> editor-documents: [];
     in-out property <int> active-document-index: 0;
+    in-out property <[BlueprintVariableInfo]> blueprint-variable-items: [];
+    in-out property <[BlueprintFunctionInfo]> blueprint-function-items: [];
     in-out property <[ProjectPageInfo]> project-page-items: [];
     in-out property <int> active-page-index: 0;
     in-out property <HotkeyBinding> reset-view-hotkey: { key: "0", ctrl: true, shift: false, alt: false };
@@ -26,6 +28,11 @@ export component BlueprintEditorScene inherits Rectangle {
     callback open-project-page(int);
     callback open-page-blueprint(int);
     callback open-server-blueprint();
+    callback add-blueprint-variable();
+    callback add-blueprint-function();
+    callback add-blueprint-variable-node(string, string, float, float);
+    callback rename-blueprint-variable(string, string);
+    callback set-blueprint-variable-type(string, string);
 
     function matches-hotkey-binding(
         text: string,
@@ -83,9 +90,27 @@ export component BlueprintEditorScene inherits Rectangle {
             BlueprintSidebar {
                 project-name: root.project-name;
                 project-page-items: root.project-page-items;
+                blueprint-variable-items: root.blueprint-variable-items;
+                blueprint-function-items: root.blueprint-function-items;
                 open-project-page(page-index) => { root.open-project-page(page-index); }
                 open-page-blueprint(page-index) => { root.open-page-blueprint(page-index); }
                 open-server-blueprint => { root.open-server-blueprint(); }
+                add-blueprint-variable => { root.add-blueprint-variable(); }
+                add-blueprint-function => { root.add-blueprint-function(); }
+                add-blueprint-variable-node(variable-id, access-kind) => {
+                    root.add-blueprint-variable-node(
+                        variable-id,
+                        access-kind,
+                        blueprint-canvas.visible-center-world-x(),
+                        blueprint-canvas.visible-center-world-y()
+                    );
+                }
+                rename-blueprint-variable(variable-id, name) => {
+                    root.rename-blueprint-variable(variable-id, name);
+                }
+                set-blueprint-variable-type(variable-id, type-name) => {
+                    root.set-blueprint-variable-type(variable-id, type-name);
+                }
             }
 
             Separator-V {}
