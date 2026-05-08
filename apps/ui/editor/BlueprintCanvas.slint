@@ -1,7 +1,7 @@
 import { HorizontalBox, VerticalBox } from "std-widgets.slint";
 import { Themes, Separator-H } from "../components/Themes.slint";
 import { CanvasZoomControls } from "./CanvasZoomControls.slint";
-import { BlueprintNodeInfo, SelectionInfo } from "../models/EditorModels.slint";
+import { BlueprintLinkInfo, BlueprintNodeInfo, SelectionInfo } from "../models/EditorModels.slint";
 import { StringSearch } from "../utils/StringSearch.slint";
 
 component NodeMenuRow inherits Rectangle {
@@ -102,14 +102,22 @@ component NodeContextAction inherits Rectangle {
 
 component BlueprintNodeCard inherits Rectangle {
     in property <string> node-id: "";
-    in property <string> title: "";
+    in property <string> title: "Getter";
     in property <string> element-type: "";
+    in property <string> descriptor-id: "";
     in property <bool> is-event: false;
     in property <bool> is-bound-event: false;
     in property <bool> has-exec-input: false;
     in property <string> exec-output-1: "";
     in property <string> exec-output-2: "";
     in property <string> exec-output-3: "";
+    in property <bool> exec-output-1-connected: false;
+    in property <bool> exec-output-2-connected: false;
+    in property <bool> exec-output-3-connected: false;
+    in property <string> data-output-name: "value";
+    in property <string> data-output-type: "bool";
+    in property <color> data-output-color: #5ac68b;
+    in property <bool> data-output-connected: false;
     in property <string> data-input-name: "";
     in property <string> data-input-type: "";
     in property <color> data-input-color: #5ac68b;
@@ -132,26 +140,47 @@ component BlueprintNodeCard inherits Rectangle {
 
     callback consume-canvas-left-down();
     callback node-select-requested(string, bool);
-    callback node-menu-requested(string, bool, bool, length, length);
+    callback node-menu-requested(string, string, bool, bool, length, length);
     callback node-drag-started(string, float, float, length, length, bool);
     callback node-drag-updated(length, length);
     callback node-drag-finished();
     callback node-drag-cancelled();
-    callback wire-started(string, float, float, length, length);
-    callback wire-finished();
+    callback wire-started(string, string, int, color, length, length);
+    callback wire-updated(length, length);
+    callback wire-released(length, length);
     callback node-moved-requested(string, float, float);
     callback marquee-hit(string);
 
     property <length> base-node-width: root.is-event ? 250px : 270px;
+    property <bool> is-getter: root.descriptor-id == "variable.get";
     property <length> base-node-height:
-        root.exec-output-3 != "" ? 150px
+        root.is-getter ? 60px
+        : root.exec-output-3 != "" ? 150px
         : root.exec-output-2 != "" ? 126px
         : root.data-input-name != "" ? 118px
         : 94px;
-    property <length> node-width: root.base-node-width * root.zoom-level;
+    property <length> header-height: 34px * root.zoom-level;
+    property <length> exec-label-x: root.width - 108px * root.zoom-level;
+    property <length> exec-pin-x: root.width - 20px * root.zoom-level;
+    property <length> exec-input-y: root.header-height + 18px * root.zoom-level;
+    property <length> exec-row-1-label-y: root.header-height + 10px * root.zoom-level;
+    property <length> exec-row-1-pin-y: root.header-height + 18px * root.zoom-level;
+    property <length> exec-row-2-label-y: root.header-height + 38px * root.zoom-level;
+    property <length> exec-row-2-pin-y: root.header-height + 46px * root.zoom-level;
+    property <length> exec-row-3-label-y: root.header-height + 66px * root.zoom-level;
+    property <length> exec-row-3-pin-y: root.header-height + 74px * root.zoom-level;
+    property <length> data-label-y: root.is-getter ? root.header-height + 2px * root.zoom-level : root.header-height + 40px * root.zoom-level;
+    property <length> data-pin-y: root.is-getter ? root.header-height + 10px * root.zoom-level : root.header-height + 48px * root.zoom-level;
+    property <color> header-glow-color:
+        root.is-event ? #ea555c8a
+        : root.is-getter ? root.data-output-color.with-alpha(0.50)
+        : #676666;
+    property <length> node-width: root.is-event ? (root.base-node-width - 100px) * root.zoom-level : root.base-node-width * root.zoom-level;
     property <length> node-height: root.base-node-height * root.zoom-level;
     property <float> base-width-world: root.base-node-width / 1px;
     property <float> base-height-world: root.base-node-height / 1px;
+    property <string> exec-arrow-commands:
+        "M 4 2 L 10 2 Q 11.5 2 12.5 3.5 L 18 10 Q 19 11 18 12 L 12.5 18.5 Q 11.5 20 10 20 L 4 20 Q 2 20 2 18 L 2 4 Q 2 2 4 2 Z";
 
     x: root.screen-x;
     y: root.screen-y;
@@ -160,7 +189,7 @@ component BlueprintNodeCard inherits Rectangle {
     border-radius: 7px * root.zoom-level;
     border-width: root.is-selected ? 2px : 1px;
     border-color: root.is-selected ? Themes.current.active-color : Themes.current.border-color;
-    background: Themes.current.secondary-bg;
+    background: Themes.secondary-background-transparent;
 
     changed drag-commit-seq => {
         if root.is-selected && (Math.abs(root.drag-delta-x) > 0.001 || Math.abs(root.drag-delta-y) > 0.001) {
@@ -185,80 +214,124 @@ component BlueprintNodeCard inherits Rectangle {
             root.marquee-hit(root.node-id);
         }
     }
+    Rectangle {
+        clip: true;
 
-    header := Rectangle {
-        width: parent.width;
-        height: 34px * root.zoom-level;
-        border-radius: 7px * root.zoom-level;
-        background: root.is-event ? #a7373f : Themes.current.primary-bg;
+        VerticalBox {
+            padding: 0;
+            z: 1;
 
-        Text {
-            x: 12px * root.zoom-level;
-            width: parent.width - 24px * root.zoom-level;
-            height: parent.height;
-            text: root.is-event ? root.element-type : root.title;
-            color: Themes.current.primary-text;
-            font-size: 12px * root.zoom-level;
-            font-weight: 700;
-            vertical-alignment: TextVerticalAlignment.center;
-            overflow: elide;
-        }
+            header := Rectangle {
+                z: 3;
+                width: parent.width;
+                height: root.header-height;
+                border-radius: 7px * root.zoom-level;
+                background: transparent;
 
-        TouchArea {
-            mouse-cursor: MouseCursor.move;
-            pointer-event(ev) => {
-                if ev.button == PointerEventButton.left && ev.kind == PointerEventKind.down {
-                    root.consume-canvas-left-down();
+                Rectangle {
+                    x: 8px * root.zoom-level;
+                    y: 5px * root.zoom-level;
+                    width: parent.width - 16px * root.zoom-level;
+                    drop-shadow-offset-y: -15px;
+                    height: parent.height - 10px * root.zoom-level;
+                    border-radius: self.height / 2;
+                    drop-shadow-blur: 40px * root.zoom-level;
+                    drop-shadow-color: root.header-glow-color;
                 }
-                let sx = root.x + self.mouse-x;
-                let sy = root.y + self.mouse-y;
-                if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
-                    root.node-drag-started(root.node-id, root.world-x, root.world-y, sx, sy, ev.modifiers.control);
-                }
-                if ev.kind == PointerEventKind.move {
-                    root.node-drag-updated(sx, sy);
-                }
-                if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left {
-                    root.node-drag-finished();
-                }
-                if ev.kind == PointerEventKind.cancel {
-                    root.node-drag-cancelled();
-                }
-            }
-        }
-    }
 
-    TouchArea {
-        width: parent.width;
-        height: parent.height;
-        mouse-cursor: MouseCursor.pointer;
-        pointer-event(ev) => {
-            if ev.button == PointerEventButton.left && ev.kind == PointerEventKind.down {
-                root.consume-canvas-left-down();
-                root.node-select-requested(root.node-id, ev.modifiers.control);
-            }
-            if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right {
-                root.node-menu-requested(root.node-id, root.is-event, root.is-bound-event, root.x + self.mouse-x, root.y + self.mouse-y);
+                Text {
+                    x: 12px * root.zoom-level;
+                    width: parent.width - 24px * root.zoom-level;
+                    height: parent.height;
+                    text: root.is-event ? root.element-type : root.title;
+                    color: Themes.current.primary-text;
+                    font-size: 12px * root.zoom-level;
+                    font-weight: 700;
+                    vertical-alignment: TextVerticalAlignment.center;
+                    overflow: elide;
+                }
+
+                TouchArea {
+                    z: 1;
+                    mouse-cursor: MouseCursor.move;
+                    pointer-event(ev) => {
+                        if ev.button == PointerEventButton.left && ev.kind == PointerEventKind.down {
+                            root.consume-canvas-left-down();
+                        }
+                        let sx = root.x + self.mouse-x;
+                        let sy = root.y + self.mouse-y;
+                        if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right {
+                            root.node-menu-requested(root.node-id, root.descriptor-id, root.is-event, root.is-bound-event, sx, sy);
+                        }
+                        if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                            root.node-drag-started(root.node-id, root.world-x, root.world-y, sx, sy, ev.modifiers.control);
+                        }
+                        if ev.kind == PointerEventKind.move {
+                            root.node-drag-updated(sx, sy);
+                        }
+                        if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left {
+                            root.node-drag-finished();
+                        }
+                        if ev.kind == PointerEventKind.cancel {
+                            root.node-drag-cancelled();
+                        }
+                    }
+                }
             }
         }
     }
 
     if root.has-exec-input: Rectangle {
-        x: -6px * root.zoom-level;
-        y: 52px * root.zoom-level;
-        width: 12px * root.zoom-level;
-        height: 12px * root.zoom-level;
-        border-radius: 6px * root.zoom-level;
-        background: #f5f5f5;
+        z: 3;
+        x: 5px * root.zoom-level;
+        y: root.exec-input-y;
+        width: 15px * root.zoom-level;
+        height: 15px * root.zoom-level;
+
+        Path {
+            width: parent.width;
+            height: parent.height;
+            viewbox-width: 20;
+            viewbox-height: 20;
+            fill: Themes.current.primary-text;
+            stroke: Themes.current.primary-text;
+            stroke-width: 2px;
+            commands: root.exec-arrow-commands;
+        }
+    }
+
+    if root.exec-output-1 != "": Text {
+        z: 3;
+        x: root.exec-label-x;
+        y: root.exec-row-1-label-y;
+        width: 80px * root.zoom-level;
+        height: 30px * root.zoom-level;
+        text: root.exec-output-1;
+        color: Themes.current.primary-text;
+        font-size: 13px * root.zoom-level;
+        horizontal-alignment: TextHorizontalAlignment.right;
+        vertical-alignment: TextVerticalAlignment.center;
+        overflow: elide;
     }
 
     if root.exec-output-1 != "": Rectangle {
-        x: parent.width - 6px * root.zoom-level;
-        y: 52px * root.zoom-level;
-        width: 12px * root.zoom-level;
-        height: 12px * root.zoom-level;
-        border-radius: 6px * root.zoom-level;
-        background: #f5f5f5;
+        z: 4;
+        x: root.exec-pin-x;
+        y: root.exec-row-1-pin-y;
+        width: 15px * root.zoom-level;
+        height: 15px * root.zoom-level;
+        background: transparent;
+
+        Path {
+            width: parent.width;
+            height: parent.height;
+            viewbox-width: 20;
+            viewbox-height: 20;
+            fill: root.exec-output-1-connected ? Themes.current.primary-text : transparent;
+            stroke: Themes.current.primary-text;
+            stroke-width: 2px;
+            commands: root.exec-arrow-commands;
+        }
 
         TouchArea {
             mouse-cursor: MouseCursor.crosshair;
@@ -267,63 +340,198 @@ component BlueprintNodeCard inherits Rectangle {
                 let sy = root.y + parent.y + self.mouse-y;
                 if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
                     root.consume-canvas-left-down();
-                    root.wire-started(
-                        root.node-id,
-                        root.live-world-x + root.base-width-world,
-                        root.live-world-y + 58,
-                        sx,
-                        sy
-                    );
+                    root.wire-started(root.node-id, "exec", 0, #f5f5f5, sx, sy);
+                }
+                if ev.kind == PointerEventKind.move && self.pressed {
+                    root.wire-updated(sx, sy);
                 }
                 if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left {
-                    root.wire-finished();
+                    root.wire-released(sx, sy);
+                }
+                if ev.kind == PointerEventKind.cancel {
+                    root.wire-released(sx, sy);
                 }
             }
         }
     }
 
-    if root.exec-output-1 != "": Text {
-        x: parent.width - 96px * root.zoom-level;
-        y: 44px * root.zoom-level;
-        width: 78px * root.zoom-level;
-        height: 28px * root.zoom-level;
-        text: root.exec-output-1;
+    if root.exec-output-2 != "": Text {
+        z: 3;
+        x: root.exec-label-x;
+        y: root.exec-row-2-label-y;
+        width: 80px * root.zoom-level;
+        height: 30px * root.zoom-level;
+        text: root.exec-output-2;
         color: Themes.current.primary-text;
-        font-size: 11px * root.zoom-level;
+        font-size: 13px * root.zoom-level;
         horizontal-alignment: TextHorizontalAlignment.right;
         vertical-alignment: TextVerticalAlignment.center;
         overflow: elide;
     }
 
-    if root.exec-output-2 != "": Text {
-        x: parent.width - 96px * root.zoom-level;
-        y: 72px * root.zoom-level;
-        width: 78px * root.zoom-level;
-        height: 28px * root.zoom-level;
-        text: root.exec-output-2;
-        color: Themes.current.primary-text;
-        font-size: 11px * root.zoom-level;
-        horizontal-alignment: TextHorizontalAlignment.right;
-        vertical-alignment: TextVerticalAlignment.center;
-        overflow: elide;
+    if root.exec-output-2 != "": Rectangle {
+        z: 4;
+        x: root.exec-pin-x;
+        y: root.exec-row-2-pin-y;
+        width: 15px * root.zoom-level;
+        height: 15px * root.zoom-level;
+        background: transparent;
+
+        Path {
+            width: parent.width;
+            height: parent.height;
+            viewbox-width: 20;
+            viewbox-height: 20;
+            fill: root.exec-output-2-connected ? Themes.current.primary-text : transparent;
+            stroke: Themes.current.primary-text;
+            stroke-width: 2px;
+            commands: root.exec-arrow-commands;
+        }
+
+        TouchArea {
+            mouse-cursor: MouseCursor.crosshair;
+            pointer-event(ev) => {
+                let sx = root.x + parent.x + self.mouse-x;
+                let sy = root.y + parent.y + self.mouse-y;
+                if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                    root.consume-canvas-left-down();
+                    root.wire-started(root.node-id, "exec", 1, #f5f5f5, sx, sy);
+                }
+                if ev.kind == PointerEventKind.move && self.pressed {
+                    root.wire-updated(sx, sy);
+                }
+                if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left {
+                    root.wire-released(sx, sy);
+                }
+                if ev.kind == PointerEventKind.cancel {
+                    root.wire-released(sx, sy);
+                }
+            }
+        }
     }
 
     if root.exec-output-3 != "": Text {
-        x: parent.width - 96px * root.zoom-level;
-        y: 100px * root.zoom-level;
-        width: 78px * root.zoom-level;
-        height: 28px * root.zoom-level;
+        z: 3;
+        x: root.exec-label-x;
+        y: root.exec-row-3-label-y;
+        width: 80px * root.zoom-level;
+        height: 30px * root.zoom-level;
         text: root.exec-output-3;
         color: Themes.current.primary-text;
+        font-size: 13px * root.zoom-level;
+        horizontal-alignment: TextHorizontalAlignment.right;
+        vertical-alignment: TextVerticalAlignment.center;
+        overflow: elide;
+    }
+
+    if root.exec-output-3 != "": Rectangle {
+        z: 4;
+        x: root.exec-pin-x;
+        y: root.exec-row-3-pin-y;
+        width: 15px * root.zoom-level;
+        height: 15px * root.zoom-level;
+        background: transparent;
+
+        Path {
+            width: parent.width;
+            height: parent.height;
+            viewbox-width: 20;
+            viewbox-height: 20;
+            fill: root.exec-output-3-connected ? Themes.current.primary-text : transparent;
+            stroke: Themes.current.primary-text;
+            stroke-width: 2px;
+            commands: root.exec-arrow-commands;
+        }
+
+        TouchArea {
+            mouse-cursor: MouseCursor.crosshair;
+            pointer-event(ev) => {
+                let sx = root.x + parent.x + self.mouse-x;
+                let sy = root.y + parent.y + self.mouse-y;
+                if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                    root.consume-canvas-left-down();
+                    root.wire-started(root.node-id, "exec", 2, #f5f5f5, sx, sy);
+                }
+                if ev.kind == PointerEventKind.move && self.pressed {
+                    root.wire-updated(sx, sy);
+                }
+                if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left {
+                    root.wire-released(sx, sy);
+                }
+                if ev.kind == PointerEventKind.cancel {
+                    root.wire-released(sx, sy);
+                }
+            }
+        }
+    }
+
+    if root.data-output-name != "": Text {
+        z: 3;
+        x: parent.width - 160px * root.zoom-level;
+        y: root.data-label-y;
+        width: 132px * root.zoom-level;
+        height: 28px * root.zoom-level;
+        text: root.data-output-name + " : " + root.data-output-type;
+        color: Themes.current.secondary-text;
         font-size: 11px * root.zoom-level;
         horizontal-alignment: TextHorizontalAlignment.right;
         vertical-alignment: TextVerticalAlignment.center;
         overflow: elide;
     }
 
+    if root.data-output-name != "": Rectangle {
+        z: 4;
+        x: parent.width - 15px * root.zoom-level;
+        y: root.data-pin-y;
+        width: 12px * root.zoom-level;
+        height: 12px * root.zoom-level;
+        border-radius: 6px * root.zoom-level;
+        border-width: 1px;
+        border-color: root.data-output-color;
+        background: root.data-output-connected ? root.data-output-color : transparent;
+
+        TouchArea {
+            mouse-cursor: MouseCursor.crosshair;
+            pointer-event(ev) => {
+                let sx = root.x + parent.x + self.mouse-x;
+                let sy = root.y + parent.y + self.mouse-y;
+                if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                    root.consume-canvas-left-down();
+                    root.wire-started(root.node-id, "data", 0, root.data-output-color, sx, sy);
+                }
+                if ev.kind == PointerEventKind.move && self.pressed {
+                    root.wire-updated(sx, sy);
+                }
+                if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left {
+                    root.wire-released(sx, sy);
+                }
+                if ev.kind == PointerEventKind.cancel {
+                    root.wire-released(sx, sy);
+                }
+            }
+        }
+    }
+
+    TouchArea {
+        y: 33px;
+        z: 1;
+        width: parent.width;
+        height: 60px;
+        mouse-cursor: MouseCursor.pointer;
+        pointer-event(ev) => {
+            if ev.button == PointerEventButton.left && ev.kind == PointerEventKind.down {
+                root.consume-canvas-left-down();
+                root.node-select-requested(root.node-id, ev.modifiers.control);
+            }
+            if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right {
+                root.node-menu-requested(root.node-id, root.descriptor-id, root.is-event, root.is-bound-event, root.x + self.mouse-x, root.y + self.mouse-y);
+            }
+        }
+    }
+
     if root.data-input-name != "": Rectangle {
-        x: -6px * root.zoom-level;
-        y: 82px * root.zoom-level;
+        x: 5px * root.zoom-level;
+        y: root.data-pin-y;
         width: 12px * root.zoom-level;
         height: 12px * root.zoom-level;
         border-radius: 6px * root.zoom-level;
@@ -331,8 +539,8 @@ component BlueprintNodeCard inherits Rectangle {
     }
 
     if root.data-input-name != "": Text {
-        x: 18px * root.zoom-level;
-        y: 74px * root.zoom-level;
+        x: 25px * root.zoom-level;
+        y: root.data-label-y;
         width: 140px * root.zoom-level;
         height: 28px * root.zoom-level;
         text: root.data-input-name + " : " + root.data-input-type;
@@ -347,7 +555,105 @@ export component BlueprintCanvas inherits Rectangle {
     in-out property <float> zoom-level: 1.0;
     in-out property <length> offset-x: 0px;
     in-out property <length> offset-y: 0px;
-    in property <[BlueprintNodeInfo]> nodes: [];
+    in property <[BlueprintNodeInfo]> nodes: [
+        {
+            node-id: "branch_1",
+            title: "Branch",
+            category: "Flow",
+            element-type: "",
+            descriptor-id: "flow.branch",
+
+            x: 500.0,
+            y: 150.0,
+
+            is-event: false,
+            is-bound-event: false,
+
+            has-exec-input: true,
+
+            exec-output-1: "True",
+            exec-output-2: "False",
+            exec-output-3: "",
+
+            exec-output-1-connected: false,
+            exec-output-2-connected: false,
+            exec-output-3-connected: false,
+
+            data-output-name: "",
+            data-output-type: "",
+            data-output-color: #000000,
+            data-output-connected: false,
+
+            data-input-name: "Condition",
+            data-input-type: "bool",
+            data-input-color: #5ac68b
+        },
+        {
+            node-id: "node_1",
+            title: "Get IsAlive",
+            category: "Variables",
+            element-type: "",
+            descriptor-id: "variable.get",
+
+            x: 100.0,
+            y: 200.0,
+
+            is-event: false,
+            is-bound-event: false,
+
+            has-exec-input: false,
+
+            exec-output-1: "",
+            exec-output-2: "",
+            exec-output-3: "",
+
+            exec-output-1-connected: false,
+            exec-output-2-connected: false,
+            exec-output-3-connected: false,
+
+            data-output-name: "IsAlive",
+            data-output-type: "bool",
+            data-output-color: #5ac68b,
+            data-output-connected: false,
+
+            data-input-name: "",
+            data-input-type: "",
+            data-input-color: #000000
+        },
+        {
+            node-id: "event_1",
+            title: "",
+            category: "Events",
+            element-type: "BeginPlay",
+            descriptor-id: "event.begin",
+
+            x: 50.0,
+            y: 50.0,
+
+            is-event: true,
+            is-bound-event: false,
+
+            has-exec-input: false,
+
+            exec-output-1: "execed",
+            exec-output-2: "execed",
+            exec-output-3: "execed",
+
+            exec-output-1-connected: false,
+            exec-output-2-connected: false,
+            exec-output-3-connected: false,
+
+            data-output-name: "",
+            data-output-type: "",
+            data-output-color: #000000,
+            data-output-connected: false,
+
+            data-input-name: "",
+            data-input-type: "",
+            data-input-color: #000000
+        },
+    ];
+    in property <[BlueprintLinkInfo]> links: [];
     in property <[SelectionInfo]> scene-elements: [];
     in property <bool> grid-visible: true;
     in property <length> grid-size: 24px;
@@ -361,6 +667,7 @@ export component BlueprintCanvas inherits Rectangle {
     callback node-duplicate-requested(string, float, float);
     callback node-create-requested(string, float, float);
     callback node-bind-source-requested(string, string);
+    callback connect-blueprint-nodes(string, string, int, float, float) -> bool;
 
     property <bool> is-panning: false;
     property <length> pan-start-x: 0px;
@@ -385,6 +692,7 @@ export component BlueprintCanvas inherits Rectangle {
     property <length> node-menu-x: 0px;
     property <length> node-menu-y: 0px;
     property <string> node-menu-target-id: "";
+    property <string> node-menu-target-descriptor-id: "";
     property <bool> node-menu-target-is-event: false;
     property <bool> node-menu-target-is-bound: false;
 
@@ -426,6 +734,9 @@ export component BlueprintCanvas inherits Rectangle {
     property <float> wire-elbow-y: 0;
     property <bool> dragging-wire-elbow: false;
     property <string> wire-source-node-id: "";
+    property <string> wire-source-kind: "exec";
+    property <int> wire-source-slot: 0;
+    property <color> wire-color: #ffffff;
 
     function world-x(screen-x: length) -> float {
         ((screen-x - root.offset-x) / 1px) / root.zoom-level
@@ -441,6 +752,30 @@ export component BlueprintCanvas inherits Rectangle {
 
     function screen-y(world: float) -> length {
         root.offset-y + world * root.zoom-level * 1px
+    }
+
+    function absf(value: float) -> float {
+        value < 0 ? -value : value
+    }
+
+    function smooth-control-offset(from-x: float, to-x: float) -> float {
+        let distance = root.absf(to-x - from-x);
+        let scaled = distance * 0.45;
+        scaled < 36 ? 36 : scaled > 220 ? 220 : scaled
+    }
+
+    function smooth-curve-commands(from-x: float, from-y: float, to-x: float, to-y: float) -> string {
+        let sx = root.screen-x(from-x) / 1px;
+        let sy = root.screen-y(from-y) / 1px;
+        let tx = root.screen-x(to-x) / 1px;
+        let ty = root.screen-y(to-y) / 1px;
+        let ctrl = root.smooth-control-offset(from-x, to-x) * root.zoom-level;
+        "M "
+            + sx + " " + sy
+            + " C "
+            + (sx + ctrl) + " " + sy + " "
+            + (tx - ctrl) + " " + ty + " "
+            + tx + " " + ty
     }
 
     function remember-pointer(screen-x: length, screen-y: length) {
@@ -498,8 +833,50 @@ export component BlueprintCanvas inherits Rectangle {
         root.dragging-node && root.is-node-selected(node-id) ? node-y + root.drag-delta-y : node-y
     }
 
+    function live-link-from-x(link: BlueprintLinkInfo) -> float {
+        root.dragging-node && root.is-node-selected(link.from-node-id)
+            ? link.from-x + root.drag-delta-x
+            : link.from-x
+    }
+
+    function live-link-from-y(link: BlueprintLinkInfo) -> float {
+        root.dragging-node && root.is-node-selected(link.from-node-id)
+            ? link.from-y + root.drag-delta-y
+            : link.from-y
+    }
+
+    function live-link-to-x(link: BlueprintLinkInfo) -> float {
+        root.dragging-node && root.is-node-selected(link.to-node-id)
+            ? link.to-x + root.drag-delta-x
+            : link.to-x
+    }
+
+    function live-link-to-y(link: BlueprintLinkInfo) -> float {
+        root.dragging-node && root.is-node-selected(link.to-node-id)
+            ? link.to-y + root.drag-delta-y
+            : link.to-y
+    }
+
     function grid-spacing() -> length {
         root.grid-size * root.zoom-level
+    }
+
+    function can-bind-event-source(descriptor-id: string, element-type: string) -> bool {
+        let type-name = element-type.to-lowercase();
+        descriptor-id == "event.button" ? StringSearch.contains(type-name, "button")
+            : descriptor-id == "event.input" ? (StringSearch.contains(type-name, "input") || StringSearch.contains(type-name, "textarea"))
+            : descriptor-id == "event.checkbox" ? StringSearch.contains(type-name, "checkbox")
+            : descriptor-id == "event.label" ? StringSearch.contains(type-name, "label")
+            : descriptor-id == "event.fill" ? (
+                StringSearch.contains(type-name, "text")
+                    || StringSearch.contains(type-name, "textarea")
+                    || StringSearch.contains(type-name, "label")
+                    || StringSearch.contains(type-name, "div")
+                    || StringSearch.contains(type-name, "container")
+                    || StringSearch.contains(type-name, "image")
+                    || StringSearch.contains(type-name, "fill")
+            )
+            : false
     }
 
     function grid-origin-x() -> length {
@@ -541,10 +918,11 @@ export component BlueprintCanvas inherits Rectangle {
         root.create-menu-open = false;
     }
 
-    function open-node-menu(node-id: string, is-event: bool, is-bound: bool, screen-x: length, screen-y: length) {
+    function open-node-menu(node-id: string, descriptor-id: string, is-event: bool, is-bound: bool, screen-x: length, screen-y: length) {
         root.create-menu-open = false;
         root.node-menu-open = true;
         root.node-menu-target-id = node-id;
+        root.node-menu-target-descriptor-id = descriptor-id;
         root.node-menu-target-is-event = is-event;
         root.node-menu-target-is-bound = is-bound;
         root.node-menu-x = Math.max(0px, Math.min(root.width - 230px, screen-x));
@@ -759,14 +1137,23 @@ export component BlueprintCanvas inherits Rectangle {
         node-id: node.node-id;
         title: node.title;
         element-type: node.element-type;
+        descriptor-id: node.descriptor-id;
         is-event: node.is-event;
         is-bound-event: node.is-bound-event;
         has-exec-input: node.has-exec-input;
         exec-output-1: node.exec-output-1;
         exec-output-2: node.exec-output-2;
         exec-output-3: node.exec-output-3;
+        exec-output-1-connected: node.exec-output-1-connected;
+        exec-output-2-connected: node.exec-output-2-connected;
+        exec-output-3-connected: node.exec-output-3-connected;
+        data-output-name: node.data-output-name;
+        data-output-type: node.data-output-type;
+        data-output-color: node.data-output-color;
+        data-output-connected: node.data-output-connected;
         data-input-name: node.data-input-name;
         data-input-type: node.data-input-type;
+        clip: false;
         data-input-color: node.data-input-color;
         world-x: node.x;
         world-y: node.y;
@@ -791,11 +1178,11 @@ export component BlueprintCanvas inherits Rectangle {
         node-select-requested(node-id, additive) => {
             root.select-node(node-id, additive);
         }
-        node-menu-requested(node-id, is-event, is-bound, screen-x, screen-y) => {
+        node-menu-requested(node-id, descriptor-id, is-event, is-bound, screen-x, screen-y) => {
             if !root.is-node-selected(node-id) {
                 root.select-node(node-id, false);
             }
-            root.open-node-menu(node-id, is-event, is-bound, screen-x, screen-y);
+            root.open-node-menu(node-id, descriptor-id, is-event, is-bound, screen-x, screen-y);
         }
         node-drag-started(node-id, world-x, world-y, pointer-x, pointer-y, additive) => {
             root.close-menus();
@@ -835,18 +1222,47 @@ export component BlueprintCanvas inherits Rectangle {
             root.drag-delta-x = 0;
             root.drag-delta-y = 0;
         }
-        wire-started(node-id, start-x, start-y, pointer-x, pointer-y) => {
+        wire-started(node-id, source-kind, source-slot, wire-color, pointer-x, pointer-y) => {
             root.wire-active = true;
             root.wire-source-node-id = node-id;
-            root.wire-start-x = start-x;
-            root.wire-start-y = start-y;
+            root.wire-source-kind = source-kind;
+            root.wire-source-slot = source-slot;
+            root.wire-color = wire-color;
             root.wire-has-elbow = false;
             root.dragging-wire-elbow = false;
             root.remember-pointer(pointer-x, pointer-y);
+            root.wire-start-x = root.cursor-world-x;
+            root.wire-start-y = root.cursor-world-y;
+            root.wire-end-x = root.cursor-world-x;
+            root.wire-end-y = root.cursor-world-y;
         }
-        wire-finished => {
+        wire-updated(pointer-x, pointer-y) => {
+            if !root.wire-active {
+                return;
+            }
+            root.remember-pointer(pointer-x, pointer-y);
+        }
+        wire-released(pointer-x, pointer-y) => {
+            if !root.wire-active {
+                return;
+            }
+            root.remember-pointer(pointer-x, pointer-y);
+            let connected = root.connect-blueprint-nodes(
+                root.wire-source-node-id,
+                root.wire-source-kind,
+                root.wire-source-slot,
+                root.cursor-world-x,
+                root.cursor-world-y
+            );
+            if !connected {
+                root.open-create-menu(pointer-x, pointer-y);
+            }
             root.wire-active = false;
             root.dragging-wire-elbow = false;
+            root.wire-source-node-id = "";
+            root.wire-source-kind = "exec";
+            root.wire-source-slot = 0;
+            root.wire-color = #ffffff;
         }
         node-moved-requested(node-id, x, y) => {
             root.node-moved(node-id, x, y);
@@ -856,21 +1272,47 @@ export component BlueprintCanvas inherits Rectangle {
         }
     }
 
+    for link in root.links: Path {
+        z: 18;
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        viewbox-x: 0;
+        viewbox-y: 0;
+        viewbox-width: parent.width / 1px;
+        viewbox-height: parent.height / 1px;
+        stroke: link.link-color;
+        stroke-width: 2px;
+        fill: transparent;
+        commands: root.smooth-curve-commands(
+            root.live-link-from-x(link),
+            root.live-link-from-y(link),
+            root.live-link-to-x(link),
+            root.live-link-to-y(link)
+        );
+    }
+
     if root.wire-active: Path {
         z: 40;
         x: 0;
         y: 0;
         width: parent.width;
         height: parent.height;
-        stroke: #ffffff;
+        viewbox-x: 0;
+        viewbox-y: 0;
+        viewbox-width: parent.width / 1px;
+        viewbox-height: parent.height / 1px;
+        stroke: root.wire-color;
         stroke-width: 2px;
         fill: transparent;
         commands: !root.wire-has-elbow
-            ? "M "
-                + (root.screen-x(root.wire-start-x) / 1px) + " "
-                + (root.screen-y(root.wire-start-y) / 1px) + " L "
-                + (root.screen-x(root.wire-end-x) / 1px) + " "
-                + (root.screen-y(root.wire-end-y) / 1px)
+            ? root.smooth-curve-commands(
+                root.wire-start-x,
+                root.wire-start-y,
+                root.wire-end-x,
+                root.wire-end-y
+            )
             : "M "
                 + (root.screen-x(root.wire-start-x) / 1px) + " "
                 + (root.screen-y(root.wire-start-y) / 1px) + " L "
@@ -1036,7 +1478,7 @@ export component BlueprintCanvas inherits Rectangle {
         border-radius: 7px;
         border-width: 1px;
         border-color: Themes.current.border-color;
-        background: Themes.current.secondary-bg;
+        background: Themes.secondary-background-transparent;
         drop-shadow-blur: Themes.shadow-size;
         drop-shadow-color: Themes.shadow-color;
 
@@ -1067,11 +1509,7 @@ export component BlueprintCanvas inherits Rectangle {
                     spacing: 2px;
 
                     for element in root.scene-elements: NodeContextAction {
-                        visible: element.element-type == "button"
-                            || element.element-type == "input"
-                            || element.element-type == "textarea"
-                            || element.element-type == "checkbox"
-                            || element.element-type == "label";
+                        visible: root.can-bind-event-source(root.node-menu-target-descriptor-id, element.element-type);
                         height: self.visible ? 26px : 0px;
                         title: element.element-name == "" ? element.element-type : element.element-name;
                         selected => {

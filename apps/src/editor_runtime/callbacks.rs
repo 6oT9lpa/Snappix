@@ -1,8 +1,9 @@
 use arboard::Clipboard;
 use image::{ImageFormat, RgbaImage};
 use rfd::FileDialog;
+use shared::{log, log_fields, LogCategory, LogLevel, LogMessage};
 use slint::{ComponentHandle, Model, SharedString};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -37,6 +38,11 @@ fn register_window_callbacks(ui: &AppWindow, state: &EditorState) {
     let close_window_state = state.clone();
     ui.on_close_window(move || {
         if ui_weak.upgrade().is_some() {
+            log(
+                LogLevel::Info,
+                LogCategory::App,
+                LogMessage::AppCloseRequested,
+            );
             let mut pm = close_window_state.project_manager.borrow_mut();
             if let Some(project) = pm.current_project_mut() {
                 save_project_history_silent(project, &close_window_state);
@@ -44,7 +50,12 @@ fn register_window_callbacks(ui: &AppWindow, state: &EditorState) {
             drop(pm);
 
             if let Err(err) = slint::quit_event_loop() {
-                eprintln!("Failed to quit event loop on app close: {err}");
+                log_fields(
+                    LogLevel::Error,
+                    LogCategory::App,
+                    LogMessage::AppCloseFailed,
+                    [("error", err.to_string())],
+                );
             }
         }
     });
@@ -251,6 +262,12 @@ fn register_project_callbacks(ui: &AppWindow, state: &EditorState) {
               custom_width,
               custom_height| {
             if name.is_empty() {
+                log_fields(
+                    LogLevel::Warn,
+                    LogCategory::Project,
+                    LogMessage::ProjectCreateFailed,
+                    [("reason", "empty_name")],
+                );
                 if let Some(ui) = ui_weak.upgrade() {
                     ui.set_project_error_message(SharedString::from(
                         "Project name cannot be empty",
@@ -261,6 +278,12 @@ fn register_project_callbacks(ui: &AppWindow, state: &EditorState) {
 
             let sanitized_name = sanitize_name(name.as_str());
             if sanitized_name != name.as_str() {
+                log_fields(
+                    LogLevel::Warn,
+                    LogCategory::Project,
+                    LogMessage::ProjectCreateFailed,
+                    [("reason", "invalid_name"), ("name", name.as_str())],
+                );
                 if let Some(ui) = ui_weak.upgrade() {
                     ui.set_project_error_message(SharedString::from(
                         "Project name contains invalid characters",
@@ -270,6 +293,12 @@ fn register_project_callbacks(ui: &AppWindow, state: &EditorState) {
             }
 
             if path.is_empty() {
+                log_fields(
+                    LogLevel::Warn,
+                    LogCategory::Project,
+                    LogMessage::ProjectCreateFailed,
+                    [("reason", "empty_path"), ("name", sanitized_name.as_str())],
+                );
                 if let Some(ui) = ui_weak.upgrade() {
                     ui.set_project_error_message(SharedString::from(
                         "Please select a project location",
@@ -281,6 +310,16 @@ fn register_project_callbacks(ui: &AppWindow, state: &EditorState) {
             let spx_path =
                 std::path::Path::new(path.as_str()).join(format!("{}.spx", sanitized_name));
             if spx_path.exists() {
+                log_fields(
+                    LogLevel::Warn,
+                    LogCategory::Project,
+                    LogMessage::ProjectCreateFailed,
+                    [
+                        ("reason", "path_exists".to_string()),
+                        ("name", sanitized_name.clone()),
+                        ("path", spx_path.to_string_lossy().to_string()),
+                    ],
+                );
                 if let Some(ui) = ui_weak.upgrade() {
                     ui.set_project_error_message(SharedString::from(
                         "A project with this name already exists in the selected location",
@@ -289,6 +328,12 @@ fn register_project_callbacks(ui: &AppWindow, state: &EditorState) {
                 return;
             }
 
+            log_fields(
+                LogLevel::Info,
+                LogCategory::Project,
+                LogMessage::ProjectCreateRequested,
+                [("name", sanitized_name.as_str()), ("folder", path.as_str())],
+            );
             let mut pm = create_project_state.project_manager.borrow_mut();
             let project = pm.create_project(
                 &sanitized_name,
@@ -301,6 +346,18 @@ fn register_project_callbacks(ui: &AppWindow, state: &EditorState) {
             );
 
             helpers::save_project_silent(project);
+            log_fields(
+                LogLevel::Info,
+                LogCategory::Project,
+                LogMessage::ProjectCreated,
+                [
+                    ("name", sanitized_name.clone()),
+                    (
+                        "path",
+                        project.spx_file_path().to_string_lossy().to_string(),
+                    ),
+                ],
+            );
 
             let mut recent_storage = config::RecentProjectsStorage::load();
             recent_storage.add_project(&sanitized_name, &project.spx_file_path().to_string_lossy());
@@ -359,14 +416,32 @@ fn register_project_callbacks(ui: &AppWindow, state: &EditorState) {
             return;
         };
 
-        if let Err(err) = delete_project_from_disk(path.as_str(), name.as_str()) {
-            eprintln!(
-                "Failed to delete project from disk (path='{}', name='{}'): {err}",
-                path, name
+        log_fields(
+            LogLevel::Info,
+            LogCategory::Project,
+            LogMessage::ProjectDeleteRequested,
+            [("path", path.as_str()), ("name", name.as_str())],
+        );
+        if let Err(err) = operations::delete_project_path(Path::new(path.as_str()), name.as_str()) {
+            log_fields(
+                LogLevel::Error,
+                LogCategory::Project,
+                LogMessage::ProjectDeleteFailed,
+                [
+                    ("path", path.to_string()),
+                    ("name", name.to_string()),
+                    ("error", err.to_string()),
+                ],
             );
             app_errors::report(AppErrorCode::ProjectDeleteFailed);
             return;
         }
+        log_fields(
+            LogLevel::Info,
+            LogCategory::Project,
+            LogMessage::ProjectDeleted,
+            [("path", path.as_str()), ("name", name.as_str())],
+        );
 
         let mut recent_storage = config::RecentProjectsStorage::load();
         recent_storage.remove_project_entry(path.as_str(), name.as_str());
@@ -381,15 +456,55 @@ fn register_project_callbacks(ui: &AppWindow, state: &EditorState) {
 
         let trimmed = new_name.trim();
         if trimmed.is_empty() {
+            log_fields(
+                LogLevel::Warn,
+                LogCategory::Project,
+                LogMessage::ProjectRenameFailed,
+                [
+                    ("path", path.as_str()),
+                    ("name", name.as_str()),
+                    ("reason", "empty_name"),
+                ],
+            );
             app_errors::report(AppErrorCode::ProjectRenameFailed);
             return;
         }
 
+        log_fields(
+            LogLevel::Info,
+            LogCategory::Project,
+            LogMessage::ProjectRenameRequested,
+            [
+                ("path", path.as_str()),
+                ("from", name.as_str()),
+                ("to", trimmed),
+            ],
+        );
         let mut recent_storage = config::RecentProjectsStorage::load();
         if !recent_storage.rename_project_entry(path.as_str(), name.as_str(), trimmed) {
+            log_fields(
+                LogLevel::Error,
+                LogCategory::Project,
+                LogMessage::ProjectRenameFailed,
+                [
+                    ("path", path.as_str()),
+                    ("from", name.as_str()),
+                    ("to", trimmed),
+                ],
+            );
             app_errors::report(AppErrorCode::ProjectRenameFailed);
             return;
         }
+        log_fields(
+            LogLevel::Info,
+            LogCategory::Project,
+            LogMessage::ProjectRenamed,
+            [
+                ("path", path.as_str()),
+                ("from", name.as_str()),
+                ("to", trimmed),
+            ],
+        );
         sync::set_recent_projects(&ui, &recent_storage);
     });
 
@@ -469,6 +584,12 @@ fn register_page_callbacks(ui: &AppWindow, state: &EditorState) {
             return;
         }
 
+        log_fields(
+            LogLevel::Info,
+            LogCategory::Runtime,
+            LogMessage::DocumentClosed,
+            [("tab_index", tab_index.to_string())],
+        );
         clear_selection_and_outline(&close_page_state);
 
         if let Some(ui) = ui_weak.upgrade() {
@@ -491,6 +612,12 @@ fn register_page_callbacks(ui: &AppWindow, state: &EditorState) {
             return;
         }
 
+        log_fields(
+            LogLevel::Info,
+            LogCategory::Runtime,
+            LogMessage::DocumentSelected,
+            [("tab_index", tab_index.to_string())],
+        );
         if let Some(ui) = ui_weak.upgrade() {
             clear_selection_and_outline(&select_page_state);
             sync::sync_editor_models(&ui, project);
@@ -518,6 +645,15 @@ fn register_page_callbacks(ui: &AppWindow, state: &EditorState) {
         if !project.open_document(document) {
             return;
         }
+        log_fields(
+            LogLevel::Info,
+            LogCategory::Runtime,
+            LogMessage::DocumentOpened,
+            [
+                ("kind", "page_ui".to_string()),
+                ("page_index", page_idx.to_string()),
+            ],
+        );
         clear_selection_and_outline(&open_project_page_state);
 
         if let Some(ui) = ui_weak.upgrade() {
@@ -542,6 +678,15 @@ fn register_page_callbacks(ui: &AppWindow, state: &EditorState) {
         if !project.open_document(document) {
             return;
         }
+        log_fields(
+            LogLevel::Info,
+            LogCategory::Runtime,
+            LogMessage::DocumentOpened,
+            [
+                ("kind", "page_blueprint".to_string()),
+                ("page_index", page_idx.to_string()),
+            ],
+        );
 
         if let Some(ui) = ui_weak.upgrade() {
             sync::sync_editor_models(&ui, project);
@@ -564,6 +709,12 @@ fn register_page_callbacks(ui: &AppWindow, state: &EditorState) {
         if !project.open_document(document) {
             return;
         }
+        log_fields(
+            LogLevel::Info,
+            LogCategory::Runtime,
+            LogMessage::DocumentOpened,
+            [("kind", "server_blueprint")],
+        );
 
         if let Some(ui) = ui_weak.upgrade() {
             sync::sync_editor_models(&ui, project);
@@ -594,6 +745,15 @@ fn register_page_callbacks(ui: &AppWindow, state: &EditorState) {
         if !project.open_document(document) {
             return;
         }
+        log_fields(
+            LogLevel::Info,
+            LogCategory::Runtime,
+            LogMessage::DocumentOpened,
+            [
+                ("kind", "selected_element_blueprint".to_string()),
+                ("element_id", element_id.to_string()),
+            ],
+        );
 
         if let Some(ui) = ui_weak.upgrade() {
             sync::sync_editor_models(&ui, project);
@@ -817,6 +977,99 @@ fn register_page_callbacks(ui: &AppWindow, state: &EditorState) {
         sync::sync_editor_models(&ui, project);
         refresh_canvas(&ui, project, &duplicate_blueprint_node_state);
     });
+
+    let ui_weak = ui.as_weak();
+    let bind_blueprint_event_source_state = state.clone();
+    ui.on_bind_blueprint_event_source_internal(move |node_id, element_id| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        if !exit_history_preview_mode(&ui, &bind_blueprint_event_source_state) {
+            return;
+        }
+        let Some(node_id) = helpers::parse_uuid(node_id.as_str()) else {
+            return;
+        };
+        let Some(element_id) = helpers::parse_uuid(element_id.as_str()) else {
+            return;
+        };
+        let mut pm = bind_blueprint_event_source_state
+            .project_manager
+            .borrow_mut();
+        let Some(project) = pm.current_project_mut() else {
+            return;
+        };
+        let before_snapshot = capture_project_snapshot(project, &bind_blueprint_event_source_state);
+        if !project.bind_catalog_event_node_to_element_in_active_blueprint(node_id, element_id) {
+            return;
+        }
+        helpers::save_project_silent(project);
+        if let (Some(before_snapshot), Some(after_snapshot)) = (
+            before_snapshot,
+            capture_project_snapshot(project, &bind_blueprint_event_source_state),
+        ) {
+            bind_blueprint_event_source_state
+                .history
+                .borrow_mut()
+                .record_change(
+                    HistoryActionKind::ModifyObject,
+                    "Bind blueprint event",
+                    node_id.to_string(),
+                    before_snapshot,
+                    after_snapshot,
+                );
+        }
+        sync::sync_editor_models(&ui, project);
+        refresh_canvas(&ui, project, &bind_blueprint_event_source_state);
+    });
+
+    let ui_weak = ui.as_weak();
+    let connect_blueprint_nodes_state = state.clone();
+    ui.on_connect_blueprint_nodes_internal(
+        move |source_node_id, source_pin_kind, source_pin_slot, x, y| {
+            let Some(ui) = ui_weak.upgrade() else {
+                return false;
+            };
+            if !exit_history_preview_mode(&ui, &connect_blueprint_nodes_state) {
+                return false;
+            }
+            let Some(source_node_id) = helpers::parse_uuid(source_node_id.as_str()) else {
+                return false;
+            };
+            let mut pm = connect_blueprint_nodes_state.project_manager.borrow_mut();
+            let Some(project) = pm.current_project_mut() else {
+                return false;
+            };
+            let before_snapshot = capture_project_snapshot(project, &connect_blueprint_nodes_state);
+            if !project.connect_nodes_in_active_blueprint_at(
+                source_node_id,
+                source_pin_kind.as_str(),
+                source_pin_slot,
+                x,
+                y,
+            ) {
+                return false;
+            }
+            helpers::save_project_silent(project);
+            if let (Some(before_snapshot), Some(after_snapshot)) = (
+                before_snapshot,
+                capture_project_snapshot(project, &connect_blueprint_nodes_state),
+            ) {
+                connect_blueprint_nodes_state
+                    .history
+                    .borrow_mut()
+                    .record_change(
+                        HistoryActionKind::ModifyObject,
+                        "Connect blueprint nodes",
+                        source_node_id.to_string(),
+                        before_snapshot,
+                        after_snapshot,
+                    );
+            }
+            sync::sync_editor_models(&ui, project);
+            true
+        },
+    );
 
     let ui_weak = ui.as_weak();
     let rename_blueprint_variable_state = state.clone();
@@ -1189,6 +1442,7 @@ fn register_element_callbacks(ui: &AppWindow, state: &EditorState) {
                 project,
                 &selected,
                 &select_element_state.collapsed_outline_nodes.borrow(),
+                &select_element_state.hidden_elements.borrow(),
             );
         }
     });
@@ -1238,6 +1492,7 @@ fn register_element_callbacks(ui: &AppWindow, state: &EditorState) {
                 project,
                 &selected,
                 &marquee_select_state.collapsed_outline_nodes.borrow(),
+                &marquee_select_state.hidden_elements.borrow(),
             );
         }
     });
@@ -2259,11 +2514,19 @@ fn register_comment_callbacks(ui: &AppWindow, state: &EditorState) {
         };
 
         let Ok(mut clipboard) = Clipboard::new() else {
-            eprintln!("Failed to access clipboard for comment image paste");
+            log(
+                LogLevel::Warn,
+                LogCategory::Runtime,
+                LogMessage::ClipboardReadFailed,
+            );
             return;
         };
         let Ok(image) = clipboard.get_image() else {
-            eprintln!("Clipboard does not contain a compatible image");
+            log(
+                LogLevel::Warn,
+                LogCategory::Runtime,
+                LogMessage::ClipboardImageUnsupported,
+            );
             return;
         };
 
@@ -2352,6 +2615,43 @@ fn register_comment_callbacks(ui: &AppWindow, state: &EditorState) {
 }
 
 fn register_hotkey_callbacks(ui: &AppWindow, state: &EditorState) {
+    let ui_weak = ui.as_weak();
+    let toggle_hidden_state = state.clone();
+    ui.on_toggle_hidden_selection_internal(move || {
+        let mut pm = toggle_hidden_state.project_manager.borrow_mut();
+        let Some(project) = pm.current_project_mut() else {
+            return;
+        };
+
+        let selected_ids = toggle_hidden_state.selected_elements.borrow().clone();
+        if selected_ids.is_empty() {
+            return;
+        }
+
+        let target_ids = selected_and_descendant_ids(project, &selected_ids);
+        if target_ids.is_empty() {
+            return;
+        }
+
+        {
+            let mut hidden = toggle_hidden_state.hidden_elements.borrow_mut();
+            let all_hidden = target_ids.iter().all(|id| hidden.contains(id));
+            if all_hidden {
+                for id in &target_ids {
+                    hidden.remove(id);
+                }
+            } else {
+                for id in &target_ids {
+                    hidden.insert(*id);
+                }
+            }
+        }
+
+        if let Some(ui) = ui_weak.upgrade() {
+            refresh_canvas(&ui, project, &toggle_hidden_state);
+        }
+    });
+
     let ui_weak = ui.as_weak();
     let select_all_state = state.clone();
     ui.on_select_all_internal(move || {
@@ -2831,13 +3131,23 @@ fn load_project_history_silent(project: &Project, state: &EditorState) {
     match operations::load_project_history(&project.spx_file_path()) {
         Ok(Some(bytes)) => {
             if let Err(err) = history.load_from_bytes(&bytes) {
-                eprintln!("Failed to decode project history: {err}");
+                log_fields(
+                    LogLevel::Warn,
+                    LogCategory::Project,
+                    LogMessage::ProjectHistoryLoadFailed,
+                    [("error", err.to_string())],
+                );
                 history.reset();
             }
         }
         Ok(None) => {}
         Err(err) => {
-            eprintln!("Failed to load project history: {err}");
+            log_fields(
+                LogLevel::Warn,
+                LogCategory::Project,
+                LogMessage::ProjectHistoryLoadFailed,
+                [("error", err.to_string())],
+            );
             history.reset();
         }
     }
@@ -2847,14 +3157,24 @@ fn save_project_history_silent(project: &Project, state: &EditorState) {
     let bytes: Vec<u8> = match state.history.borrow().save_to_bytes() {
         Ok(bytes) => bytes,
         Err(err) => {
-            eprintln!("Failed to encode project history: {err}");
+            log_fields(
+                LogLevel::Warn,
+                LogCategory::Project,
+                LogMessage::ProjectHistorySaveFailed,
+                [("error", err.to_string())],
+            );
             return;
         }
     };
     let path = project.spx_file_path();
     std::thread::spawn(move || {
         if let Err(err) = operations::save_project_history(&path, &bytes) {
-            eprintln!("Failed to save project history: {err}");
+            log_fields(
+                LogLevel::Warn,
+                LogCategory::Project,
+                LogMessage::ProjectHistorySaveFailed,
+                [("error", err.to_string())],
+            );
         }
     });
 }
@@ -2881,16 +3201,33 @@ fn activate_project(ui: &AppWindow, project: &Project, state: &EditorState) {
 }
 
 fn load_project_from_path(ui: &AppWindow, state: &EditorState, path: &str) {
+    log_fields(
+        LogLevel::Info,
+        LogCategory::Project,
+        LogMessage::ProjectOpenRequested,
+        [("path", path)],
+    );
     let mut pm = state.project_manager.borrow_mut();
     match pm.load_project(path) {
         Ok(project) => {
+            log_fields(
+                LogLevel::Info,
+                LogCategory::Project,
+                LogMessage::ProjectOpened,
+                [("path", path), ("name", project.name())],
+            );
             let mut recent_storage = config::RecentProjectsStorage::load();
             recent_storage.add_project(project.name(), path);
             activate_project(ui, project, state);
             sync::set_recent_projects(ui, &recent_storage);
         }
         Err(err) => {
-            eprintln!("Failed to load project: {err}");
+            log_fields(
+                LogLevel::Error,
+                LogCategory::Project,
+                LogMessage::ProjectOpenFailed,
+                [("path", path.to_string()), ("error", err.to_string())],
+            );
             app_errors::report(AppErrorCode::ProjectLoadFailed);
         }
     }
@@ -2916,111 +3253,38 @@ fn relocate_project_path(current_path: &str, project_name: &str) -> Option<Strin
         .set_title("Select New Project Location")
         .pick_folder()?;
 
-    let file_name = source
-        .file_name()
-        .map(|value| value.to_owned())
-        .unwrap_or_else(|| {
-            std::ffi::OsString::from(format!("{}.spx", sanitize_name(project_name)))
-        });
-    let destination = destination_folder.join(file_name);
-
-    if source == destination {
-        return Some(source.to_string_lossy().to_string());
-    }
-
-    if let Err(err) = std::fs::rename(&source, &destination) {
-        eprintln!(
-            "Failed to move project file from {} to {}: {err}",
-            source.display(),
-            destination.display()
-        );
-        app_errors::report(AppErrorCode::ProjectRelocateFailed);
-        return None;
-    }
-
-    Some(destination.to_string_lossy().to_string())
-}
-
-fn delete_project_from_disk(path: &str, project_name: &str) -> Result<(), std::io::Error> {
-    let path = path.trim();
-    if path.is_empty() {
-        // Nothing to delete on disk, but recent entry should still be removable.
-        return Ok(());
-    }
-
-    let target = PathBuf::from(path);
-    if !target.exists() {
-        // Project may have already been deleted manually.
-        return Ok(());
-    }
-
-    if target.is_file() {
-        std::fs::remove_file(target)?;
-        return Ok(());
-    }
-
-    if target.is_dir() {
-        // Safety: do not remove an arbitrary directory recursively.
-        // We only delete matching .spx file(s) inside the selected directory.
-        let mut removed_any = false;
-
-        if !project_name.trim().is_empty() {
-            let named_candidate = target.join(format!("{}.spx", project_name.trim()));
-            if named_candidate.exists() && named_candidate.is_file() {
-                std::fs::remove_file(named_candidate)?;
-                removed_any = true;
-            }
+    match operations::relocate_project_file(&source, &destination_folder, project_name) {
+        Ok(destination) => {
+            log_fields(
+                LogLevel::Info,
+                LogCategory::Project,
+                LogMessage::ProjectRelocated,
+                [
+                    ("from", source.to_string_lossy().to_string()),
+                    ("to", destination.to_string_lossy().to_string()),
+                ],
+            );
+            Some(destination.to_string_lossy().to_string())
         }
-
-        if !removed_any {
-            let mut spx_files = Vec::new();
-            for entry in std::fs::read_dir(&target)? {
-                let entry = entry?;
-                let entry_path = entry.path();
-                let is_spx = entry_path
-                    .extension()
-                    .and_then(|ext| ext.to_str())
-                    .map(|ext| ext.eq_ignore_ascii_case("spx"))
-                    .unwrap_or(false);
-                if entry_path.is_file() && is_spx {
-                    spx_files.push(entry_path);
-                }
-            }
-
-            // Delete only when we can identify a single project file unambiguously.
-            if spx_files.len() == 1 {
-                std::fs::remove_file(&spx_files[0])?;
-                removed_any = true;
-            }
+        Err(err) => {
+            log_fields(
+                LogLevel::Error,
+                LogCategory::Project,
+                LogMessage::ProjectRelocateFailed,
+                [
+                    ("from", source.to_string_lossy().to_string()),
+                    ("to", destination_folder.to_string_lossy().to_string()),
+                    ("error", err.to_string()),
+                ],
+            );
+            app_errors::report(AppErrorCode::ProjectRelocateFailed);
+            None
         }
-
-        if removed_any && target.read_dir()?.next().is_none() {
-            // Best-effort cleanup of an empty project directory.
-            let _ = std::fs::remove_dir(&target);
-        }
-
-        return Ok(());
     }
-
-    Ok(())
 }
 
 fn sanitize_name(name: &str) -> String {
-    let mut sanitized = String::new();
-    for ch in name.chars() {
-        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == ' ' {
-            sanitized.push(ch);
-        } else {
-            sanitized.push('_');
-        }
-    }
-
-    let trimmed = sanitized.trim();
-    if trimmed.is_empty() {
-        "project".to_string()
-    } else {
-        trimmed.to_string()
-    }
+    operations::sanitize_project_file_stem(name)
 }
 
 fn pick_image_file() -> Option<PathBuf> {
@@ -3053,24 +3317,46 @@ fn import_image_file_to_project_assets(project: &Project, source: &Path) -> Opti
 
     let destination_dir = project_images_dir(project);
     if let Err(err) = std::fs::create_dir_all(&destination_dir) {
-        eprintln!(
-            "Failed to create image assets directory {}: {err}",
-            destination_dir.display()
+        log_fields(
+            LogLevel::Error,
+            LogCategory::Asset,
+            LogMessage::AssetImportFailed,
+            [
+                ("path", destination_dir.to_string_lossy().to_string()),
+                ("error", err.to_string()),
+            ],
         );
         return None;
     }
 
     let file_name = format!("{}.{}", Uuid::new_v4(), extension);
     let destination = destination_dir.join(&file_name);
+    log_fields(
+        LogLevel::Info,
+        LogCategory::Asset,
+        LogMessage::AssetImportRequested,
+        [("source", source.to_string_lossy().to_string())],
+    );
     if let Err(err) = std::fs::copy(source, &destination) {
-        eprintln!(
-            "Failed to import image {} into project assets {}: {err}",
-            source.display(),
-            destination.display()
+        log_fields(
+            LogLevel::Error,
+            LogCategory::Asset,
+            LogMessage::AssetImportFailed,
+            [
+                ("source", source.to_string_lossy().to_string()),
+                ("destination", destination.to_string_lossy().to_string()),
+                ("error", err.to_string()),
+            ],
         );
         return None;
     }
 
+    log_fields(
+        LogLevel::Info,
+        LogCategory::Asset,
+        LogMessage::AssetImported,
+        [("path", destination.to_string_lossy().to_string())],
+    );
     Some(project_image_asset_path(&file_name))
 }
 
@@ -3084,9 +3370,14 @@ fn save_clipboard_image_to_project_assets(
 
     let destination_dir = project_images_dir(project);
     if let Err(err) = std::fs::create_dir_all(&destination_dir) {
-        eprintln!(
-            "Failed to create clipboard image assets directory {}: {err}",
-            destination_dir.display()
+        log_fields(
+            LogLevel::Error,
+            LogCategory::Asset,
+            LogMessage::AssetImportFailed,
+            [
+                ("path", destination_dir.to_string_lossy().to_string()),
+                ("error", err.to_string()),
+            ],
         );
         return None;
     }
@@ -3094,13 +3385,24 @@ fn save_clipboard_image_to_project_assets(
     let file_name = format!("{}.png", Uuid::new_v4());
     let destination = destination_dir.join(&file_name);
     if let Err(err) = image.save_with_format(&destination, ImageFormat::Png) {
-        eprintln!(
-            "Failed to save clipboard image into project assets {}: {err}",
-            destination.display()
+        log_fields(
+            LogLevel::Error,
+            LogCategory::Asset,
+            LogMessage::AssetImportFailed,
+            [
+                ("path", destination.to_string_lossy().to_string()),
+                ("error", err.to_string()),
+            ],
         );
         return None;
     }
 
+    log_fields(
+        LogLevel::Info,
+        LogCategory::Asset,
+        LogMessage::AssetImported,
+        [("path", destination.to_string_lossy().to_string())],
+    );
     Some(project_image_asset_path(&file_name))
 }
 
@@ -3161,21 +3463,30 @@ fn try_paste_clipboard_image_into_selected_image(
 }
 
 fn refresh_canvas(ui: &AppWindow, project: &Project, state: &EditorState) {
+    retain_existing_hidden_elements(project, state);
     sync::sync_canvas(
         ui,
         project,
         &state.selected_elements.borrow(),
         &state.collapsed_outline_nodes.borrow(),
+        &state.hidden_elements.borrow(),
     );
     sync::sync_timeline(ui, &state.history.borrow());
 }
 
 fn refresh_canvas_preview(ui: &AppWindow, project: &Project, state: &EditorState) {
-    sync::sync_canvas_view(ui, project, &state.selected_elements.borrow(), None);
+    sync::sync_canvas_view(
+        ui,
+        project,
+        &state.selected_elements.borrow(),
+        None,
+        &state.hidden_elements.borrow(),
+    );
 }
 
 fn clear_selection_and_outline(state: &EditorState) {
     state.selected_elements.borrow_mut().clear();
+    state.hidden_elements.borrow_mut().clear();
     state.collapsed_outline_nodes.borrow_mut().clear();
     state.transform_preview.borrow_mut().take();
 }
@@ -3210,6 +3521,18 @@ fn retain_existing_selection(project: &Project, state: &EditorState) {
         .selected_elements
         .borrow_mut()
         .retain(|selected_id| existing.contains(selected_id));
+}
+
+fn retain_existing_hidden_elements(project: &Project, state: &EditorState) {
+    let existing: HashSet<Uuid> = project
+        .active_page_elements()
+        .into_iter()
+        .map(|element| element.id)
+        .collect();
+    state
+        .hidden_elements
+        .borrow_mut()
+        .retain(|hidden_id| existing.contains(hidden_id));
 }
 
 fn capture_project_snapshot(project: &Project, state: &EditorState) -> Option<ProjectSnapshot> {
@@ -3300,6 +3623,56 @@ fn selected_root_ids(project: &Project, selected_ids: &[Uuid]) -> Vec<Uuid> {
     }
 
     roots
+}
+
+fn selected_and_descendant_ids(project: &Project, selected_ids: &[Uuid]) -> Vec<Uuid> {
+    let all_elements = project.active_page_elements();
+    let existing: HashSet<Uuid> = all_elements.iter().map(|element| element.id).collect();
+    let mut children_map: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
+
+    for element in &all_elements {
+        let parent_id = element
+            .properties
+            .as_object()
+            .and_then(|props| props.get("parent_id"))
+            .and_then(|value| value.as_str())
+            .and_then(|value| Uuid::parse_str(value).ok())
+            .filter(|parent_id| *parent_id != element.id && existing.contains(parent_id));
+        if let Some(parent_id) = parent_id {
+            children_map.entry(parent_id).or_default().push(element.id);
+        }
+    }
+
+    let mut out = Vec::new();
+    let mut visited = HashSet::new();
+    for selected_id in selected_ids {
+        collect_descendants_for_toggle(
+            *selected_id,
+            &existing,
+            &children_map,
+            &mut visited,
+            &mut out,
+        );
+    }
+    out
+}
+
+fn collect_descendants_for_toggle(
+    element_id: Uuid,
+    existing: &HashSet<Uuid>,
+    children_map: &HashMap<Uuid, Vec<Uuid>>,
+    visited: &mut HashSet<Uuid>,
+    out: &mut Vec<Uuid>,
+) {
+    if !existing.contains(&element_id) || !visited.insert(element_id) {
+        return;
+    }
+    out.push(element_id);
+    if let Some(children) = children_map.get(&element_id) {
+        for child_id in children {
+            collect_descendants_for_toggle(*child_id, existing, children_map, visited, out);
+        }
+    }
 }
 
 fn select_outline_neighbor(project: &Project, state: &EditorState, step: i32) -> Option<Uuid> {

@@ -8,7 +8,7 @@ import { VisualEditorScene } from "./views/VisualEditorScene.slint";
 import { ProjectSelectedScene, RecentProjectData } from "./views/ProjectSelectedScene.slint";
 import { NewProjectDialog } from "./dialogs/NewProjectDialog.slint";
 import { NewPageDialog } from "./editor/PageTabs.slint";
-import { SelectionInfo, CanvasBounds, CanvasCommentInfo, EditorDocumentInfo, ProjectPageInfo, BlueprintVariableInfo, BlueprintFunctionInfo, BlueprintNodeInfo, HotkeyBinding, TimelineEntry, AppErrorNotification } from "./models/EditorModels.slint";
+import { SelectionInfo, CanvasBounds, CanvasCommentInfo, EditorDocumentInfo, ProjectPageInfo, BlueprintVariableInfo, BlueprintFunctionInfo, BlueprintNodeInfo, BlueprintLinkInfo, HotkeyBinding, TimelineEntry, AppErrorNotification } from "./models/EditorModels.slint";
 export { StringSearch } from "./utils/StringSearch.slint";
 
 component Separator inherits Rectangle {
@@ -155,6 +155,7 @@ export component AppWindow inherits Window {
     in-out property <[BlueprintVariableInfo]> blueprint-variable-items: [];
     in-out property <[BlueprintFunctionInfo]> blueprint-function-items: [];
     in-out property <[BlueprintNodeInfo]> blueprint-node-items: [];
+    in-out property <[BlueprintLinkInfo]> blueprint-link-items: [];
     in-out property <[ProjectPageInfo]> project-page-items: [];
     in-out property <int> active-page-index: 0;
     in-out property <float> zoom-level: 1.0;
@@ -229,6 +230,7 @@ export component AppWindow inherits Window {
     in-out property <HotkeyBinding> copy-hotkey: { key: "c", ctrl: true, shift: false, alt: false };
     in-out property <HotkeyBinding> paste-hotkey: { key: "v", ctrl: true, shift: false, alt: false };
     in-out property <HotkeyBinding> paste-replace-hotkey: { key: "r", ctrl: true, shift: false, alt: false };
+    in-out property <HotkeyBinding> hide-selection-hotkey: { key: "h", ctrl: true, shift: false, alt: false };
     in-out property <HotkeyBinding> delete-hotkey: { key: "delete", ctrl: false, shift: false, alt: false };
     in-out property <HotkeyBinding> rename-hotkey: { key: "f2", ctrl: false, shift: false, alt: true };
     in-out property <HotkeyBinding> exit-project-hotkey: { key: "q", ctrl: true, shift: false, alt: false };
@@ -289,6 +291,7 @@ export component AppWindow inherits Window {
     callback copy-internal();
     callback paste-internal(float, float);
     callback paste-replace-internal(float, float);
+    callback toggle-hidden-selection-internal();
     callback flip-vertical-internal();
     callback flip-horizontal-internal();
     callback exit-project-internal();
@@ -307,6 +310,8 @@ export component AppWindow inherits Window {
     callback move-blueprint-node-internal(string, float, float);
     callback delete-blueprint-node-internal(string);
     callback duplicate-blueprint-node-internal(string, float, float);
+    callback connect-blueprint-nodes-internal(string, string, int, float, float) -> bool;
+    callback bind-blueprint-event-source-internal(string, string);
     callback rename-blueprint-variable-internal(string, string);
     callback set-blueprint-variable-type-internal(string, string);
     callback set-blueprint-variable-item-type-internal(string, string);
@@ -566,6 +571,7 @@ export component AppWindow inherits Window {
         blueprint-variable-items: root.blueprint-variable-items;
         blueprint-function-items: root.blueprint-function-items;
         blueprint-node-items: root.blueprint-node-items;
+        blueprint-link-items: root.blueprint-link-items;
         outline-elements: root.outline-elements;
         project-page-items: root.project-page-items;
         active-page-index: root.active-page-index;
@@ -621,6 +627,14 @@ export component AppWindow inherits Window {
 
         duplicate-blueprint-node(node-id, x, y) => {
             root.duplicate-blueprint-node-internal(node-id, x, y);
+        }
+
+        bind-blueprint-event-source(node-id, element-id) => {
+            root.bind-blueprint-event-source-internal(node-id, element-id);
+        }
+
+        connect-blueprint-nodes(source-node-id, source-pin-kind, source-pin-slot, x, y) => {
+            root.connect-blueprint-nodes-internal(source-node-id, source-pin-kind, source-pin-slot, x, y)
         }
 
         rename-blueprint-variable(variable-id, name) => {
@@ -726,6 +740,7 @@ export component AppWindow inherits Window {
             copy-hotkey: root.copy-hotkey;
             paste-hotkey: root.paste-hotkey;
             paste-replace-hotkey: root.paste-replace-hotkey;
+            hide-selection-hotkey: root.hide-selection-hotkey;
             delete-hotkey: root.delete-hotkey;
             rename-hotkey: root.rename-hotkey;
             exit-project-hotkey: root.exit-project-hotkey;
@@ -883,6 +898,7 @@ export component AppWindow inherits Window {
             copy-requested => { root.copy-internal(); }
             paste-requested(x, y) => { root.paste-internal(x, y); }
             paste-replace-requested(x, y) => { root.paste-replace-internal(x, y); }
+            hide-selection-requested => { root.toggle-hidden-selection-internal(); }
             flip-vertical-requested => { root.flip-vertical-internal(); }
             flip-horizontal-requested => { root.flip-horizontal-internal(); }
             exit-project-requested => { root.exit-project-internal(); }

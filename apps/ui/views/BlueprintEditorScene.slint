@@ -3,7 +3,7 @@ import { Themes } from "../components/Themes.slint";
 import { PageTabsBar } from "../editor/PageTabs.slint";
 import { BlueprintCanvas } from "../editor/BlueprintCanvas.slint";
 import { BlueprintSidebar } from "./blueprint/BlueprintSidebar.slint";
-import { BlueprintFunctionInfo, BlueprintNodeInfo, BlueprintVariableInfo, EditorDocumentInfo, HotkeyBinding, ProjectPageInfo, SelectionInfo } from "../models/EditorModels.slint";
+import { BlueprintFunctionInfo, BlueprintLinkInfo, BlueprintNodeInfo, BlueprintVariableInfo, EditorDocumentInfo, HotkeyBinding, ProjectPageInfo, SelectionInfo } from "../models/EditorModels.slint";
 
 export component BlueprintEditorScene inherits Rectangle {
     background: Themes.current.primary-bg;
@@ -15,6 +15,7 @@ export component BlueprintEditorScene inherits Rectangle {
     in-out property <[BlueprintVariableInfo]> blueprint-variable-items: [];
     in-out property <[BlueprintFunctionInfo]> blueprint-function-items: [];
     in-out property <[BlueprintNodeInfo]> blueprint-node-items: [];
+    in-out property <[BlueprintLinkInfo]> blueprint-link-items: [];
     in-out property <[ProjectPageInfo]> project-page-items: [];
     in-out property <[SelectionInfo]> outline-elements: [];
     in-out property <int> active-page-index: 0;
@@ -42,6 +43,8 @@ export component BlueprintEditorScene inherits Rectangle {
     callback move-blueprint-node(string, float, float);
     callback delete-blueprint-node(string);
     callback duplicate-blueprint-node(string, float, float);
+    callback connect-blueprint-nodes(string, string, int, float, float) -> bool;
+    callback bind-blueprint-event-source(string, string);
     callback rename-blueprint-variable(string, string);
     callback set-blueprint-variable-type(string, string);
     callback set-blueprint-variable-item-type(string, string);
@@ -231,6 +234,7 @@ export component BlueprintEditorScene inherits Rectangle {
             offset-x <=> root.blueprint-offset-x;
             offset-y <=> root.blueprint-offset-y;
             nodes: root.blueprint-node-items;
+            links: root.blueprint-link-items;
             scene-elements: root.outline-elements;
             grid-visible: true;
             grid-size: 24px;
@@ -253,7 +257,12 @@ export component BlueprintEditorScene inherits Rectangle {
             node-create-requested(descriptor-id, x, y) => {
                 root.add-blueprint-catalog-node(descriptor-id, x, y);
             }
-            node-bind-source-requested(_node-id, _element-id) => { }
+            node-bind-source-requested(node-id, element-id) => {
+                root.bind-blueprint-event-source(node-id, element-id);
+            }
+            connect-blueprint-nodes(source-node-id, source-pin-kind, source-pin-slot, x, y) => {
+                root.connect-blueprint-nodes(source-node-id, source-pin-kind, source-pin-slot, x, y)
+            }
         }
     }
 

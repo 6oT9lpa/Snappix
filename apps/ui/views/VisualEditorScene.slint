@@ -105,6 +105,7 @@ export component VisualEditorScene inherits Rectangle {
     in-out property <HotkeyBinding> copy-hotkey: { key: "c", ctrl: true, shift: false, alt: false };
     in-out property <HotkeyBinding> paste-hotkey: { key: "v", ctrl: true, shift: false, alt: false };
     in-out property <HotkeyBinding> paste-replace-hotkey: { key: "r", ctrl: true, shift: false, alt: false };
+    in-out property <HotkeyBinding> hide-selection-hotkey: { key: "h", ctrl: true, shift: false, alt: false };
     in-out property <HotkeyBinding> delete-hotkey: { key: "delete", ctrl: false, shift: false, alt: false };
     in-out property <HotkeyBinding> rename-hotkey: { key: "f2", ctrl: false, shift: false, alt: true };
     in-out property <HotkeyBinding> exit-project-hotkey: { key: "q", ctrl: true, shift: false, alt: false };
@@ -173,6 +174,7 @@ export component VisualEditorScene inherits Rectangle {
     callback copy-requested();
     callback paste-requested(float, float);
     callback paste-replace-requested(float, float);
+    callback hide-selection-requested();
     callback flip-vertical-requested();
     callback flip-horizontal-requested();
     callback exit-project-requested();
@@ -407,6 +409,7 @@ export component VisualEditorScene inherits Rectangle {
                 normalized == expected
                 || (expected == "/" && normalized == ".")
                 || (expected == "." && normalized == "/")
+                || (binding.ctrl && expected == "h" && normalized == "backspace")
             );
     }
 
@@ -494,6 +497,16 @@ export component VisualEditorScene inherits Rectangle {
                 root.paste-replace-hotkey
             ) {
                 root.paste-replace-requested(canvas-view.cursor-canvas-x, canvas-view.cursor-canvas-y);
+                return accept;
+            }
+            if root.matches-hotkey-binding(
+                event.text,
+                event.modifiers.control,
+                event.modifiers.shift,
+                event.modifiers.alt,
+                root.hide-selection-hotkey
+            ) {
+                root.hide-selection-requested();
                 return accept;
             }
             if root.matches-hotkey-binding(

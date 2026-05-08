@@ -31,6 +31,7 @@ pub struct BlueprintEditorState {
 pub struct EditorState {
     pub project_manager: Arc<Mutex<ProjectManager>>,
     pub selected_elements: Rc<RefCell<Vec<Uuid>>>,
+    pub hidden_elements: Rc<RefCell<HashSet<Uuid>>>,
     pub collapsed_outline_nodes: Rc<RefCell<HashSet<Uuid>>>,
     pub transform_preview: Rc<RefCell<Option<TransformPreviewState>>>,
     #[allow(dead_code)]
@@ -44,6 +45,7 @@ impl EditorState {
         Self {
             project_manager: Arc::new(Mutex::new(ProjectManager::new())),
             selected_elements: Rc::new(RefCell::new(Vec::new())),
+            hidden_elements: Rc::new(RefCell::new(HashSet::new())),
             collapsed_outline_nodes: Rc::new(RefCell::new(HashSet::new())),
             transform_preview: Rc::new(RefCell::new(None)),
             blueprint: BlueprintEditorState::default(),

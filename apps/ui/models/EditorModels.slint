@@ -168,9 +168,26 @@ export struct BlueprintNodeInfo {
     exec-output-1: string,
     exec-output-2: string,
     exec-output-3: string,
+    exec-output-1-connected: bool,
+    exec-output-2-connected: bool,
+    exec-output-3-connected: bool,
+    data-output-name: string,
+    data-output-type: string,
+    data-output-color: color,
+    data-output-connected: bool,
     data-input-name: string,
     data-input-type: string,
     data-input-color: color,
+}
+
+export struct BlueprintLinkInfo {
+    from-node-id: string,
+    to-node-id: string,
+    from-x: float,
+    from-y: float,
+    to-x: float,
+    to-y: float,
+    link-color: color,
 }
 
 export enum CanvasCursor {
