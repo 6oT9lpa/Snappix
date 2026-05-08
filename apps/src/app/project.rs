@@ -10,24 +10,25 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use core_blueprint::{
-    blueprint_name_for_page, builtin_node_descriptor, compile_project, BlueprintCompilationResult,
-    BlueprintDocument, BlueprintDocumentKind, BlueprintFunctionParameter,
-    BlueprintFunctionSignature, BlueprintGraph, BlueprintGraphKind, BlueprintLocalVariable,
-    BlueprintNode, BlueprintNodeKind, BlueprintOwner, BlueprintPinType, BlueprintPoint,
-    BlueprintProjectApi, PageApiDescriptor, ServerApiDescriptor, UiActionDescriptor,
-    UiElementApiDescriptor, UiEventDescriptor,
+    blueprint_name_for_page, compile_project, BlueprintCompilationResult, BlueprintDocument,
+    BlueprintDocumentKind, BlueprintFunctionParameter, BlueprintFunctionSignature, BlueprintGraph,
+    BlueprintGraphKind, BlueprintLink, BlueprintLocalVariable, BlueprintNode, BlueprintNodeKind,
+    BlueprintOwner, BlueprintPinType, BlueprintPoint, BlueprintProjectApi, PageApiDescriptor,
+    ServerApiDescriptor, UiActionDescriptor, UiElementApiDescriptor, UiEventDescriptor,
 };
 use core_ui_graphs::{
-    layout::{
-        AlignContent, AlignItems, FlexDirection, FlexLayout, FlexWrap, GridLayout, JustifyContent,
-        LayoutStyles, SizeValue,
-    },
     project::{
         Page as CorePage, PageComment as CorePageComment, PageCommentImage as CorePageCommentImage,
     },
     ElementKind, FormFactor, Os, Platform as CorePlatform, ProjectManifest, ProjectMode, UiElement,
 };
+use project_core as project_domain;
+use project_core::{
+    apply_geometry_snapshot_recursive, build_page_root, clamp_to_parent_bounds, page_size,
+    rotate_vector, set_element_geometry, transform_descendant_geometry_with_parent,
+};
 use project_manager::{operations, EditorDocumentRef, ProjectFile};
+use shared::{log_fields, LogCategory, LogLevel, LogMessage};
 
 const COMMENT_TITLE_MAX_CHARS: usize = 120;
 const COMMENT_BODY_MAX_CHARS: usize = 8_192;
@@ -111,496 +112,7 @@ impl PageSize {
     }
 }
 
-/// Canvas element data for UI layer.
-#[derive(Debug, Clone, Default)]
-pub struct CanvasElementData {
-    pub id: Uuid,
-    pub element_type: String,
-    pub x: f32,
-    pub y: f32,
-    pub width: f32,
-    pub height: f32,
-    pub rotation: f32,
-    pub properties: serde_json::Value,
-}
-
-impl CanvasElementData {
-    pub fn from_component_template(element_type: &str, x: f32, y: f32) -> Self {
-        let (width, height) = Self::template_size(element_type);
-        let mut props = Self::template_properties(element_type);
-        props.insert("element_type".to_string(), serde_json::json!(element_type));
-        props.insert(
-            "display_name".to_string(),
-            serde_json::json!(Self::display_name(element_type)),
-        );
-        props.insert(
-            "name".to_string(),
-            serde_json::json!(Self::name_seed(element_type)),
-        );
-
-        Self {
-            id: Uuid::new_v4(),
-            element_type: element_type.to_string(),
-            x,
-            y,
-            width,
-            height,
-            rotation: 0.0,
-            properties: serde_json::to_value(props).unwrap_or_else(|_| serde_json::json!({})),
-        }
-    }
-
-    fn display_name(element_type: &str) -> &'static str {
-        match element_type {
-            "flex-container" | "flex" => "Flex Container",
-            "grid-container" | "grid" => "Grid Container",
-            "stack-container" | "stack" => "Stack Container",
-            "div" => "Div",
-            "text" => "Text",
-            "label" => "Label",
-            "button" => "Button",
-            "input" => "Input",
-            "textarea" => "Textarea",
-            "checkbox" => "Checkbox",
-            "image" => "Image",
-            "video" => "Video",
-            "audio" => "Audio",
-            "select" => "Select",
-            "radio" => "Radio",
-            "slider" => "Slider",
-            "switch" => "Switch",
-            _ => "Component",
-        }
-    }
-
-    fn name_seed(element_type: &str) -> String {
-        match element_type {
-            "flex-container" => "flex",
-            "grid-container" => "grid",
-            "stack-container" => "stack",
-            other => other,
-        }
-        .replace('-', "")
-        .to_lowercase()
-    }
-
-    fn template_size(element_type: &str) -> (f32, f32) {
-        match element_type {
-            "flex-container" | "stack-container" | "div" => (320.0, 200.0),
-            "grid-container" => (360.0, 240.0),
-            "text" => (220.0, 40.0),
-            "label" => (220.0, 28.0),
-            "button" => (140.0, 42.0),
-            "input" | "select" => (220.0, 40.0),
-            "textarea" => (260.0, 120.0),
-            "checkbox" | "radio" | "switch" => (180.0, 32.0),
-            "slider" => (220.0, 24.0),
-            "image" | "video" | "audio" => (260.0, 160.0),
-            _ => (140.0, 100.0),
-        }
-    }
-
-    fn template_properties(element_type: &str) -> HashMap<String, serde_json::Value> {
-        let mut props = HashMap::new();
-        props.insert("background".to_string(), serde_json::json!("#ffffff"));
-        props.insert("border_color".to_string(), serde_json::json!("#4a4a4a"));
-        props.insert("border_width".to_string(), serde_json::json!(0.0));
-        props.insert("border_radius".to_string(), serde_json::json!(6.0));
-        props.insert(
-            "text".to_string(),
-            serde_json::json!(Self::display_name(element_type)),
-        );
-        props.insert("text_color".to_string(), serde_json::json!("#f5f5f5"));
-        props.insert("font_size".to_string(), serde_json::json!(14.0));
-        props.insert("font_family".to_string(), serde_json::json!("Sans"));
-        props.insert("text_wrap".to_string(), serde_json::json!("wrap"));
-        props.insert("inherit_text_style".to_string(), serde_json::json!(true));
-        props.insert("background_image".to_string(), serde_json::json!(""));
-        props.insert("image_src".to_string(), serde_json::json!(""));
-        props.insert("locked".to_string(), serde_json::json!(false));
-        props.insert("flip_horizontal".to_string(), serde_json::json!(false));
-        props.insert("flip_vertical".to_string(), serde_json::json!(false));
-        props.insert("positioning".to_string(), serde_json::json!("absolute"));
-        props.insert("responsive_mode".to_string(), serde_json::json!("manual"));
-        props.insert("container_mode".to_string(), serde_json::json!("absolute"));
-        props.insert(
-            "allow_absolute_children".to_string(),
-            serde_json::json!(false),
-        );
-        props.insert("layout_padding".to_string(), serde_json::json!(8.0));
-        props.insert("layout_padding_left".to_string(), serde_json::json!(8.0));
-        props.insert("layout_padding_right".to_string(), serde_json::json!(8.0));
-        props.insert("layout_padding_top".to_string(), serde_json::json!(8.0));
-        props.insert("layout_padding_bottom".to_string(), serde_json::json!(8.0));
-        props.insert("layout_spacing".to_string(), serde_json::json!(8.0));
-        props.insert("layout_margin".to_string(), serde_json::json!(0.0));
-        props.insert("layout_margin_left".to_string(), serde_json::json!(0.0));
-        props.insert("layout_margin_right".to_string(), serde_json::json!(0.0));
-        props.insert("layout_margin_top".to_string(), serde_json::json!(0.0));
-        props.insert("layout_margin_bottom".to_string(), serde_json::json!(0.0));
-        props.insert("layout_order".to_string(), serde_json::json!(0.0));
-        props.insert("opacity".to_string(), serde_json::json!(1.0));
-        props.insert("display_mode".to_string(), serde_json::json!("visible"));
-        props.insert("stack_alignment".to_string(), serde_json::json!("stretch"));
-        props.insert("justify_items".to_string(), serde_json::json!("stretch"));
-        props.insert(
-            "justify_content".to_string(),
-            serde_json::json!("flex-start"),
-        );
-        props.insert("align_items".to_string(), serde_json::json!("stretch"));
-        props.insert("align_content".to_string(), serde_json::json!("stretch"));
-        props.insert(
-            "place_items".to_string(),
-            serde_json::json!("stretch stretch"),
-        );
-        props.insert("flex_flow".to_string(), serde_json::json!("column nowrap"));
-        props.insert(
-            "grid_template_columns".to_string(),
-            serde_json::json!("1fr 1fr"),
-        );
-        props.insert(
-            "grid_template_rows".to_string(),
-            serde_json::json!("auto auto"),
-        );
-        props.insert("grid_template_areas".to_string(), serde_json::json!(""));
-
-        match element_type {
-            "stack-container" | "stack" => {
-                props.insert("background".to_string(), serde_json::json!("#ffffff"));
-                props.insert("container_mode".to_string(), serde_json::json!("stack"));
-                props.insert("display".to_string(), serde_json::json!("block"));
-                props.insert(
-                    "positioning_mode".to_string(),
-                    serde_json::json!("absolute-children"),
-                );
-            }
-            "grid-container" | "grid" => {
-                props.insert("background".to_string(), serde_json::json!("#ffffff"));
-                props.insert("container_mode".to_string(), serde_json::json!("grid"));
-                props.insert("display".to_string(), serde_json::json!("grid"));
-                props.insert(
-                    "responsive_mode".to_string(),
-                    serde_json::json!("layout-managed"),
-                );
-                props.insert("grid_columns".to_string(), serde_json::json!("1fr 1fr"));
-                props.insert("grid_rows".to_string(), serde_json::json!("auto auto"));
-                props.insert("grid_auto_flow".to_string(), serde_json::json!("row"));
-                props.insert(
-                    "positioning_mode".to_string(),
-                    serde_json::json!("grid-only"),
-                );
-            }
-            "flex-container" | "flex" => {
-                props.insert("background".to_string(), serde_json::json!("#ffffff"));
-                props.insert("container_mode".to_string(), serde_json::json!("flex"));
-                props.insert("display".to_string(), serde_json::json!("flex"));
-                props.insert(
-                    "responsive_mode".to_string(),
-                    serde_json::json!("layout-managed"),
-                );
-                props.insert("flex_direction".to_string(), serde_json::json!("column"));
-                props.insert("flex_wrap".to_string(), serde_json::json!("nowrap"));
-                props.insert(
-                    "justify_content".to_string(),
-                    serde_json::json!("flex-start"),
-                );
-                props.insert("align_items".to_string(), serde_json::json!("stretch"));
-                props.insert(
-                    "positioning_mode".to_string(),
-                    serde_json::json!("flex-only"),
-                );
-            }
-            "div" => {
-                props.insert("background".to_string(), serde_json::json!("#ffffff"));
-                props.remove("display");
-                props.insert("text".to_string(), serde_json::json!(""));
-                props.insert("container_mode".to_string(), serde_json::json!("absolute"));
-                props.insert(
-                    "positioning_mode".to_string(),
-                    serde_json::json!("absolute-children"),
-                );
-            }
-            "text" => {
-                props.insert("background".to_string(), serde_json::json!("#0000"));
-                props.insert("text".to_string(), serde_json::json!("Text"));
-                props.insert("font_size".to_string(), serde_json::json!(20.0));
-                props.insert("border_width".to_string(), serde_json::json!(0.0));
-                props.insert("wrap_text".to_string(), serde_json::json!(true));
-            }
-            "label" => {
-                props.insert("background".to_string(), serde_json::json!("#0000"));
-                props.insert("text".to_string(), serde_json::json!("Label"));
-                props.insert("font_size".to_string(), serde_json::json!(18.0));
-                props.insert("border_width".to_string(), serde_json::json!(0.0));
-                props.insert("single_line".to_string(), serde_json::json!(true));
-                props.insert("wrap_text".to_string(), serde_json::json!(false));
-                props.insert("text_wrap".to_string(), serde_json::json!("nowrap"));
-            }
-            "button" => {
-                props.insert("background".to_string(), serde_json::json!("#2f7bff"));
-                props.insert("text".to_string(), serde_json::json!("Button"));
-                props.insert("border_radius".to_string(), serde_json::json!(8.0));
-                props.insert("text_wrap".to_string(), serde_json::json!("nowrap"));
-            }
-            "input" => {
-                props.insert("background".to_string(), serde_json::json!("#151515"));
-                props.insert("text".to_string(), serde_json::json!(""));
-                props.insert("placeholder".to_string(), serde_json::json!("Type here"));
-                props.insert("focus_on_click".to_string(), serde_json::json!(true));
-                props.insert("single_line".to_string(), serde_json::json!(true));
-                props.insert("text_wrap".to_string(), serde_json::json!("nowrap"));
-            }
-            "textarea" => {
-                props.insert("background".to_string(), serde_json::json!("#151515"));
-                props.insert("text".to_string(), serde_json::json!(""));
-                props.insert(
-                    "placeholder".to_string(),
-                    serde_json::json!("Type multiple lines"),
-                );
-                props.insert("focus_on_click".to_string(), serde_json::json!(true));
-                props.insert("single_line".to_string(), serde_json::json!(false));
-                props.insert("wrap_text".to_string(), serde_json::json!(true));
-            }
-            "checkbox" => {
-                props.insert("text".to_string(), serde_json::json!("Checkbox"));
-                props.insert("checked".to_string(), serde_json::json!(false));
-                props.insert("checkbox_box_side".to_string(), serde_json::json!("left"));
-                props.insert(
-                    "checkbox_check_color".to_string(),
-                    serde_json::json!("#f5f5f5"),
-                );
-                props.insert(
-                    "checkbox_box_color".to_string(),
-                    serde_json::json!("#151515"),
-                );
-                props.insert(
-                    "checkbox_box_border_color".to_string(),
-                    serde_json::json!("#4a4a4a"),
-                );
-                props.insert(
-                    "checkbox_box_border_width".to_string(),
-                    serde_json::json!(1.0),
-                );
-                props.insert(
-                    "checkbox_space_between".to_string(),
-                    serde_json::json!(false),
-                );
-            }
-            "select" => {
-                props.insert("text".to_string(), serde_json::json!("Select..."));
-            }
-            "radio" => {
-                props.insert("text".to_string(), serde_json::json!("Radio"));
-            }
-            "slider" => {
-                props.insert("value".to_string(), serde_json::json!(50));
-            }
-            "switch" => {
-                props.insert("value".to_string(), serde_json::json!(false));
-            }
-            "image" | "video" | "audio" => {
-                props.insert("background".to_string(), serde_json::json!("#141820"));
-                props.insert(
-                    "text".to_string(),
-                    serde_json::json!(if element_type == "image" {
-                        "No image"
-                    } else {
-                        Self::display_name(element_type)
-                    }),
-                );
-                if element_type == "image" {
-                    props.insert("src".to_string(), serde_json::json!(""));
-                    props.insert("alt".to_string(), serde_json::json!(""));
-                    props.insert("image_src".to_string(), serde_json::json!(""));
-                }
-            }
-            _ => {}
-        }
-
-        props
-    }
-
-    fn kind_for_type(element_type: &str) -> ElementKind {
-        match element_type {
-            "flex-container" | "flex" => ElementKind::FlexContainer,
-            "grid-container" | "grid" => ElementKind::GridContainer,
-            "stack-container" | "stack" => ElementKind::StackContainer,
-            "div" => ElementKind::Div,
-            "text" => ElementKind::Text,
-            "label" => ElementKind::Label,
-            "input" | "select" | "radio" | "slider" | "switch" => ElementKind::Input,
-            "textarea" => ElementKind::Textarea,
-            "checkbox" => ElementKind::Checkbox,
-            "image" | "video" | "audio" => ElementKind::Image,
-            "button" => ElementKind::Button,
-            _ => ElementKind::FlexContainer,
-        }
-    }
-
-    fn layout_for_type(element_type: &str) -> LayoutStyles {
-        match element_type {
-            "flex-container" | "flex" => LayoutStyles::Flex(FlexLayout {
-                direction: FlexDirection::Column,
-                wrap: FlexWrap::NoWrap,
-                justify_content: JustifyContent::FlexStart,
-                align_items: AlignItems::Stretch,
-                align_content: AlignContent::Stretch,
-                gap: Some(SizeValue::Pixels(8.0)),
-            }),
-            "grid-container" | "grid" => LayoutStyles::Grid(GridLayout {
-                columns: vec![SizeValue::Fraction(1.0), SizeValue::Fraction(1.0)],
-                rows: vec![SizeValue::Auto, SizeValue::Auto],
-                gap: Some(SizeValue::Pixels(8.0)),
-            }),
-            "stack-container" | "stack" | "div" => LayoutStyles::Block { overflow: None },
-            _ => LayoutStyles::Block { overflow: None },
-        }
-    }
-
-    /// Convert to core UiElement.
-    pub fn to_ui_element(&self) -> UiElement {
-        let mut props = Self::template_properties(self.element_type.as_str());
-        props.insert(
-            "element_type".to_string(),
-            serde_json::json!(self.element_type.clone()),
-        );
-        props.insert("x".to_string(), serde_json::json!(self.x));
-        props.insert("y".to_string(), serde_json::json!(self.y));
-        props.insert("width".to_string(), serde_json::json!(self.width));
-        props.insert("height".to_string(), serde_json::json!(self.height));
-        props.insert("rotation".to_string(), serde_json::json!(self.rotation));
-
-        if let Some(obj) = self.properties.as_object() {
-            for (k, v) in obj {
-                props.insert(k.clone(), v.clone());
-            }
-        }
-
-        UiElement {
-            id: self.id,
-            kind: Self::kind_for_type(self.element_type.as_str()),
-            layout: Self::layout_for_type(self.element_type.as_str()),
-            children: Vec::new(),
-            properties: props,
-        }
-    }
-
-    /// Create from core UiElement.
-    pub fn from_ui_element(element: &UiElement) -> Self {
-        let fallback_type = match element.kind {
-            ElementKind::FlexContainer => "flex-container",
-            ElementKind::GridContainer => "grid-container",
-            ElementKind::StackContainer => "stack-container",
-            ElementKind::Div => "div",
-            ElementKind::Text => "text",
-            ElementKind::Label => "label",
-            ElementKind::Input => "input",
-            ElementKind::Textarea => "textarea",
-            ElementKind::Checkbox => "checkbox",
-            ElementKind::Image => "image",
-            ElementKind::Button => "button",
-            _ => "div",
-        };
-
-        let raw_element_type = element
-            .properties
-            .get("element_type")
-            .and_then(|v| v.as_str())
-            .unwrap_or(fallback_type);
-        let element_type = match raw_element_type {
-            "vector" | "vector-line" | "vector-rect" | "vector-ellipse" | "vector-pen" => "div",
-            other => other,
-        }
-        .to_string();
-
-        let x = element
-            .properties
-            .get("x")
-            .and_then(|v| v.as_f64())
-            .map(|v| v as f32)
-            .unwrap_or(0.0);
-        let y = element
-            .properties
-            .get("y")
-            .and_then(|v| v.as_f64())
-            .map(|v| v as f32)
-            .unwrap_or(0.0);
-        let width = element
-            .properties
-            .get("width")
-            .and_then(|v| v.as_f64())
-            .map(|v| v as f32)
-            .unwrap_or(100.0);
-        let height = element
-            .properties
-            .get("height")
-            .and_then(|v| v.as_f64())
-            .map(|v| v as f32)
-            .unwrap_or(100.0);
-        let rotation = element
-            .properties
-            .get("rotation")
-            .and_then(|v| v.as_f64())
-            .map(|v| v as f32)
-            .unwrap_or(0.0);
-
-        Self {
-            id: element.id,
-            element_type,
-            x,
-            y,
-            width,
-            height,
-            rotation,
-            properties: serde_json::to_value(&element.properties)
-                .unwrap_or_else(|_| serde_json::json!({})),
-        }
-    }
-}
-
-fn build_page_root(width: u32, height: u32) -> UiElement {
-    let mut root_props = HashMap::new();
-    root_props.insert("width".to_string(), serde_json::json!(width));
-    root_props.insert("height".to_string(), serde_json::json!(height));
-    root_props.insert("element_type".to_string(), serde_json::json!("root-canvas"));
-    root_props.insert("display_name".to_string(), serde_json::json!("Canvas Root"));
-
-    UiElement {
-        id: Uuid::new_v4(),
-        kind: ElementKind::FlexContainer,
-        layout: LayoutStyles::Flex(FlexLayout {
-            direction: FlexDirection::Column,
-            wrap: FlexWrap::NoWrap,
-            justify_content: JustifyContent::FlexStart,
-            align_items: AlignItems::Stretch,
-            align_content: AlignContent::Stretch,
-            gap: None,
-        }),
-        children: Vec::new(),
-        properties: root_props,
-    }
-}
-
-fn page_size(page: &CorePage) -> (u32, u32) {
-    let Some(root) = page.children.first() else {
-        return (1920, 1080);
-    };
-
-    let width = root
-        .properties
-        .get("width")
-        .and_then(|v| v.as_u64().or_else(|| v.as_f64().map(|n| n as u64)))
-        .map(|v| v as u32)
-        .unwrap_or(1920);
-    let height = root
-        .properties
-        .get("height")
-        .and_then(|v| v.as_u64().or_else(|| v.as_f64().map(|n| n as u64)))
-        .map(|v| v as u32)
-        .unwrap_or(1080);
-
-    (width, height)
-}
+pub use project_core::CanvasElementData;
 
 fn collect_elements_recursive<'a>(elements: &'a [UiElement], out: &mut Vec<&'a UiElement>) {
     for element in elements {
@@ -1074,6 +586,10 @@ fn blueprint_events_for_element_type(element_type: &str) -> Vec<UiEventDescripto
             ui_event_descriptor("clicked", "Clicked"),
             ui_event_descriptor("hovered", "Hovered"),
         ],
+        "label" => vec![
+            ui_event_descriptor("clicked", "Clicked"),
+            ui_event_descriptor("hovered", "Hovered"),
+        ],
         "input" | "textarea" | "select" | "slider" => vec![
             ui_event_descriptor("changed", "Changed"),
             ui_event_descriptor("focused", "Focused"),
@@ -1241,191 +757,6 @@ fn collect_descendant_ids(
             out.push(*child_id);
             collect_descendant_ids(*child_id, children_map, out);
         }
-    }
-}
-
-fn rotate_vector(x: f32, y: f32, rotation_deg: f32) -> (f32, f32) {
-    let radians = rotation_deg.to_radians();
-    let cos_v = radians.cos();
-    let sin_v = radians.sin();
-    (x * cos_v - y * sin_v, x * sin_v + y * cos_v)
-}
-
-fn rotated_bounding_box(width: f32, height: f32, rotation_deg: f32) -> (f32, f32) {
-    let radians = rotation_deg.to_radians();
-    let abs_cos = radians.cos().abs();
-    let abs_sin = radians.sin().abs();
-    (
-        width * abs_cos + height * abs_sin,
-        width * abs_sin + height * abs_cos,
-    )
-}
-
-fn clamp_to_parent_bounds(
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-    child_rotation: f32,
-    parent_x: f32,
-    parent_y: f32,
-    parent_width: f32,
-    parent_height: f32,
-    parent_rotation: f32,
-) -> (f32, f32, f32, f32) {
-    let safe_parent_width = parent_width.max(1.0);
-    let safe_parent_height = parent_height.max(1.0);
-    let mut width = width.max(1.0);
-    let mut height = height.max(1.0);
-
-    let relative_rotation = normalize_rotation(child_rotation - parent_rotation);
-    let (bbox_w, bbox_h) = rotated_bounding_box(width, height, relative_rotation);
-    let scale = (safe_parent_width / bbox_w.max(1.0))
-        .min(safe_parent_height / bbox_h.max(1.0))
-        .min(1.0);
-    width = (width * scale).max(1.0);
-    height = (height * scale).max(1.0);
-
-    let (bbox_w, bbox_h) = rotated_bounding_box(width, height, relative_rotation);
-    let parent_center_x = parent_x + safe_parent_width / 2.0;
-    let parent_center_y = parent_y + safe_parent_height / 2.0;
-    let child_center_x = x + width / 2.0;
-    let child_center_y = y + height / 2.0;
-    let (local_center_x, local_center_y) = rotate_vector(
-        child_center_x - parent_center_x,
-        child_center_y - parent_center_y,
-        -parent_rotation,
-    );
-
-    let min_local_x = -safe_parent_width / 2.0 + bbox_w / 2.0;
-    let max_local_x = (safe_parent_width / 2.0 - bbox_w / 2.0).max(min_local_x);
-    let min_local_y = -safe_parent_height / 2.0 + bbox_h / 2.0;
-    let max_local_y = (safe_parent_height / 2.0 - bbox_h / 2.0).max(min_local_y);
-
-    let clamped_local_x = local_center_x.clamp(min_local_x, max_local_x);
-    let clamped_local_y = local_center_y.clamp(min_local_y, max_local_y);
-    let (world_offset_x, world_offset_y) =
-        rotate_vector(clamped_local_x, clamped_local_y, parent_rotation);
-    let clamped_center_x = parent_center_x + world_offset_x;
-    let clamped_center_y = parent_center_y + world_offset_y;
-
-    (
-        clamped_center_x - width / 2.0,
-        clamped_center_y - height / 2.0,
-        width,
-        height,
-    )
-}
-
-fn normalize_rotation(rotation: f32) -> f32 {
-    let mut normalized = rotation;
-    while normalized > 180.0 {
-        normalized -= 360.0;
-    }
-    while normalized < -180.0 {
-        normalized += 360.0;
-    }
-    normalized
-}
-
-fn transform_descendant_geometry_with_parent(
-    child_x: f32,
-    child_y: f32,
-    child_width: f32,
-    child_height: f32,
-    child_rotation: f32,
-    old_parent_x: f32,
-    old_parent_y: f32,
-    old_parent_width: f32,
-    old_parent_height: f32,
-    old_parent_rotation: f32,
-    new_parent_x: f32,
-    new_parent_y: f32,
-    new_parent_width: f32,
-    new_parent_height: f32,
-    new_parent_rotation: f32,
-) -> (f32, f32, f32, f32, f32) {
-    let safe_old_width = old_parent_width.max(1.0);
-    let safe_old_height = old_parent_height.max(1.0);
-    let safe_new_width = new_parent_width.max(1.0);
-    let safe_new_height = new_parent_height.max(1.0);
-
-    let scale_x = safe_new_width / safe_old_width;
-    let scale_y = safe_new_height / safe_old_height;
-
-    let old_parent_center_x = old_parent_x + safe_old_width / 2.0;
-    let old_parent_center_y = old_parent_y + safe_old_height / 2.0;
-    let new_parent_center_x = new_parent_x + safe_new_width / 2.0;
-    let new_parent_center_y = new_parent_y + safe_new_height / 2.0;
-    let child_center_x = child_x + child_width / 2.0;
-    let child_center_y = child_y + child_height / 2.0;
-    let (local_center_x, local_center_y) = rotate_vector(
-        child_center_x - old_parent_center_x,
-        child_center_y - old_parent_center_y,
-        -old_parent_rotation,
-    );
-    let scaled_local_x = local_center_x * scale_x;
-    let scaled_local_y = local_center_y * scale_y;
-    let (world_offset_x, world_offset_y) =
-        rotate_vector(scaled_local_x, scaled_local_y, new_parent_rotation);
-    let new_center_x = new_parent_center_x + world_offset_x;
-    let new_center_y = new_parent_center_y + world_offset_y;
-
-    let delta_rotation = normalize_rotation(new_parent_rotation - old_parent_rotation);
-    let new_width = (child_width * scale_x).max(1.0);
-    let new_height = (child_height * scale_y).max(1.0);
-    let new_x = new_center_x - new_width / 2.0;
-    let new_y = new_center_y - new_height / 2.0;
-    let new_rotation = normalize_rotation(child_rotation + delta_rotation);
-
-    (new_x, new_y, new_width, new_height, new_rotation)
-}
-
-fn set_element_geometry(
-    element: &mut UiElement,
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-    rotation: f32,
-) {
-    element
-        .properties
-        .insert("x".to_string(), serde_json::json!(x));
-    element
-        .properties
-        .insert("y".to_string(), serde_json::json!(y));
-    element
-        .properties
-        .insert("width".to_string(), serde_json::json!(width));
-    element
-        .properties
-        .insert("height".to_string(), serde_json::json!(height));
-    element
-        .properties
-        .insert("rotation".to_string(), serde_json::json!(rotation));
-}
-
-fn apply_geometry_snapshot_recursive(
-    elements: &mut [UiElement],
-    snapshot: &HashMap<Uuid, (f32, f32, f32, f32, f32)>,
-    any_updated: &mut bool,
-) {
-    for element in elements {
-        if let Some((x, y, width, height, rotation)) = snapshot.get(&element.id).copied() {
-            let previous = CanvasElementData::from_ui_element(element);
-            if (previous.x - x).abs() > 0.001
-                || (previous.y - y).abs() > 0.001
-                || (previous.width - width).abs() > 0.001
-                || (previous.height - height).abs() > 0.001
-                || (previous.rotation - rotation).abs() > 0.001
-            {
-                *any_updated = true;
-                set_element_geometry(element, x, y, width, height, rotation);
-            }
-        }
-
-        apply_geometry_snapshot_recursive(&mut element.children, snapshot, any_updated);
     }
 }
 
@@ -1829,57 +1160,57 @@ impl Project {
             .unwrap_or_default()
     }
 
+    pub fn active_blueprint_links(&self) -> Vec<BlueprintLink> {
+        self.active_blueprint_document()
+            .and_then(|document| document.graphs.first())
+            .map(|graph| graph.links.clone())
+            .unwrap_or_default()
+    }
+
     pub fn add_catalog_node_to_active_blueprint(
         &mut self,
         descriptor_id: &str,
         preferred_x: f32,
         preferred_y: f32,
     ) -> Option<Uuid> {
-        let descriptor = builtin_node_descriptor(descriptor_id)?;
+        let document_kind = self.active_blueprint_document()?.kind;
         let graph = self.active_blueprint_graph_mut()?;
-        let mut node = descriptor.instantiate(BlueprintPoint {
-            x: preferred_x.round() as i32,
-            y: preferred_y.round() as i32,
-        });
-        node.position = nearest_free_blueprint_position(
-            &graph.nodes,
-            node.position,
-            blueprint_node_size(&node.kind),
-        );
-        let node_id = node.id;
-        graph.nodes.push(node);
-        Some(node_id)
+        project_domain::add_catalog_node(
+            graph,
+            document_kind,
+            descriptor_id,
+            BlueprintPoint {
+                x: preferred_x.round() as i32,
+                y: preferred_y.round() as i32,
+            },
+        )
+        .ok()
+        .and_then(|outcome| outcome.affected_node_id)
     }
 
     pub fn move_node_in_active_blueprint(&mut self, node_id: Uuid, x: f32, y: f32) -> bool {
         let Some(graph) = self.active_blueprint_graph_mut() else {
             return false;
         };
-        let Some(node) = graph.nodes.iter_mut().find(|node| node.id == node_id) else {
-            return false;
-        };
-        node.position = BlueprintPoint {
-            x: x.round() as i32,
-            y: y.round() as i32,
-        };
-        true
+        project_domain::move_node(
+            graph,
+            node_id,
+            BlueprintPoint {
+                x: x.round() as i32,
+                y: y.round() as i32,
+            },
+        )
+        .map(|outcome| outcome.changed)
+        .unwrap_or(false)
     }
 
     pub fn delete_node_from_active_blueprint(&mut self, node_id: Uuid) -> bool {
         let Some(graph) = self.active_blueprint_graph_mut() else {
             return false;
         };
-        let Some(position) = graph.nodes.iter().position(|node| node.id == node_id) else {
-            return false;
-        };
-        graph.nodes.remove(position);
-        graph
-            .entrypoints
-            .retain(|entrypoint| *entrypoint != node_id);
-        graph
-            .links
-            .retain(|link| link.from_node_id != node_id && link.to_node_id != node_id);
-        true
+        project_domain::delete_node(graph, node_id)
+            .map(|outcome| outcome.changed)
+            .unwrap_or(false)
     }
 
     pub fn duplicate_node_in_active_blueprint(
@@ -1889,19 +1220,75 @@ impl Project {
         preferred_y: f32,
     ) -> Option<Uuid> {
         let graph = self.active_blueprint_graph_mut()?;
-        let source = graph.nodes.iter().find(|node| node.id == node_id)?.clone();
-        let mut duplicate = clone_blueprint_node_with_new_ids(&source);
-        duplicate.position = nearest_free_blueprint_position(
-            &graph.nodes,
+        project_domain::duplicate_node(
+            graph,
+            node_id,
             BlueprintPoint {
                 x: preferred_x.round() as i32,
                 y: preferred_y.round() as i32,
             },
-            blueprint_node_size(&duplicate.kind),
-        );
-        let duplicate_id = duplicate.id;
-        graph.nodes.push(duplicate);
-        Some(duplicate_id)
+        )
+        .ok()
+        .and_then(|outcome| outcome.affected_node_id)
+    }
+
+    pub fn bind_catalog_event_node_to_element_in_active_blueprint(
+        &mut self,
+        node_id: Uuid,
+        element_id: Uuid,
+    ) -> bool {
+        if self
+            .active_blueprint_document()
+            .map(|document| document.kind)
+            != Some(BlueprintDocumentKind::PageBlueprint)
+        {
+            return false;
+        }
+        let document_kind = BlueprintDocumentKind::PageBlueprint;
+        let Some(element) = self.get_element_on_active_page(element_id) else {
+            return false;
+        };
+        let element_type = element.element_type.clone();
+        let Some(graph) = self.active_blueprint_graph_mut() else {
+            return false;
+        };
+        project_domain::bind_catalog_event_node_to_element_type(
+            graph,
+            document_kind,
+            node_id,
+            element_id,
+            &element_type,
+        )
+        .map(|outcome| outcome.changed)
+        .unwrap_or(false)
+    }
+
+    pub fn connect_nodes_in_active_blueprint_at(
+        &mut self,
+        from_node_id: Uuid,
+        source_pin_kind: &str,
+        source_pin_slot: i32,
+        drop_x: f32,
+        drop_y: f32,
+    ) -> bool {
+        let Some(graph) = self.active_blueprint_graph_mut() else {
+            return false;
+        };
+        let Some(source_pin_kind) = project_domain::SourcePinKind::from_str(source_pin_kind) else {
+            return false;
+        };
+        project_domain::connect_nodes_at(
+            graph,
+            from_node_id,
+            source_pin_kind,
+            source_pin_slot.max(0) as usize,
+            BlueprintPoint {
+                x: drop_x.round() as i32,
+                y: drop_y.round() as i32,
+            },
+        )
+        .map(|outcome| outcome.changed)
+        .unwrap_or(false)
     }
 
     pub fn active_blueprint_local_variables(&self) -> Vec<BlueprintLocalVariable> {
@@ -2195,6 +1582,7 @@ impl Project {
 
     pub fn compile_blueprints(&mut self) -> BlueprintCompilationResult {
         self.sync_document_model();
+        let project_name = self.name().to_string();
         let api = self.build_blueprint_api();
         let build_dir = self
             .file_path
@@ -2202,12 +1590,32 @@ impl Project {
             .unwrap_or_else(|| Path::new("."))
             .join(".snappix")
             .join("build");
-        compile_project(
-            self.name(),
+        log_fields(
+            LogLevel::Info,
+            LogCategory::Blueprint,
+            LogMessage::BlueprintCompileRequested,
+            [
+                ("project", project_name.clone()),
+                ("build_dir", build_dir.to_string_lossy().to_string()),
+            ],
+        );
+        let result = compile_project(
+            &project_name,
             &self.project_file.logic_data.documents,
             &api,
             build_dir,
-        )
+        );
+        log_fields(
+            LogLevel::Info,
+            LogCategory::Blueprint,
+            LogMessage::BlueprintCompileFinished,
+            [
+                ("project", project_name),
+                ("success", result.success.to_string()),
+                ("diagnostics", result.diagnostics.len().to_string()),
+            ],
+        );
+        result
     }
 
     fn page_by_id(&self, page_id: Uuid) -> Option<&CorePage> {
@@ -4388,6 +3796,7 @@ impl Project {
                     .iter()
                     .filter(|node| match &node.kind {
                         BlueprintNodeKind::UiEvent { element_id, .. }
+                        | BlueprintNodeKind::CatalogEvent { element_id, .. }
                         | BlueprintNodeKind::SetElementText { element_id } => {
                             element_ids.contains(element_id)
                         }
@@ -4589,18 +3998,9 @@ fn blueprint_node_size(kind: &BlueprintNodeKind) -> (i32, i32) {
         BlueprintNodeKind::VariableGet { .. } => (190, 48),
         BlueprintNodeKind::VariableSet { .. } => (210, 96),
         BlueprintNodeKind::Functional { node_id } if node_id == "if_statement" => (230, 128),
-        BlueprintNodeKind::UiEvent { .. } => (190, 112),
+        BlueprintNodeKind::UiEvent { .. } | BlueprintNodeKind::CatalogEvent { .. } => (190, 112),
         _ => (220, 112),
     }
-}
-
-fn clone_blueprint_node_with_new_ids(source: &BlueprintNode) -> BlueprintNode {
-    let mut next = source.clone();
-    next.id = Uuid::new_v4();
-    for pin in &mut next.pins {
-        pin.id = Uuid::new_v4();
-    }
-    next
 }
 
 fn nearest_free_blueprint_position(
@@ -4985,6 +4385,81 @@ mod tests {
                 node.kind,
                 BlueprintNodeKind::UiEvent { element_id, .. } if element_id == button_id
             )));
+    }
+
+    #[test]
+    fn binding_catalog_event_node_makes_it_runnable_entrypoint() {
+        let temp = tempdir().expect("tempdir");
+        let project_dir = temp.path().to_string_lossy().to_string();
+        let mut project = Project::new(
+            "SnappixBindCatalogEvent",
+            &project_dir,
+            Platform::Desktop,
+            DevMode::Nodes,
+            PageSize::Desktop,
+            0,
+            0,
+        );
+
+        let button = CanvasElementData::from_component_template("button", 24.0, 24.0);
+        let button_id = button.id;
+        assert!(project
+            .add_element_to_active_page_with_parent(button, None)
+            .is_some());
+
+        let blueprint_ref = project
+            .page_blueprint_document_ref(project.active_page_index())
+            .expect("page blueprint");
+        assert!(project.open_document(blueprint_ref));
+
+        let node_id = project
+            .add_catalog_node_to_active_blueprint("event.button", 80.0, 80.0)
+            .expect("catalog event node");
+        assert!(project.bind_catalog_event_node_to_element_in_active_blueprint(node_id, button_id));
+
+        let document = project.active_blueprint_document().expect("blueprint");
+        let graph = document.graphs.first().expect("graph");
+        assert!(graph.entrypoints.contains(&node_id));
+        let node = graph.node_by_id(node_id).expect("bound node");
+        assert!(matches!(
+            &node.kind,
+            BlueprintNodeKind::CatalogEvent {
+                descriptor_id,
+                element_id
+            } if descriptor_id == "event.button" && *element_id == button_id
+        ));
+
+        let result = project.compile_blueprints();
+        assert!(
+            result.success,
+            "expected compile success, diagnostics: {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn project_rejects_catalog_node_for_wrong_blueprint_context() {
+        let temp = tempdir().expect("tempdir");
+        let project_dir = temp.path().to_string_lossy().to_string();
+        let mut project = Project::new(
+            "SnappixRejectCatalogContext",
+            &project_dir,
+            Platform::Desktop,
+            DevMode::Nodes,
+            PageSize::Desktop,
+            0,
+            0,
+        );
+
+        let blueprint_ref = project
+            .page_blueprint_document_ref(project.active_page_index())
+            .expect("page blueprint");
+        assert!(project.open_document(blueprint_ref));
+
+        assert!(project
+            .add_catalog_node_to_active_blueprint("network.request", 80.0, 80.0)
+            .is_none());
+        assert!(project.active_blueprint_nodes().is_empty());
     }
 
     #[test]

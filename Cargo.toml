@@ -4,6 +4,7 @@ members = [
     "crates/shared",
     "crates/core-ui-graphs",
     "crates/core-blueprint",
+    "crates/project-core",
     "crates/project-manager",
     "apps",
 ]

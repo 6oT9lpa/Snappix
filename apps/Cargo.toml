@@ -29,6 +29,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 shared = { path = "../crates/shared" }
 core-ui-graphs = { path = "../crates/core-ui-graphs" }
 core-blueprint = { path = "../crates/core-blueprint" }
+project-core = { path = "../crates/project-core" }
 project-manager = { path = "../crates/project-manager" }
 
 [build-dependencies]

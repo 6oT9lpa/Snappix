@@ -16,7 +16,8 @@ pub enum ElementKind {
     Checkbox,
     Image,
     Button,
-    Vector,
+    #[serde(other)]
+    Unknown,
 }
 
 /// UI элемент.
@@ -27,4 +28,23 @@ pub struct UiElement {
     pub layout: LayoutStyles,
     pub children: Vec<UiElement>,
     pub properties: std::collections::HashMap<String, serde_json::Value>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_vector_kind_deserializes_as_unknown() {
+        let kind: ElementKind = serde_json::from_str("\"vector\"").expect("deserialize kind");
+        assert_eq!(kind, ElementKind::Unknown);
+    }
+
+    #[test]
+    fn button_kind_round_trips_by_name() {
+        let json = serde_json::to_string(&ElementKind::Button).expect("serialize kind");
+        assert_eq!(json, "\"button\"");
+        let kind: ElementKind = serde_json::from_str(&json).expect("deserialize kind");
+        assert_eq!(kind, ElementKind::Button);
+    }
 }
