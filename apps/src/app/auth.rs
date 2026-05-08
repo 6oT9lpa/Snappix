@@ -1,5 +1,6 @@
 //! Authentication logic with session persistence.
 
+use shared::{log, log_fields, LogCategory, LogLevel, LogMessage};
 use slint::ComponentHandle;
 use std::thread;
 
@@ -10,7 +11,12 @@ pub fn try_auto_login(ui: &AppWindow) -> bool {
     if let Some(session) = UserSession::load() {
         if session.is_authenticated {
             ui.set_is_loading(false);
-            println!("Auto-login from saved session: {}", session.username);
+            log_fields(
+                LogLevel::Info,
+                LogCategory::App,
+                LogMessage::UserLoginSucceeded,
+                [("username", session.username.as_str())],
+            );
             return true;
         }
     }
@@ -46,7 +52,12 @@ pub fn setup_login_handler(ui: &AppWindow) {
                     if let Some(ui) = ui_weak_clone.upgrade() {
                         ui.set_is_loading(false);
                         ui.set_error_message(slint::SharedString::from(""));
-                        println!("Login successful for: {}", username);
+                        log_fields(
+                            LogLevel::Info,
+                            LogCategory::App,
+                            LogMessage::UserLoginSucceeded,
+                            [("username", username.as_str())],
+                        );
                         ui.invoke_authenticated();
                     }
                 })
@@ -65,7 +76,7 @@ pub fn setup_logout_handler(ui: &AppWindow) {
         session.logout();
 
         if let Some(ui) = ui_weak.upgrade() {
-            println!("User logged out");
+            log(LogLevel::Info, LogCategory::App, LogMessage::UserLogout);
             // Navigate back to auth scene
             ui.set_current_scene(crate::AppScene::Auth);
         }

@@ -1,5 +1,6 @@
 #![cfg_attr(all(target_os = "windows", not(test)), windows_subsystem = "windows")]
 
+use shared::{configure_logger, log, LogCategory, LogLevel, LogMessage, LoggerConfig};
 use slint::ComponentHandle;
 use slint::SharedString;
 use std::error::Error;
@@ -13,6 +14,8 @@ mod editor_runtime;
 slint::include_modules!();
 
 fn main() -> Result<(), Box<dyn Error>> {
+    configure_logger(LoggerConfig::default());
+    log(LogLevel::Info, LogCategory::App, LogMessage::AppStarted);
     let launch_project = project_path_from_cli_args();
     let ui = AppWindow::new()?;
     let editor_state = editor_runtime::EditorState::new();

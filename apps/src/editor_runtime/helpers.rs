@@ -1,3 +1,4 @@
+use shared::{log_fields, LogCategory, LogLevel, LogMessage};
 use uuid::Uuid;
 
 use crate::app::project::{CanvasElementData, Project};
@@ -90,9 +91,33 @@ pub fn parse_uuid(text: &str) -> Option<Uuid> {
 }
 
 pub fn save_project_silent(project: &Project) {
+    log_fields(
+        LogLevel::Debug,
+        LogCategory::Project,
+        LogMessage::ProjectSaveRequested,
+        [(
+            "path",
+            project.spx_file_path().to_string_lossy().to_string(),
+        )],
+    );
     if let Err(err) = project.save() {
-        eprintln!("Failed to save project: {err}");
+        log_fields(
+            LogLevel::Error,
+            LogCategory::Project,
+            LogMessage::ProjectSaveFailed,
+            [("error", err.to_string())],
+        );
         app_errors::report(AppErrorCode::ProjectSaveFailed);
+    } else {
+        log_fields(
+            LogLevel::Debug,
+            LogCategory::Project,
+            LogMessage::ProjectSaved,
+            [(
+                "path",
+                project.spx_file_path().to_string_lossy().to_string(),
+            )],
+        );
     }
 }
 

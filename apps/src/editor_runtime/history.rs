@@ -1,6 +1,7 @@
-use std::collections::HashSet;
 use chrono::Local;
 use serde::{Deserialize, Serialize};
+use shared::{log_fields, LogCategory, LogLevel, LogMessage};
+use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::app::project::Project;
@@ -170,6 +171,16 @@ impl HistoryManager {
 
         let title = title.into();
         let details = details.into();
+        log_fields(
+            LogLevel::Info,
+            LogCategory::Runtime,
+            LogMessage::UserActionRecorded,
+            [
+                ("kind", action_kind.as_tag().to_string()),
+                ("title", title.clone()),
+                ("details", details.clone()),
+            ],
+        );
         self.command_entries.push(CommandEntry {
             title: title.clone(),
             details: details.clone(),
