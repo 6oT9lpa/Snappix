@@ -238,10 +238,11 @@ mod tests {
         BlueprintProjectApi, PageApiDescriptor, ServerApiDescriptor, UiActionDescriptor,
         UiElementApiDescriptor, UiEventDescriptor,
     };
+    use crate::catalog::builtin_node_descriptor;
     use crate::model::{
         BlueprintDocument, BlueprintFunctionParameter, BlueprintFunctionSignature,
         BlueprintFunctionTarget, BlueprintGraph, BlueprintGraphKind, BlueprintLink, BlueprintNode,
-        BlueprintPinType,
+        BlueprintNodeKind, BlueprintPinType, BlueprintPoint,
     };
 
     use super::compile_project;
@@ -299,10 +300,20 @@ mod tests {
                     element_id: button_id,
                     display_name: "button".to_string(),
                     element_type: "button".to_string(),
-                    events: vec![UiEventDescriptor {
-                        name: "clicked".to_string(),
-                        display_name: "Clicked".to_string(),
-                    }],
+                    events: vec![
+                        UiEventDescriptor {
+                            name: "clicked".to_string(),
+                            display_name: "Clicked".to_string(),
+                        },
+                        UiEventDescriptor {
+                            name: "hovered".to_string(),
+                            display_name: "Hovered".to_string(),
+                        },
+                        UiEventDescriptor {
+                            name: "pressed".to_string(),
+                            display_name: "Pressed".to_string(),
+                        },
+                    ],
                     actions: Vec::new(),
                 },
                 UiElementApiDescriptor {
@@ -428,5 +439,127 @@ mod tests {
             .generated_files
             .iter()
             .any(|file| file.path.ends_with("runtime.rs")));
+    }
+
+    #[test]
+    fn compiles_bound_catalog_event_entrypoint() {
+        let page_id = Uuid::new_v4();
+        let button_id = Uuid::new_v4();
+        let label_id = Uuid::new_v4();
+
+        let mut document = BlueprintDocument::new_page(page_id, "Main");
+        let mut event = builtin_node_descriptor("event.button")
+            .expect("event descriptor")
+            .instantiate(BlueprintPoint::default());
+        event.kind = BlueprintNodeKind::CatalogEvent {
+            descriptor_id: "event.button".to_string(),
+            element_id: button_id,
+        };
+        let set_text = BlueprintNode::set_element_text(label_id);
+        let literal = BlueprintNode::literal_string("Hello from catalog event");
+
+        document.graphs[0].entrypoints = vec![event.id];
+        document.graphs[0].nodes = vec![event.clone(), set_text.clone(), literal.clone()];
+        document.graphs[0].links = vec![
+            BlueprintLink::new(
+                event.id,
+                event.pin_named("clicked").expect("event click exec").id,
+                set_text.id,
+                set_text.pin_named("in").expect("set text exec").id,
+            ),
+            BlueprintLink::new(
+                literal.id,
+                literal.pin_named("value").expect("literal value").id,
+                set_text.id,
+                set_text.pin_named("text").expect("set text value").id,
+            ),
+        ];
+
+        let api = page_api(
+            page_id,
+            vec![
+                UiElementApiDescriptor {
+                    element_id: button_id,
+                    display_name: "button".to_string(),
+                    element_type: "button".to_string(),
+                    events: vec![
+                        UiEventDescriptor {
+                            name: "clicked".to_string(),
+                            display_name: "Clicked".to_string(),
+                        },
+                        UiEventDescriptor {
+                            name: "hovered".to_string(),
+                            display_name: "Hovered".to_string(),
+                        },
+                        UiEventDescriptor {
+                            name: "pressed".to_string(),
+                            display_name: "Pressed".to_string(),
+                        },
+                    ],
+                    actions: Vec::new(),
+                },
+                UiElementApiDescriptor {
+                    element_id: label_id,
+                    display_name: "label".to_string(),
+                    element_type: "label".to_string(),
+                    events: Vec::new(),
+                    actions: vec![UiActionDescriptor {
+                        name: "set_text".to_string(),
+                        display_name: "Set Text".to_string(),
+                        parameters: vec![BlueprintFunctionParameter {
+                            name: "text".to_string(),
+                            data_type: BlueprintPinType::String,
+                        }],
+                        return_type: BlueprintPinType::Void,
+                    }],
+                },
+            ],
+            Vec::new(),
+        );
+
+        let output_dir = tempdir().expect("temp dir");
+        let result = compile_project(
+            "snappix_catalog_event_test",
+            &[document, BlueprintDocument::new_server()],
+            &api,
+            output_dir.path(),
+        );
+
+        assert!(
+            result.success,
+            "expected compile success, diagnostics: {:?}",
+            result.diagnostics
+        );
+        assert!(result
+            .source_map
+            .spans
+            .iter()
+            .any(|span| span.node_id == set_text.id));
+    }
+
+    #[test]
+    fn compiles_global_catalog_event_entrypoint() {
+        let page_id = Uuid::new_v4();
+        let mut document = BlueprintDocument::new_page(page_id, "Main");
+        let event = builtin_node_descriptor("event.app_started")
+            .expect("app started descriptor")
+            .instantiate(BlueprintPoint::default());
+        document.graphs[0].entrypoints = vec![event.id];
+        document.graphs[0].nodes = vec![event];
+
+        let api = page_api(page_id, Vec::new(), Vec::new());
+        let output_dir = tempdir().expect("temp dir");
+        let result = compile_project(
+            "snappix_global_event_test",
+            &[document, BlueprintDocument::new_server()],
+            &api,
+            output_dir.path(),
+        );
+
+        assert!(
+            result.success,
+            "expected compile success, diagnostics: {:?}",
+            result.diagnostics
+        );
     }
 }

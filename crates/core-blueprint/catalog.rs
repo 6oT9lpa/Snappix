@@ -105,26 +105,26 @@ pub fn builtin_node_catalog() -> Vec<BlueprintNodeDescriptor> {
         event_node(
             "event.button",
             "Event Button",
-            &["click", "hover"],
-            &["button", "click", "hover", "ui"],
+            &["clicked", "hovered", "pressed"],
+            &["button", "clicked", "hovered", "pressed", "ui"],
         ),
         event_node(
             "event.input",
             "Event Input",
-            &["click", "hover", "enter"],
-            &["input", "click", "hover", "enter", "ui"],
+            &["changed", "focused", "blurred"],
+            &["input", "changed", "focused", "blurred", "ui"],
         ),
         event_node(
             "event.checkbox",
             "Event Checkbox",
-            &["click", "changed"],
-            &["checkbox", "click", "changed", "ui"],
+            &["clicked", "changed"],
+            &["checkbox", "clicked", "changed", "ui"],
         ),
         event_node(
             "event.label",
             "Event Label",
-            &["click"],
-            &["label", "click", "ui"],
+            &["clicked", "hovered"],
+            &["label", "clicked", "hovered", "ui"],
         ),
         event_node(
             "event.fill",
@@ -138,6 +138,7 @@ pub fn builtin_node_catalog() -> Vec<BlueprintNodeDescriptor> {
                 "container",
                 "image",
                 "fill",
+                "ui",
             ],
         ),
         event_node(

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::api::BlueprintProjectApi;
-use crate::catalog::is_builtin_node_descriptor;
+use crate::catalog::{builtin_node_descriptor, BlueprintNodeContext};
 use crate::model::{
     BlueprintDocument, BlueprintDocumentKind, BlueprintFunctionSignature, BlueprintFunctionTarget,
     BlueprintGraph, BlueprintNode, BlueprintNodeKind, BlueprintOwner, BlueprintPin,
@@ -410,7 +410,21 @@ fn validate_node(
             }
         }
         BlueprintNodeKind::Catalog { descriptor_id } => {
-            if !is_builtin_node_descriptor(descriptor_id) {
+            if let Some(descriptor) = builtin_node_descriptor(descriptor_id) {
+                if !descriptor_context_matches_document(descriptor.context, document.kind) {
+                    diagnostics.push(BlueprintDiagnostic::error(
+                        "catalog_node_context_invalid",
+                        format!(
+                            "Catalog node '{descriptor_id}' is not valid in {:?}.",
+                            document.kind
+                        ),
+                        Some(document.id),
+                        Some(graph.id),
+                        Some(node.id),
+                        None,
+                    ));
+                }
+            } else {
                 diagnostics.push(BlueprintDiagnostic::error(
                     "catalog_node_missing",
                     format!("Catalog node '{descriptor_id}' is not registered."),
@@ -419,6 +433,98 @@ fn validate_node(
                     Some(node.id),
                     None,
                 ));
+            }
+        }
+        BlueprintNodeKind::CatalogEvent {
+            descriptor_id,
+            element_id,
+        } => {
+            let mut descriptor_is_event = false;
+            if let Some(descriptor) = builtin_node_descriptor(descriptor_id) {
+                if !descriptor_context_matches_document(descriptor.context, document.kind) {
+                    diagnostics.push(BlueprintDiagnostic::error(
+                        "catalog_node_context_invalid",
+                        format!(
+                            "Catalog node '{descriptor_id}' is not valid in {:?}.",
+                            document.kind
+                        ),
+                        Some(document.id),
+                        Some(graph.id),
+                        Some(node.id),
+                        None,
+                    ));
+                }
+                if descriptor.category != "Events" {
+                    diagnostics.push(BlueprintDiagnostic::error(
+                        "catalog_event_invalid",
+                        format!("Catalog node '{descriptor_id}' is not an event descriptor."),
+                        Some(document.id),
+                        Some(graph.id),
+                        Some(node.id),
+                        None,
+                    ));
+                } else {
+                    descriptor_is_event = true;
+                }
+            } else {
+                diagnostics.push(BlueprintDiagnostic::error(
+                    "catalog_node_missing",
+                    format!("Catalog node '{descriptor_id}' is not registered."),
+                    Some(document.id),
+                    Some(graph.id),
+                    Some(node.id),
+                    None,
+                ));
+            }
+
+            if document.kind == BlueprintDocumentKind::ServerBlueprint {
+                diagnostics.push(BlueprintDiagnostic::error(
+                    "server_ui_access_forbidden",
+                    "Server blueprints cannot reference page UI events directly.",
+                    Some(document.id),
+                    Some(graph.id),
+                    Some(node.id),
+                    None,
+                ));
+                return diagnostics;
+            }
+
+            let Some(page_id) = page_owner else {
+                return diagnostics;
+            };
+            let Some(page_api) = api.page(page_id) else {
+                return diagnostics;
+            };
+            let Some(element_api) = page_api.element(*element_id) else {
+                diagnostics.push(BlueprintDiagnostic::error(
+                    "ui_element_missing",
+                    "Catalog event node references a missing page element.",
+                    Some(document.id),
+                    Some(graph.id),
+                    Some(node.id),
+                    None,
+                ));
+                return diagnostics;
+            };
+            if descriptor_is_event {
+                for pin in node.pins.iter().filter(|pin| {
+                    pin.direction == BlueprintPinDirection::Output
+                        && pin.data_type == BlueprintPinType::Exec
+                }) {
+                    if element_api.event(&pin.name).is_none() {
+                        diagnostics.push(BlueprintDiagnostic::error(
+                            "ui_event_missing",
+                            format!(
+                                "Event '{}' is not available for element '{}'.",
+                                pin.name, element_api.display_name
+                            ),
+                            Some(document.id),
+                            Some(graph.id),
+                            Some(node.id),
+                            Some(pin.id),
+                        ));
+                    }
+                }
             }
         }
         BlueprintNodeKind::Functional { node_id } => {
@@ -442,6 +548,17 @@ fn validate_node(
 
 fn pin_types_are_compatible(from: BlueprintPinType, to: BlueprintPinType) -> bool {
     from == to || from == BlueprintPinType::Any || to == BlueprintPinType::Any
+}
+
+fn descriptor_context_matches_document(
+    context: BlueprintNodeContext,
+    kind: BlueprintDocumentKind,
+) -> bool {
+    match context {
+        BlueprintNodeContext::Any => true,
+        BlueprintNodeContext::Page => kind == BlueprintDocumentKind::PageBlueprint,
+        BlueprintNodeContext::Server => kind == BlueprintDocumentKind::ServerBlueprint,
+    }
 }
 
 fn resolve_function_target(
@@ -555,7 +672,11 @@ fn compare_signatures(
 mod tests {
     use uuid::Uuid;
 
-    use crate::api::{BlueprintProjectApi, PageApiDescriptor, ServerApiDescriptor};
+    use crate::api::{
+        BlueprintProjectApi, PageApiDescriptor, ServerApiDescriptor, UiElementApiDescriptor,
+        UiEventDescriptor,
+    };
+    use crate::catalog::builtin_node_descriptor;
     use crate::model::{
         BlueprintDocument, BlueprintFunctionSignature, BlueprintGraph, BlueprintGraphKind,
         BlueprintLink, BlueprintNode, BlueprintNodeKind, BlueprintPinType, BlueprintPoint,
@@ -679,5 +800,109 @@ mod tests {
         assert!(diagnostics
             .iter()
             .any(|diagnostic| diagnostic.code == "functional_node_unavailable"));
+    }
+
+    #[test]
+    fn rejects_server_catalog_node_in_page_blueprint() {
+        let page_id = Uuid::new_v4();
+        let mut document = BlueprintDocument::new_page(page_id, "Main");
+        let node = builtin_node_descriptor("network.request")
+            .expect("network descriptor")
+            .instantiate(BlueprintPoint::default());
+        document.graphs[0].nodes.push(node);
+
+        let api = BlueprintProjectApi {
+            pages: vec![PageApiDescriptor {
+                page_id,
+                page_name: "Main".to_string(),
+                elements: Vec::new(),
+                exported_functions: Vec::new(),
+            }],
+            server: ServerApiDescriptor::default(),
+        };
+
+        let diagnostics = validate_project(&[document], &api);
+        assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "catalog_node_context_invalid"));
+    }
+
+    #[test]
+    fn rejects_page_catalog_node_in_server_blueprint() {
+        let mut document = BlueprintDocument::new_server();
+        let node = builtin_node_descriptor("page.navigate")
+            .expect("page descriptor")
+            .instantiate(BlueprintPoint::default());
+        document.graphs[0].nodes.push(node);
+
+        let diagnostics = validate_project(&[document], &BlueprintProjectApi::default());
+        assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "catalog_node_context_invalid"));
+    }
+
+    #[test]
+    fn allows_any_catalog_node_in_page_blueprint() {
+        let page_id = Uuid::new_v4();
+        let mut document = BlueprintDocument::new_page(page_id, "Main");
+        let node = builtin_node_descriptor("flow.branch")
+            .expect("flow descriptor")
+            .instantiate(BlueprintPoint::default());
+        document.graphs[0].nodes.push(node);
+
+        let api = BlueprintProjectApi {
+            pages: vec![PageApiDescriptor {
+                page_id,
+                page_name: "Main".to_string(),
+                elements: Vec::new(),
+                exported_functions: Vec::new(),
+            }],
+            server: ServerApiDescriptor::default(),
+        };
+
+        let diagnostics = validate_project(&[document], &api);
+        assert!(!diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "catalog_node_context_invalid"));
+    }
+
+    #[test]
+    fn rejects_catalog_event_when_element_does_not_expose_pin_event() {
+        let page_id = Uuid::new_v4();
+        let button_id = Uuid::new_v4();
+        let mut document = BlueprintDocument::new_page(page_id, "Main");
+        let mut node = builtin_node_descriptor("event.button")
+            .expect("button event descriptor")
+            .instantiate(BlueprintPoint::default());
+        node.kind = BlueprintNodeKind::CatalogEvent {
+            descriptor_id: "event.button".to_string(),
+            element_id: button_id,
+        };
+        document.graphs[0].entrypoints.push(node.id);
+        document.graphs[0].nodes.push(node);
+
+        let api = BlueprintProjectApi {
+            pages: vec![PageApiDescriptor {
+                page_id,
+                page_name: "Main".to_string(),
+                elements: vec![UiElementApiDescriptor {
+                    element_id: button_id,
+                    display_name: "Submit".to_string(),
+                    element_type: "button".to_string(),
+                    events: vec![UiEventDescriptor {
+                        name: "clicked".to_string(),
+                        display_name: "Clicked".to_string(),
+                    }],
+                    actions: Vec::new(),
+                }],
+                exported_functions: Vec::new(),
+            }],
+            server: ServerApiDescriptor::default(),
+        };
+
+        let diagnostics = validate_project(&[document], &api);
+        assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "ui_event_missing"));
     }
 }

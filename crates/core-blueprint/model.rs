@@ -306,6 +306,10 @@ pub enum BlueprintNodeKind {
     Catalog {
         descriptor_id: String,
     },
+    CatalogEvent {
+        descriptor_id: String,
+        element_id: Uuid,
+    },
     Functional {
         node_id: String,
     },

@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::api::BlueprintProjectApi;
+use crate::catalog::builtin_node_descriptor;
 use crate::model::{
     BlueprintDocument, BlueprintDocumentKind, BlueprintFunctionSignature, BlueprintFunctionTarget,
     BlueprintGraph, BlueprintLink, BlueprintLocalVariable, BlueprintNode, BlueprintNodeKind,
@@ -152,48 +153,79 @@ fn lower_graph(document: &BlueprintDocument, graph: &BlueprintGraph) -> Vec<Blue
         let Some(node) = node_map.get(entrypoint_id).copied() else {
             continue;
         };
-        if let BlueprintNodeKind::UiEvent {
-            element_id,
-            event_name,
-        } = &node.kind
-        {
-            let start_pin_id = node
-                .pins
-                .iter()
-                .find(|pin| {
-                    pin.direction == BlueprintPinDirection::Output
-                        && pin.data_type == BlueprintPinType::Exec
-                })
-                .map(|pin| pin.id);
-            let signature = BlueprintFunctionSignature {
-                name: format!("{}_{}", node.title.replace(' ', "_"), event_name),
-                parameters: Vec::new(),
-                return_type: BlueprintPinType::Void,
-                is_public: false,
-            };
-            functions.push(BlueprintIrFunction {
-                graph_id: graph.id,
-                source_node_id: node.id,
-                name: signature.name.clone(),
-                rust_name: sanitize_ident(format!(
-                    "{}_{}_{}",
-                    document.name, element_id, event_name
-                )),
-                trigger: BlueprintIrFunctionTrigger::Event {
-                    element_id: *element_id,
-                    event_name: event_name.clone(),
-                },
-                signature,
-                statements: follow_exec_chain(
+        match &node.kind {
+            BlueprintNodeKind::UiEvent {
+                element_id,
+                event_name,
+            } => {
+                let start_pin_id = node
+                    .pins
+                    .iter()
+                    .find(|pin| {
+                        pin.direction == BlueprintPinDirection::Output
+                            && pin.data_type == BlueprintPinType::Exec
+                    })
+                    .map(|pin| pin.id);
+                functions.push(build_event_ir_function(
                     document,
+                    graph,
+                    node,
+                    *element_id,
+                    event_name,
                     start_pin_id,
                     &node_map,
                     &variable_map,
                     &exec_links,
                     &data_links,
-                    HashSet::new(),
-                ),
-            });
+                ));
+            }
+            BlueprintNodeKind::CatalogEvent { element_id, .. } => {
+                for pin in node.pins.iter().filter(|pin| {
+                    pin.direction == BlueprintPinDirection::Output
+                        && pin.data_type == BlueprintPinType::Exec
+                }) {
+                    functions.push(build_event_ir_function(
+                        document,
+                        graph,
+                        node,
+                        *element_id,
+                        &pin.name,
+                        Some(pin.id),
+                        &node_map,
+                        &variable_map,
+                        &exec_links,
+                        &data_links,
+                    ));
+                }
+            }
+            BlueprintNodeKind::Catalog { descriptor_id } => {
+                if builtin_node_descriptor(descriptor_id)
+                    .map(|descriptor| {
+                        descriptor.category == "Events"
+                            && !descriptor.tags.iter().any(|tag| tag == "ui")
+                    })
+                    .unwrap_or(false)
+                {
+                    for pin in node.pins.iter().filter(|pin| {
+                        pin.direction == BlueprintPinDirection::Output
+                            && pin.data_type == BlueprintPinType::Exec
+                    }) {
+                        functions.push(build_event_ir_function(
+                            document,
+                            graph,
+                            node,
+                            Uuid::nil(),
+                            &pin.name,
+                            Some(pin.id),
+                            &node_map,
+                            &variable_map,
+                            &exec_links,
+                            &data_links,
+                        ));
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
@@ -228,6 +260,46 @@ fn lower_graph(document: &BlueprintDocument, graph: &BlueprintGraph) -> Vec<Blue
     }
 
     functions
+}
+
+fn build_event_ir_function(
+    document: &BlueprintDocument,
+    graph: &BlueprintGraph,
+    node: &BlueprintNode,
+    element_id: Uuid,
+    event_name: &str,
+    start_pin_id: Option<Uuid>,
+    node_map: &HashMap<Uuid, &BlueprintNode>,
+    variable_map: &HashMap<Uuid, &BlueprintLocalVariable>,
+    exec_links: &HashMap<Uuid, &BlueprintLink>,
+    data_links: &HashMap<Uuid, &BlueprintLink>,
+) -> BlueprintIrFunction {
+    let signature = BlueprintFunctionSignature {
+        name: format!("{}_{}", node.title.replace(' ', "_"), event_name),
+        parameters: Vec::new(),
+        return_type: BlueprintPinType::Void,
+        is_public: false,
+    };
+    BlueprintIrFunction {
+        graph_id: graph.id,
+        source_node_id: node.id,
+        name: signature.name.clone(),
+        rust_name: sanitize_ident(format!("{}_{}_{}", document.name, element_id, event_name)),
+        trigger: BlueprintIrFunctionTrigger::Event {
+            element_id,
+            event_name: event_name.to_string(),
+        },
+        signature,
+        statements: follow_exec_chain(
+            document,
+            start_pin_id,
+            node_map,
+            variable_map,
+            exec_links,
+            data_links,
+            HashSet::new(),
+        ),
+    }
 }
 
 fn build_exec_links<'a>(
