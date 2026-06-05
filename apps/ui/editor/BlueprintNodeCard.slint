@@ -1,0 +1,1162 @@
+import { VerticalBox } from "std-widgets.slint";
+import { Themes } from "../components/Themes.slint";
+import { ProjectPageInfo, SelectionInfo } from "../models/EditorModels.slint";
+import { StringSearch } from "../utils/StringSearch.slint";
+
+component DataPinValueEditor inherits Rectangle {
+    in property <string> descriptor-id: "";
+    in property <string> pin-name: "";
+    in property <string> pin-type: "";
+    in property <string> value: "";
+    in property <string> display-value: "";
+    in property <float> zoom-level: 1.0;
+    in property <[ProjectPageInfo]> page-items: [];
+    in property <[SelectionInfo]> scene-elements: [];
+    callback value-changed(string);
+    callback object-menu-requested(length, length, string);
+
+    property <bool> option-menu-open: false;
+    property <string> normalized-type: root.pin-type.to-lowercase();
+    property <string> normalized-pin-name: root.pin-name.to-lowercase();
+    property <bool> is-bool: root.normalized-type == "bool";
+    property <bool> is-int: root.normalized-type == "int";
+    property <bool> is-float: root.normalized-type == "float";
+    property <bool> is-array: root.normalized-type == "array";
+    property <bool> is-object: root.normalized-type == "object" || root.normalized-type == "element" || root.normalized-type == "page";
+    property <bool> is-collection-mode: root.descriptor-id == "variable.set" && root.normalized-pin-name == "mode";
+    property <bool> is-display-mode: root.descriptor-id == "ui.set_display_mode" && root.normalized-pin-name == "mode";
+    property <bool> is-option: root.is-collection-mode || root.is-display-mode;
+    property <string> normalized-value: root.value == "" ? (root.is-display-mode ? "visible" : "push") : root.value.to-lowercase();
+    property <length> editor-font-size: min(11px * root.zoom-level, 12px);
+
+    border-radius: 4px;
+    border-width: root.is-bool ? 0px : 1px;
+    border-color: Themes.current.border-color;
+    background: root.is-bool ? transparent : Themes.current.primary-bg;
+    clip: false;
+
+    if root.is-object: Path {
+        x: parent.width - 14px;
+        y: (parent.height - 8px) / 2;
+        width: 10px;
+        height: 8px;
+        viewbox-width: 10;
+        viewbox-height: 8;
+        fill: transparent;
+        stroke: Themes.current.secondary-text;
+        stroke-width: 2px;
+        commands: "M 1 1 L 5 5 L 9 1";
+    }
+
+    if root.is-bool: Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: min(14px * root.zoom-level, 15px);
+        height: min(14px * root.zoom-level, 15px);
+        border-radius: 3px;
+        border-width: 1px;
+        border-color: root.value == "false" ? Themes.current.border-color : Themes.current.active-color;
+        background: root.value == "false" ? transparent : Themes.current.active-color;
+
+        if root.value != "false": Path {
+            x: 2px * root.zoom-level;
+            y: 2px * root.zoom-level;
+            width: min(10px * root.zoom-level, 11px);
+            height: min(10px * root.zoom-level, 11px);
+            viewbox-width: 10;
+            viewbox-height: 10;
+
+            stroke: Themes.on-accent-text;
+            stroke-width: 2px;
+            fill: transparent;
+
+            commands: "M 2 5 L 4 7 L 8 2";
+        }
+    }
+
+    if root.is-bool: TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => {
+            root.value-changed(root.value == "false" ? "true" : "false");
+        }
+    }
+
+    if root.is-array: Text {
+        width: parent.width;
+        height: parent.height;
+        text: "Array";
+        color: Themes.current.secondary-text;
+        font-size: root.editor-font-size;
+        horizontal-alignment: TextHorizontalAlignment.center;
+        vertical-alignment: TextVerticalAlignment.center;
+    }
+    
+    if root.is-option: Text {
+        x: 6px;
+        width: parent.width - 20px;
+        height: parent.height;
+        text: root.normalized-value;
+        color: Themes.current.primary-text;
+        font-size: root.editor-font-size;
+        vertical-alignment: TextVerticalAlignment.center;
+        overflow: elide;
+    }
+
+    if root.is-option: Path {
+        x: parent.width - 13px;
+        y: (parent.height - 8px) / 2;
+        width: 9px;
+        height: 8px;
+        viewbox-width: 9;
+        viewbox-height: 8;
+        fill: transparent;
+        stroke: Themes.current.secondary-text;
+        stroke-width: 2px;
+        commands: "M 1 2 L 4.5 5.5 L 8 2";
+    }
+
+    if root.is-option: TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => {
+            root.option-menu-open = !root.option-menu-open;
+        }
+    }
+
+    if root.is-option && root.option-menu-open: Rectangle {
+        z: 80;
+        x: 0;
+        y: root.height + 3px;
+        width: root.width;
+        height: root.is-display-mode ? 58px : 58px;
+        border-radius: 5px;
+        border-width: 1px;
+        border-color: Themes.current.border-color;
+        background: Themes.current.secondary-bg;
+        drop-shadow-blur: Themes.shadow-size;
+        drop-shadow-color: Themes.shadow-color;
+
+        VerticalBox {
+            padding: 3px;
+            spacing: 2px;
+
+            for option in root.is-display-mode ? [{ label: "visible" }, { label: "none" }] : [{ label: "push" }, { label: "pop" }]: Rectangle {
+                height: 24px;
+                border-radius: 4px;
+                background: option-touch.has-hover || root.normalized-value == option.label ? Themes.current.hover-color : transparent;
+
+                option-touch := TouchArea {
+                    mouse-cursor: MouseCursor.pointer;
+                    clicked => {
+                        root.value-changed(option.label);
+                        root.option-menu-open = false;
+                    }
+                }
+
+                Text {
+                    x: 7px;
+                    width: parent.width - 14px;
+                    height: parent.height;
+                    text: option.label;
+                    color: Themes.current.primary-text;
+                    font-size: root.editor-font-size;
+                    vertical-alignment: TextVerticalAlignment.center;
+                }
+            }
+        }
+    }
+
+    if !root.is-option && !root.is-bool && !root.is-object && !root.is-array: VerticalBox {   
+        padding: 0;
+        padding-left: 4px;
+        padding-top: 3px;
+        padding-right: root.is-int || root.is-float ? 4px : 2px; 
+
+        TextInput {
+            width: parent.width;
+            height: parent.height;
+            text: root.value;
+            color: Themes.current.primary-text;
+            font-size: root.editor-font-size;
+            single-line: true;
+            input-type: (root.is-int || root.is-float) ? InputType.number : InputType.text;
+            accepted => {
+                root.value-changed(self.text);
+            }
+            changed has-focus => {
+                if !self.has-focus {
+                    root.value-changed(self.text);
+                }
+            }
+        }
+    }
+
+    if root.is-object: Text {
+        x: 6px;
+        width: parent.width - 18px;
+        height: parent.height;
+        text: root.value == "" ? "None" : (root.display-value == "" ? root.value : root.display-value);
+        color: Themes.current.primary-text;
+        font-size: root.editor-font-size;
+        vertical-alignment: TextVerticalAlignment.center;
+        overflow: elide;
+    }
+
+    if root.is-object: TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => {
+            root.object-menu-requested(root.x, root.y + root.height + 3px, root.normalized-type);
+        }
+    }
+}
+
+component ExecOutputRow inherits Rectangle {
+    in property <string> label: "";
+    in property <bool> connected: false;
+    in property <int> slot: 0;
+    in property <float> zoom-level: 1.0;
+    callback consume-canvas-left-down();
+    callback wire-started(int, color, length, length);
+    callback wire-updated(length, length);
+    callback wire-released(length, length);
+    property <length> row-font-size: min(11px * root.zoom-level, 13px);
+
+    height: 30px * root.zoom-level;
+    background: transparent;
+
+    Text {
+        x: 0;
+        y: 0;
+        width: 80px * root.zoom-level;
+        height: parent.height;
+        text: root.label.to-lowercase() == "then" ? "" : root.label;
+        color: Themes.current.primary-text;
+        font-size: root.row-font-size;
+        horizontal-alignment: TextHorizontalAlignment.right;
+        vertical-alignment: TextVerticalAlignment.center;
+        overflow: elide;
+    }
+
+    Rectangle {
+        x: 88px * root.zoom-level;
+        y: 8px * root.zoom-level;
+        width: 15px * root.zoom-level;
+        height: 15px * root.zoom-level;
+        background: transparent;
+
+        Path {
+            width: parent.width;
+            height: parent.height;
+            viewbox-width: 20;
+            viewbox-height: 20;
+            fill: root.connected ? Themes.current.primary-text : transparent;
+            stroke: Themes.current.primary-text;
+            stroke-width: 2px;
+            commands: "M 4 2 L 10 2 Q 11.5 2 12.5 3.5 L 18 10 Q 19 11 18 12 L 12.5 18.5 Q 11.5 20 10 20 L 4 20 Q 2 20 2 18 L 2 4 Q 2 2 4 2 Z";
+        }
+
+        TouchArea {
+            mouse-cursor: MouseCursor.crosshair;
+            pointer-event(ev) => {
+                let sx = root.x + parent.x + self.mouse-x;
+                let sy = root.y + parent.y + self.mouse-y;
+                if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                    root.consume-canvas-left-down();
+                    root.wire-started(root.slot, #f5f5f5, sx, sy);
+                }
+                if ev.kind == PointerEventKind.move && self.pressed {
+                    root.wire-updated(sx, sy);
+                }
+                if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left {
+                    root.wire-released(sx, sy);
+                }
+                if ev.kind == PointerEventKind.cancel {
+                    root.wire-released(sx, sy);
+                }
+            }
+        }
+    }
+}
+
+component DataOutputRow inherits Rectangle {
+    in property <string> label: "";
+    in property <string> pin-type: "";
+    in property <color> pin-color: #5ac68b;
+    in property <bool> connected: false;
+    in property <bool> show-label: true;
+    in property <int> slot: 0;
+    in property <float> zoom-level: 1.0;
+    callback consume-canvas-left-down();
+    callback wire-started(int, color, length, length);
+    callback wire-updated(length, length);
+    callback wire-released(length, length);
+    property <length> row-font-size: min(11px * root.zoom-level, 12px);
+
+    height: 30px * root.zoom-level;
+    background: transparent;
+
+    if root.show-label: Text {
+        x: parent.width - 165px * root.zoom-level;
+        y: 0;
+        width: 132px * root.zoom-level;
+        height: parent.height;
+        text: root.label;
+        color: Themes.current.secondary-text;
+        font-size: root.row-font-size;
+        horizontal-alignment: TextHorizontalAlignment.right;
+        vertical-alignment: TextVerticalAlignment.center;
+        overflow: elide;
+    }
+
+    Rectangle {
+        x: parent.width - 20px * root.zoom-level;
+        y: 8px * root.zoom-level;
+        width: 12px * root.zoom-level;
+        height: 12px * root.zoom-level;
+        border-radius: 6px * root.zoom-level;
+        border-width: 1px;
+        border-color: root.pin-color;
+        background: root.connected ? root.pin-color : transparent;
+
+        Path {
+            x: 13px * root.zoom-level;
+            y: 1px * root.zoom-level;
+            width: 7px * root.zoom-level;
+            height: 10px * root.zoom-level;
+            viewbox-width: 7;
+            viewbox-height: 10;
+            fill: transparent;
+            stroke: root.pin-color;
+            stroke-width: 2px;
+            commands: "M 1 1 L 5 5 L 1 9";
+        }
+
+        TouchArea {
+            mouse-cursor: MouseCursor.crosshair;
+            pointer-event(ev) => {
+                let sx = root.x + parent.x + self.mouse-x;
+                let sy = root.y + parent.y + self.mouse-y;
+                if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                    root.consume-canvas-left-down();
+                    root.wire-started(root.slot, root.pin-color, sx, sy);
+                }
+                if ev.kind == PointerEventKind.move && self.pressed {
+                    root.wire-updated(sx, sy);
+                }
+                if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left {
+                    root.wire-released(sx, sy);
+                }
+                if ev.kind == PointerEventKind.cancel {
+                    root.wire-released(sx, sy);
+                }
+            }
+        }
+    }
+}
+
+component DataInputRow inherits Rectangle {
+    in property <string> descriptor-id: "";
+    in property <string> label: "";
+    in property <string> pin-type: "q";
+    in property <color> pin-color: #5ac68b;
+    in property <bool> connected: false;
+    in property <string> value: "";
+    in property <string> display-value: "";
+    in property <bool> is-operator-node: false;
+    in property <int> slot: 0;
+    in property <float> zoom-level: 1.0;
+    in property <[ProjectPageInfo]> page-items: [];
+    in property <[SelectionInfo]> scene-elements: [];
+
+    callback value-changed(int, string);
+    callback object-menu-requested(int, string, length, length);
+    property <length> row-font-size: min(11px * root.zoom-level, 12px);
+
+    height: 30px * root.zoom-level;
+    background: transparent;
+
+    Rectangle {
+        x: 5px * root.zoom-level;
+        y: 8px * root.zoom-level;
+        width: 12px * root.zoom-level;
+        height: 12px * root.zoom-level;
+        border-radius: 6px * root.zoom-level;
+        border-width: 1px;
+        border-color: root.pin-color;
+        background: root.connected ? root.pin-color : transparent;
+
+        Path {
+            x: 12px * root.zoom-level;
+            y: 1px * root.zoom-level;
+            width: 7px * root.zoom-level;
+            height: 10px * root.zoom-level;
+            viewbox-width: 7;
+            viewbox-height: 10;
+            fill: transparent;
+            stroke: root.pin-color;
+            stroke-width: 2px;
+            commands: "M 1 2 L 5 5 L 1 9";
+        }
+    }
+
+    label_text := Text {
+        x: 30px * root.zoom-level;
+        y: 0;
+
+        text: root.label;
+        color: Themes.current.secondary-text;
+
+        font-size: root.row-font-size;
+        vertical-alignment: TextVerticalAlignment.center;
+
+        width: self.preferred-width;
+        height: parent.height;
+
+        overflow: elide;
+    }
+
+    if !root.connected: DataPinValueEditor {
+        z: 10;
+        x: (root.is-operator-node
+            ? 24px
+            : (label_text.preferred-width + 40px)
+        ) * root.zoom-level;
+
+        y: 5px * root.zoom-level;
+        width: (root.is-operator-node ? 48px : (root.pin-type.to-lowercase() == "bool" ? 20px : 90px)) * root.zoom-level;
+        height: 20px * root.zoom-level;
+        descriptor-id: root.descriptor-id;
+        pin-name: root.label;
+        pin-type: root.pin-type;
+        value: root.value;
+        display-value: root.display-value;
+        page-items: root.page-items;
+        scene-elements: root.scene-elements;
+        zoom-level: root.zoom-level;
+        value-changed(value) => {
+            root.value-changed(root.slot, value);
+        }
+        object-menu-requested(x, y, pin-type) => {
+            root.object-menu-requested(root.slot, pin-type, root.x + x, root.y + y);
+        }
+    }
+}
+
+export component BlueprintNodeCardBase inherits Rectangle {
+    in property <string> node-id: "";
+    in property <string> variable-id: "";
+    in property <string> title: "";
+    in property <string> element-type: "";
+    in property <string> descriptor-id: "";
+    in property <bool> is-event: false;
+    in property <bool> is-bound-event: false;
+    in property <bool> has-exec-input: false;
+    in property <string> exec-output-1: "";
+    in property <string> exec-output-2: "";
+    in property <string> exec-output-3: "";
+    in property <bool> exec-output-1-connected: false;
+    in property <bool> exec-output-2-connected: false;
+    in property <bool> exec-output-3-connected: false;
+    in property <string> data-output-name: "value";
+    in property <string> data-output-type: "bool";
+    in property <color> data-output-color: #5ac68b;
+    in property <bool> data-output-connected: false;
+    in property <string> data-output-2-name: "";
+    in property <string> data-output-2-type: "";
+    in property <color> data-output-2-color: #5ac68b;
+    in property <bool> data-output-2-connected: false;
+    in property <string> data-input-name: "1";
+    in property <string> data-input-type: "int";
+    in property <color> data-input-color: #5ac68b;
+    in property <bool> data-input-connected: false;
+    in property <string> data-input-value: "";
+    in property <string> data-input-display-value: "";
+    in property <string> data-input-2-name: "";
+    in property <string> data-input-2-type: "";
+    in property <color> data-input-2-color: #5ac68b;
+    in property <bool> data-input-2-connected: false;
+    in property <string> data-input-2-value: "";
+    in property <string> data-input-2-display-value: "";
+    in property <string> validation-severity: "";
+    in property <string> validation-message: "";
+    in property <[ProjectPageInfo]> page-items: [];
+    in property <[SelectionInfo]> scene-elements: [];
+    in property <float> world-x: 0;
+    in property <float> world-y: 0;
+    in property <float> live-world-x: 0;
+    in property <float> live-world-y: 0;
+    in property <length> screen-x: 0px;
+    in property <length> screen-y: 0px;
+    in property <float> zoom-level: 1.0;
+    in property <bool> is-selected: false;
+    in property <float> drag-delta-x: 0;
+    in property <float> drag-delta-y: 0;
+    in property <int> drag-commit-seq: 0;
+    in property <float> marquee-min-x: 0;
+    in property <float> marquee-max-x: 0;
+    in property <float> marquee-min-y: 0;
+    in property <float> marquee-max-y: 0;
+    in property <int> marquee-apply-seq: 0;
+
+    callback consume-canvas-left-down();
+    callback node-select-requested(string, bool);
+    callback node-menu-requested(string, string, string, string, bool, bool, length, length);
+    callback node-drag-started(string, float, float, length, length, bool);
+    callback node-drag-updated(length, length);
+    callback node-drag-finished();
+    callback node-drag-cancelled();
+    callback wire-started(string, string, int, color, length, length);
+    callback wire-updated(length, length);
+    callback wire-released(length, length);
+    callback node-moved-requested(string, float, float);
+    callback node-input-value-changed(string, int, string);
+    callback node-object-input-menu-requested(string, int, string, length, length);
+    callback marquee-hit(string);
+
+    property <bool> is-getter: root.descriptor-id == "variable.get";
+    property <bool> is-operator-node:
+        StringSearch.contains(root.descriptor-id, "math.")
+        || StringSearch.contains(root.descriptor-id, "compare.")
+        || root.descriptor-id == "string.concat";
+    property <string> operator-symbol:
+        StringSearch.contains(root.descriptor-id, ".add") || root.descriptor-id == "string.concat" ? "+"
+        : StringSearch.contains(root.descriptor-id, ".sub") ? "-"
+        : StringSearch.contains(root.descriptor-id, ".mul") ? "*"
+        : StringSearch.contains(root.descriptor-id, ".div") ? "/"
+        : StringSearch.contains(root.descriptor-id, ".mod") ? "%"
+        : StringSearch.contains(root.descriptor-id, ".pow") ? "^"
+        : root.descriptor-id == "compare.gt" ? ">"
+        : root.descriptor-id == "compare.lt" ? "<"
+        : root.descriptor-id == "compare.gte" ? ">="
+        : root.descriptor-id == "compare.lte" ? "<="
+        : root.descriptor-id == "compare.eq" ? "=="
+        : root.descriptor-id == "compare.neq" ? "!="
+        : root.title;
+    property <bool> has-exec-output: root.exec-output-1 != "" || root.exec-output-2 != "" || root.exec-output-3 != "";
+    property <bool> has-data-input:
+        root.data-input-name != "" || root.data-input-type != ""
+        || root.data-input-2-name != "" || root.data-input-2-type != "";
+
+    // Compact value nodes use getter geometry only. Keep getter-only styles
+    // such as header glow tied to is-getter so plain value nodes stay visually neutral.
+    property <bool> is-compact-data-output-node:
+        !root.is-getter
+        && !root.is-event
+        && !root.is-operator-node
+        && !root.has-exec-input
+        && !root.has-exec-output
+        && !root.has-data-input
+        && (root.data-output-name != "" || root.data-output-type != "")
+        && root.data-output-2-name == "";
+    property <bool> is-single-line-output-node: root.is-getter || root.is-compact-data-output-node;
+    property <length> base-node-width:
+        root.is-event ? 250px
+        : root.is-operator-node ? 150px
+        : root.is-single-line-output-node ? 160px
+        : 270px;
+    property <length> base-node-height:
+        root.is-operator-node ? 78px
+        : root.is-single-line-output-node ? 48px
+        : root.exec-output-3 != "" ? 170px
+        : root.exec-output-2 != "" ? ((root.has-data-input || root.data-output-name != "" || root.data-output-type != "") ? 154px : 126px)
+        : (root.data-input-2-name != "" || root.data-input-2-type != "" || root.data-output-2-name != "" || root.data-output-2-type != "") ? 142px
+        : root.has-data-input ? 118px
+        : 94px;
+    property <length> header-height: (root.is-operator-node ? root.base-node-height : 34px) * root.zoom-level;
+    property <length> exec-label-x: root.width - 108px * root.zoom-level;
+    property <length> exec-pin-x: root.width - 20px * root.zoom-level;
+    property <length> exec-input-y: root.header-height + 18px * root.zoom-level;
+    property <length> exec-row-1-label-y: root.header-height + 10px * root.zoom-level;
+    property <length> exec-row-1-pin-y: root.header-height + 18px * root.zoom-level;
+    property <length> exec-row-2-label-y: root.header-height + 38px * root.zoom-level;
+    property <length> exec-row-2-pin-y: root.header-height + 46px * root.zoom-level;
+    property <length> exec-row-3-label-y: root.header-height + 66px * root.zoom-level;
+    property <length> exec-row-3-pin-y: root.header-height + 74px * root.zoom-level;
+
+    // These Y offsets must match editor_runtime::sync::node_pin_anchor_offset_y
+    // and project_core::node_pin_anchor_offset_y; links and drop-target picking use them.
+    property <length> data-base-y: root.is-operator-node
+        ? 18px * root.zoom-level
+        : root.is-single-line-output-node
+            ? 16px * root.zoom-level
+        : root.exec-output-3 != "" ? root.header-height + 96px * root.zoom-level
+        : root.exec-output-2 != "" ? root.header-height + 68px * root.zoom-level
+        : root.header-height + 40px * root.zoom-level;
+    property <length> data-label-y: root.data-base-y;
+    property <length> data-pin-y: root.data-base-y + 8px * root.zoom-level;
+    property <length> data-label-2-y: root.data-base-y + 24px * root.zoom-level;
+    property <length> data-pin-2-y: root.data-base-y + 32px * root.zoom-level;
+    property <length> data-output-label-y: root.is-operator-node ? root.data-base-y + 12px * root.zoom-level : root.data-label-y;
+    property <length> data-output-pin-y: root.is-operator-node ? root.data-base-y + 20px * root.zoom-level : root.data-pin-y;
+    property <color> header-glow-color:
+        root.is-event ? #ea555c8a
+        : root.is-getter ? root.data-output-color.with-alpha(0.50)
+        : #676666;
+    property <bool> has-validation: root.validation-message != "";
+    property <bool> has-validation-error: root.validation-severity == "error";
+    property <color> validation-color: root.has-validation-error ? Themes.error-text : Themes.warning-color;
+    property <color> validation-bg: root.has-validation-error ? Themes.error-bg : Themes.warning-color.with-alpha(0.16);
+    property <string> validation-label: root.has-validation-error ? "Error" : "Warning";
+    property <bool> validation-tooltip-open: false;
+    property <length> title-font-size: min(12px * root.zoom-level, 14px);
+    property <length> operator-font-size: min(20px * root.zoom-level, 22px);
+    property <length> node-width: root.is-event ? (root.base-node-width - 100px) * root.zoom-level : root.base-node-width * root.zoom-level;
+    property <length> node-height: root.base-node-height * root.zoom-level;
+    property <float> base-width-world: root.base-node-width / 1px;
+    property <float> base-height-world: root.base-node-height / 1px;
+    property <string> exec-arrow-commands:
+        "M 4 2 L 10 2 Q 11.5 2 12.5 3.5 L 18 10 Q 19 11 18 12 L 12.5 18.5 Q 11.5 20 10 20 L 4 20 Q 2 20 2 18 L 2 4 Q 2 2 4 2 Z";
+
+    x: root.screen-x;
+    y: root.screen-y;
+    width: root.node-width;
+    height: root.node-height;
+    border-radius: 7px * root.zoom-level;
+    border-width: root.is-selected ? 2px : 1px;
+    border-color: root.is-selected ? Themes.current.active-color : Themes.current.border-color;
+    background: Themes.secondary-background-transparent;
+
+    changed drag-commit-seq => {
+        if root.is-selected && (Math.abs(root.drag-delta-x) > 0.001 || Math.abs(root.drag-delta-y) > 0.001) {
+            root.node-moved-requested(
+                root.node-id,
+                root.world-x + root.drag-delta-x,
+                root.world-y + root.drag-delta-y
+            );
+        }
+    }
+
+    changed marquee-apply-seq => {
+        let node-min-x = root.world-x;
+        let node-max-x = root.world-x + root.base-width-world;
+        let node-min-y = root.world-y;
+        let node-max-y = root.world-y + root.base-height-world;
+        let intersects = node-max-x >= root.marquee-min-x
+            && node-min-x <= root.marquee-max-x
+            && node-max-y >= root.marquee-min-y
+            && node-min-y <= root.marquee-max-y;
+        if intersects {
+            root.marquee-hit(root.node-id);
+        }
+    }
+
+    Rectangle {
+        clip: true;
+
+        VerticalBox {
+            padding: 0;
+            z: 1;
+
+            header := Rectangle {
+                z: 3;
+                width: parent.width;
+                height: root.header-height;
+                border-radius: 7px * root.zoom-level;
+                background: transparent;
+
+                Rectangle {
+                    x: 8px * root.zoom-level;
+                    y: 5px * root.zoom-level;
+                    width: parent.width - 16px * root.zoom-level;
+                    drop-shadow-offset-y: -15px;
+                    height: parent.height - 10px * root.zoom-level;
+                    border-radius: self.height / 2;
+                    drop-shadow-blur: 40px * root.zoom-level;
+                    drop-shadow-color: root.header-glow-color;
+                }
+
+                Text {
+                    x: 12px * root.zoom-level;
+                    width: root.has-validation
+                        ? parent.width - 150px * root.zoom-level
+                        : parent.width - 24px * root.zoom-level;
+                    height: parent.height;
+                    visible: !root.is-single-line-output-node;
+                    text: root.is-operator-node ? root.operator-symbol : (root.is-event ? root.element-type : root.title);
+                    color: Themes.current.primary-text;
+                    font-size: root.is-operator-node ? root.operator-font-size : root.title-font-size;
+                    font-weight: 700;
+                    horizontal-alignment: root.is-operator-node ? TextHorizontalAlignment.center : TextHorizontalAlignment.left;
+                    vertical-alignment: TextVerticalAlignment.center;
+                    overflow: elide;
+                }
+
+                if root.has-validation && !root.is-operator-node: Rectangle {
+                    z: 5;
+                    x: parent.width - 132px * root.zoom-level;
+                    y: (parent.height - 20px * root.zoom-level) / 2;
+                    width: 76px * root.zoom-level;
+                    height: 20px * root.zoom-level;
+                    border-radius: 4px * root.zoom-level;
+                    border-width: 1px;
+                    border-color: root.validation-color;
+                    background: root.validation-bg;
+
+                    Text {
+                        x: 6px * root.zoom-level;
+                        width: parent.width - 12px * root.zoom-level;
+                        height: parent.height;
+                        text: root.validation-label;
+                        color: root.validation-color;
+                        font-size: min(10px * root.zoom-level, 11px);
+                        font-weight: 700;
+                        horizontal-alignment: TextHorizontalAlignment.center;
+                        vertical-alignment: TextVerticalAlignment.center;
+                        overflow: elide;
+                    }
+
+                    TouchArea {
+                        mouse-cursor: MouseCursor.help;
+                        changed has-hover => {
+                            root.validation-tooltip-open = self.has-hover;
+                        }
+                    }
+                }
+
+                TouchArea {
+                    z: 1;
+                    mouse-cursor: MouseCursor.move;
+                    pointer-event(ev) => {
+                        if ev.button == PointerEventButton.left && ev.kind == PointerEventKind.down {
+                            root.consume-canvas-left-down();
+                        }
+                        let sx = root.x + self.mouse-x;
+                        let sy = root.y + self.mouse-y;
+                        if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right {
+                            root.node-menu-requested(
+                                root.node-id,
+                                root.variable-id,
+                                root.descriptor-id,
+                                root.data-output-type,
+                                root.is-event,
+                                root.is-bound-event,
+                                sx,
+                                sy
+                            );
+                        }
+                        if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                            root.node-drag-started(root.node-id, root.world-x, root.world-y, sx, sy, ev.modifiers.control);
+                        }
+                        if ev.kind == PointerEventKind.move {
+                            root.node-drag-updated(sx, sy);
+                        }
+                        if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left {
+                            root.node-drag-finished();
+                        }
+                        if ev.kind == PointerEventKind.cancel {
+                            root.node-drag-cancelled();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if root.is-single-line-output-node: Text {
+        z: 5;
+        x: 12px * root.zoom-level;
+        y: root.data-output-label-y - 8px * root.zoom-level;
+        width: root.has-validation
+            ? parent.width - 94px * root.zoom-level
+            : parent.width - 42px * root.zoom-level;
+        height: 28px * root.zoom-level;
+        text: root.title;
+        color: Themes.current.primary-text;
+        font-size: root.title-font-size;
+        font-weight: 700;
+        vertical-alignment: TextVerticalAlignment.center;
+        overflow: elide;
+    }
+
+    if root.has-validation && root.is-single-line-output-node: Rectangle {
+        z: 6;
+        x: parent.width - 72px * root.zoom-level;
+        y: root.data-output-label-y - 4px * root.zoom-level;
+        width: 48px * root.zoom-level;
+        height: 20px * root.zoom-level;
+        border-radius: 4px * root.zoom-level;
+        border-width: 1px;
+        border-color: root.validation-color;
+        background: root.validation-bg;
+
+        Text {
+            width: parent.width;
+            height: parent.height;
+            text: root.has-validation-error ? "Error" : "Warn";
+            color: root.validation-color;
+            font-size: min(10px * root.zoom-level, 11px);
+            font-weight: 700;
+            horizontal-alignment: TextHorizontalAlignment.center;
+            vertical-alignment: TextVerticalAlignment.center;
+            overflow: elide;
+        }
+
+        TouchArea {
+            mouse-cursor: MouseCursor.help;
+            changed has-hover => {
+                root.validation-tooltip-open = self.has-hover;
+            }
+        }
+    }
+
+    if root.has-validation && root.validation-tooltip-open: Rectangle {
+        z: 200;
+        x: parent.width + 8px * root.zoom-level;
+        y: 4px * root.zoom-level;
+        width: 280px;
+        height: max(38px, tooltip-text.preferred-height + 18px);
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: root.validation-color;
+        background: Themes.current.tooltip-bg;
+        drop-shadow-blur: Themes.shadow-size;
+        drop-shadow-color: Themes.shadow-color;
+
+        Path {
+            x: -6px;
+            y: 12px;
+            width: 6px;
+            height: 12px;
+            fill: Themes.current.tooltip-bg;
+            commands: "M 6 0 L 0 6 L 6 12 Z";
+        }
+
+        Text {
+            x: 10px;
+            y: 8px;
+            width: parent.width - 20px;
+            height: parent.height - 16px;
+            text: root.validation-label + ": " + root.validation-message;
+            color: Themes.current.primary-text;
+            font-size: 11px;
+            wrap: word-wrap;
+            vertical-alignment: TextVerticalAlignment.center;
+        }
+
+        tooltip-text := Text {
+            visible: false;
+            width: parent.width - 20px;
+            text: root.validation-label + ": " + root.validation-message;
+            font-size: 11px;
+            wrap: word-wrap;
+        }
+    }
+
+    if root.has-exec-input: Rectangle {
+        z: 3;
+        x: 5px * root.zoom-level;
+        y: root.exec-input-y;
+        width: 15px * root.zoom-level;
+        height: 15px * root.zoom-level;
+
+        Path {
+            width: parent.width;
+            height: parent.height;
+            viewbox-width: 20;
+            viewbox-height: 20;
+            fill: Themes.current.primary-text;
+            stroke: Themes.current.primary-text;
+            stroke-width: 2px;
+            commands: root.exec-arrow-commands;
+        }
+    }
+    
+    if root.exec-output-1 != "": ExecOutputRow {
+        z: 4;
+        x: root.exec-label-x;
+        y: root.exec-row-1-label-y;
+        width: 103px * root.zoom-level;
+        zoom-level: root.zoom-level;
+        label: root.exec-output-1;
+        connected: root.exec-output-1-connected;
+        slot: 0;
+        consume-canvas-left-down => {
+            root.consume-canvas-left-down();
+        }
+        wire-started(slot, color, x, y) => {
+            root.wire-started(root.node-id, "exec", slot, color, root.x + x, root.y + y);
+        }
+        wire-updated(x, y) => {
+            root.wire-updated(root.x + x, root.y + y);
+        }
+        wire-released(x, y) => {
+            root.wire-released(root.x + x, root.y + y);
+        }
+    }
+
+    if root.exec-output-2 != "": ExecOutputRow {
+        z: 4;
+        x: root.exec-label-x;
+        y: root.exec-row-2-label-y;
+        width: 103px * root.zoom-level;
+        zoom-level: root.zoom-level;
+        label: root.exec-output-2;
+        connected: root.exec-output-2-connected;
+        slot: 1;
+        consume-canvas-left-down => {
+            root.consume-canvas-left-down();
+        }
+        wire-started(slot, color, x, y) => {
+            root.wire-started(root.node-id, "exec", slot, color, root.x + x, root.y + y);
+        }
+        wire-updated(x, y) => {
+            root.wire-updated(root.x + x, root.y + y);
+        }
+        wire-released(x, y) => {
+            root.wire-released(root.x + x, root.y + y);
+        }
+    }
+
+    if root.exec-output-3 != "": ExecOutputRow {
+        z: 4;
+        x: root.exec-label-x;
+        y: root.exec-row-3-label-y;
+        width: 103px * root.zoom-level;
+        zoom-level: root.zoom-level;
+        label: root.exec-output-3;
+        connected: root.exec-output-3-connected;
+        slot: 2;
+        consume-canvas-left-down => {
+            root.consume-canvas-left-down();
+        }
+        wire-started(slot, color, x, y) => {
+            root.wire-started(root.node-id, "exec", slot, color, root.x + x, root.y + y);
+        }
+        wire-updated(x, y) => {
+            root.wire-updated(root.x + x, root.y + y);
+        }
+        wire-released(x, y) => {
+            root.wire-released(root.x + x, root.y + y);
+        }
+    }
+
+    if root.data-output-name != "" || root.data-output-type != "": DataOutputRow {
+        z: 4;
+        x: 0;
+        y: root.data-output-label-y;
+        width: parent.width;
+        zoom-level: root.zoom-level;
+        label: root.data-output-name;
+        pin-type: root.data-output-type;
+        pin-color: root.data-output-color;
+        connected: root.data-output-connected;
+        show-label: !root.is-operator-node && !root.is-single-line-output-node;
+        slot: 0;
+        consume-canvas-left-down => {
+            root.consume-canvas-left-down();
+        }
+        wire-started(slot, color, x, y) => {
+            root.wire-started(root.node-id, "data", slot, color, root.x + x, root.y + y);
+        }
+        wire-updated(x, y) => {
+            root.wire-updated(root.x + x, root.y + y);
+        }
+        wire-released(x, y) => {
+            root.wire-released(root.x + x, root.y + y);
+        }
+    }
+
+    if root.data-output-2-name != "" || root.data-output-2-type != "": DataOutputRow {
+        z: 4;
+        x: 0;
+        y: root.data-label-2-y;
+        width: parent.width;
+        zoom-level: root.zoom-level;
+        label: root.data-output-2-name;
+        pin-type: root.data-output-2-type;
+        pin-color: root.data-output-2-color;
+        connected: root.data-output-2-connected;
+        show-label: !root.is-operator-node;
+        slot: 1;
+        consume-canvas-left-down => {
+            root.consume-canvas-left-down();
+        }
+        wire-started(slot, color, x, y) => {
+            root.wire-started(root.node-id, "data", slot, color, root.x + x, root.y + y);
+        }
+        wire-updated(x, y) => {
+            root.wire-updated(root.x + x, root.y + y);
+        }
+        wire-released(x, y) => {
+            root.wire-released(root.x + x, root.y + y);
+        }
+    }
+
+    TouchArea {
+        y: 33px;
+        z: 1;
+        width: parent.width;
+        height: 60px;
+        mouse-cursor: MouseCursor.pointer;
+        pointer-event(ev) => {
+            if ev.button == PointerEventButton.left && ev.kind == PointerEventKind.down {
+                root.consume-canvas-left-down();
+                root.node-select-requested(root.node-id, ev.modifiers.control);
+            }
+            if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right {
+                root.node-menu-requested(
+                    root.node-id,
+                    root.variable-id,
+                    root.descriptor-id,
+                    root.data-output-type,
+                    root.is-event,
+                    root.is-bound-event,
+                    root.x + self.mouse-x,
+                    root.y + self.mouse-y
+                );
+            }
+        }
+    }
+
+    VerticalBox {
+        vertical-stretch: 1;
+    }
+
+    if root.data-input-name != "" || root.data-input-type != "": DataInputRow {
+        z: 10;
+        x: 0;
+        y: root.data-label-y;
+        width: parent.width;
+        zoom-level: root.zoom-level;
+        descriptor-id: root.descriptor-id;
+        label: root.data-input-name;
+        pin-type: root.data-input-type;
+        pin-color: root.data-input-color;
+        connected: root.data-input-connected;
+        value: root.data-input-value;
+        display-value: root.data-input-display-value;
+        is-operator-node: root.is-operator-node;
+        slot: 0;
+        page-items: root.page-items;
+        scene-elements: root.scene-elements;
+        value-changed(slot, value) => {
+            root.node-input-value-changed(root.node-id, slot, value);
+        }
+        object-menu-requested(slot, pin-type, x, y) => {
+            root.node-object-input-menu-requested(root.node-id, slot, pin-type, root.x + x, root.y + y);
+        }
+    }
+
+    if root.data-input-2-name != "" || root.data-input-2-type != "": DataInputRow {
+        z: 10;
+        x: 0;
+        y: root.data-label-2-y;
+        width: parent.width;
+        zoom-level: root.zoom-level;
+        descriptor-id: root.descriptor-id;
+        label: root.data-input-2-name;
+        pin-type: root.data-input-2-type;
+        pin-color: root.data-input-2-color;
+        connected: root.data-input-2-connected;
+        value: root.data-input-2-value;
+        display-value: root.data-input-2-display-value;
+        is-operator-node: root.is-operator-node;
+        slot: 1;
+        page-items: root.page-items;
+        scene-elements: root.scene-elements;
+        value-changed(slot, value) => {
+            root.node-input-value-changed(root.node-id, slot, value);
+        }
+        object-menu-requested(slot, pin-type, x, y) => {
+            root.node-object-input-menu-requested(root.node-id, slot, pin-type, root.x + x, root.y + y);
+        }
+    }
+}
+
+
+export component BlueprintEventNodePreview inherits BlueprintNodeCardBase {
+    node-id: "preview-event-button";
+    title: "Button Click";
+    element-type: "Button";
+    descriptor-id: "event.button";
+    is-event: true;
+    is-bound-event: true;
+    has-exec-input: false;
+    exec-output-1: "Clicked";
+    data-output-name: "";
+    data-output-type: "";
+}
+
+export component BlueprintFlowNodePreview inherits BlueprintNodeCardBase {
+    node-id: "preview-flow-branch";
+    title: "Branch";
+    descriptor-id: "flow.branch";
+    has-exec-input: true;
+    exec-output-1: "True";
+    exec-output-2: "False";
+    data-input-name: "Condition";
+    data-input-type: "bool";
+    data-input-color: #5ac68b;
+    data-input-value: "true";
+    data-input-display-value: "true";
+    data-output-name: "";
+    data-output-type: "";
+}
+
+export component BlueprintMathNodePreview inherits BlueprintNodeCardBase {
+    node-id: "preview-math-add";
+    title: "Float Add";
+    descriptor-id: "math.float.add";
+    has-exec-input: false;
+    data-input-name: "";
+    data-input-type: "float";
+    data-input-color: #4abcd6;
+    data-input-value: "2.5";
+    data-input-display-value: "2.5";
+    data-input-2-name: "";
+    data-input-2-type: "float";
+    data-input-2-color: #4abcd6;
+    data-input-2-value: "7.5";
+    data-input-2-display-value: "7.5";
+    data-output-name: "";
+    data-output-type: "float";
+    data-output-color: #4abcd6;
+    data-output-connected: true;
+}
+
+export component BlueprintCompareEqNodePreview inherits BlueprintNodeCardBase {
+    node-id: "preview-compare-eq";
+    title: "Equal";
+    descriptor-id: "compare.eq";
+    has-exec-input: false;
+    data-input-name: "";
+    data-input-type: "int";
+    data-input-color: #5d8cff;
+    data-input-value: "10";
+    data-input-display-value: "10";
+    data-input-2-name: "";
+    data-input-2-type: "int";
+    data-input-2-color: #5d8cff;
+    data-input-2-value: "10";
+    data-input-2-display-value: "10";
+    data-output-name: "";
+    data-output-type: "bool";
+    data-output-color: #5ac68b;
+}
+
+export component BlueprintCompactNodePreview inherits BlueprintNodeCardBase {
+    node-id: "preview-compact-value";
+    title: "Status Text";
+    descriptor-id: "value.string";
+    has-exec-input: false;
+    data-output-name: "Text";
+    data-output-type: "string";
+    data-output-color: #e0b85c;
+    data-output-connected: true;
+}
+
+export component BlueprintConvertNodePreview inherits BlueprintNodeCardBase {
+    node-id: "preview-convert-to-string";
+    title: "To String";
+    descriptor-id: "convert.to_string";
+    has-exec-input: false;
+    data-input-name: "Value";
+    data-input-type: "float";
+    data-input-color: #4abcd6;
+    data-input-value: "42.0";
+    data-input-display-value: "42.0";
+    data-output-name: "Result";
+    data-output-type: "string";
+    data-output-color: #e0b85c;
+}
+
+export component BlueprintNodeCard inherits BlueprintFlowNodePreview {}

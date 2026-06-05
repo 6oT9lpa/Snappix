@@ -103,6 +103,7 @@ export component VisualEditorScene inherits Rectangle {
     in-out property <HotkeyBinding> redo-hotkey: { key: "z", ctrl: false, shift: true, alt: false };
     in-out property <HotkeyBinding> cut-hotkey: { key: "x", ctrl: true, shift: false, alt: false };
     in-out property <HotkeyBinding> copy-hotkey: { key: "c", ctrl: true, shift: false, alt: false };
+    in-out property <HotkeyBinding> save-hotkey: { key: "s", ctrl: true, shift: false, alt: false };
     in-out property <HotkeyBinding> paste-hotkey: { key: "v", ctrl: true, shift: false, alt: false };
     in-out property <HotkeyBinding> paste-replace-hotkey: { key: "r", ctrl: true, shift: false, alt: false };
     in-out property <HotkeyBinding> hide-selection-hotkey: { key: "h", ctrl: true, shift: false, alt: false };
@@ -172,6 +173,7 @@ export component VisualEditorScene inherits Rectangle {
     callback redo-requested();
     callback cut-requested();
     callback copy-requested();
+    callback save-project-requested();
     callback paste-requested(float, float);
     callback paste-replace-requested(float, float);
     callback hide-selection-requested();
@@ -203,6 +205,7 @@ export component VisualEditorScene inherits Rectangle {
             : text == "\u{7}" ? "g"
             : text == "\u{d}" ? "m"
             : text == "\u{12}" ? "r"
+            : text == "\u{13}" ? "s"
             : text == "\u{16}" ? "v"
             : text == "\u{18}" ? "x"
             : text == "\u{1a}" ? "z"
@@ -477,6 +480,16 @@ export component VisualEditorScene inherits Rectangle {
                 root.copy-hotkey
             ) {
                 root.copy-requested();
+                return accept;
+            }
+            if root.matches-hotkey-binding(
+                event.text,
+                event.modifiers.control,
+                event.modifiers.shift,
+                event.modifiers.alt,
+                root.save-hotkey
+            ) {
+                root.save-project-requested();
                 return accept;
             }
             if root.matches-hotkey-binding(

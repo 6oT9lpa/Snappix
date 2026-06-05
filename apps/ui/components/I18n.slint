@@ -1,12 +1,136 @@
-﻿export global I18n {
+export global I18n {
     in-out property <string> language: "ru";
 
     public pure function t(key: string) -> string {
         if language == "en" {
-            return key;
+            if key == "blueprint.node.tooltip.event.button" { return "Runs when a bound button emits click, hover, or press events."; }
+            else if key == "blueprint.node.tooltip.event.input" { return "Runs when a bound input changes text or focus state."; }
+            else if key == "blueprint.node.tooltip.event.checkbox" { return "Runs when a bound checkbox is clicked or its checked state changes."; }
+            else if key == "blueprint.node.tooltip.event.label" { return "Runs when a bound label is clicked or hovered."; }
+            else if key == "blueprint.node.tooltip.event.fill" { return "Runs when a fill-capable element receives or updates text content."; }
+            else if key == "blueprint.node.tooltip.event.app_started" { return "Starts execution once when the application opens."; }
+            else if key == "blueprint.node.tooltip.event.app_started_delayed" { return "Starts execution after startup delay, when the UI is ready."; }
+            else if key == "blueprint.node.tooltip.event.page_changed" { return "Starts execution when the active page changes."; }
+            else if key == "blueprint.node.tooltip.page.navigate" { return "Switches to the selected page and continues execution."; }
+            else if key == "blueprint.node.tooltip.ui.set_opacity" { return "Changes an element opacity using a float value from 0.0 to 1.0."; }
+            else if key == "blueprint.node.tooltip.ui.set_display_mode" { return "Changes how an element is displayed, such as visible, hidden, or layout mode."; }
+            else if key == "blueprint.node.tooltip.flow.branch" { return "Splits execution into true and false paths using a boolean condition."; }
+            else if key == "blueprint.node.tooltip.flow.delay" { return "Waits for a configured duration before continuing execution."; }
+            else if key == "blueprint.node.tooltip.flow.loop" { return "Repeats the body path while the condition allows iteration."; }
+            else if key == "blueprint.node.tooltip.flow.while" { return "Runs the body path while the boolean condition remains true."; }
+            else if key == "blueprint.node.tooltip.flow.for_range" { return "Iterates from a start integer to an end integer and exposes the current index."; }
+            else if key == "blueprint.node.tooltip.flow.for_each" { return "Iterates over an array and exposes the current item and index."; }
+            else if key == "blueprint.node.tooltip.value.bool_true" { return "Outputs the constant boolean value true."; }
+            else if key == "blueprint.node.tooltip.value.bool_false" { return "Outputs the constant boolean value false."; }
+            else if key == "blueprint.node.tooltip.value.int_zero" { return "Outputs the integer literal 0."; }
+            else if key == "blueprint.node.tooltip.value.float_zero" { return "Outputs the floating-point literal 0.0."; }
+            else if key == "blueprint.node.tooltip.value.string_empty" { return "Outputs an empty string literal."; }
+            else if key == "blueprint.node.tooltip.bool.not" { return "Inverts a boolean value and outputs the opposite result."; }
+            else if key == "blueprint.node.tooltip.math.negate" { return "Changes a number sign and outputs the negated float value."; }
+            else if key == "blueprint.node.tooltip.string.length" { return "Counts characters in text and outputs the length as an integer."; }
+            else if key == "blueprint.node.tooltip.string.is_empty" { return "Checks whether text is empty and outputs a boolean result."; }
+            else if key == "blueprint.node.tooltip.convert.to_bool" { return "Converts an incoming value to a boolean output."; }
+            else if key == "blueprint.node.tooltip.convert.to_int" { return "Converts an incoming value to an integer output."; }
+            else if key == "blueprint.node.tooltip.convert.to_float" { return "Converts an incoming value to a floating-point output."; }
+            else if key == "blueprint.node.tooltip.convert.to_string" { return "Converts an incoming value to a string output."; }
+            else if key == "blueprint.node.tooltip.math.int.add" { return "Adds two integer values and outputs an integer result."; }
+            else if key == "blueprint.node.tooltip.math.int.sub" { return "Subtracts the second integer from the first and outputs an integer result."; }
+            else if key == "blueprint.node.tooltip.math.int.mul" { return "Multiplies two integer values and outputs an integer result."; }
+            else if key == "blueprint.node.tooltip.math.int.div" { return "Divides the first integer by the second and outputs an integer result."; }
+            else if key == "blueprint.node.tooltip.math.int.mod" { return "Outputs the integer remainder after division."; }
+            else if key == "blueprint.node.tooltip.math.int.pow" { return "Raises an integer base to an integer power."; }
+            else if key == "blueprint.node.tooltip.math.float.add" { return "Adds two float values and outputs a float result."; }
+            else if key == "blueprint.node.tooltip.math.float.sub" { return "Subtracts the second float from the first and outputs a float result."; }
+            else if key == "blueprint.node.tooltip.math.float.mul" { return "Multiplies two float values and outputs a float result."; }
+            else if key == "blueprint.node.tooltip.math.float.div" { return "Divides the first float by the second and outputs a float result."; }
+            else if key == "blueprint.node.tooltip.math.float.mod" { return "Outputs the floating-point remainder after division."; }
+            else if key == "blueprint.node.tooltip.math.float.pow" { return "Raises a float base to a float power."; }
+            else if key == "blueprint.node.tooltip.math.int_float.add" { return "Adds an integer and a float, then outputs a float result."; }
+            else if key == "blueprint.node.tooltip.math.int_float.sub" { return "Subtracts a float from an integer and outputs a float result."; }
+            else if key == "blueprint.node.tooltip.math.int_float.mul" { return "Multiplies an integer by a float and outputs a float result."; }
+            else if key == "blueprint.node.tooltip.math.int_float.div" { return "Divides an integer by a float and outputs a float result."; }
+            else if key == "blueprint.node.tooltip.math.int_float.mod" { return "Outputs the remainder of an integer divided by a float."; }
+            else if key == "blueprint.node.tooltip.math.int_float.pow" { return "Raises an integer base to a float power."; }
+            else if key == "blueprint.node.tooltip.string.concat" { return "Joins two text values and outputs the combined string."; }
+            else if key == "blueprint.node.tooltip.compare.gt" { return "Checks whether the left value is greater than the right value."; }
+            else if key == "blueprint.node.tooltip.compare.lt" { return "Checks whether the left value is less than the right value."; }
+            else if key == "blueprint.node.tooltip.compare.gte" { return "Checks whether the left value is greater than or equal to the right value."; }
+            else if key == "blueprint.node.tooltip.compare.lte" { return "Checks whether the left value is less than or equal to the right value."; }
+            else if key == "blueprint.node.tooltip.compare.eq" { return "Checks whether two values are equal."; }
+            else if key == "blueprint.node.tooltip.compare.neq" { return "Checks whether two values are different."; }
+            else if key == "blueprint.node.tooltip.variables.get_dynamic" { return "Reads a dynamic variable value and outputs it as any type."; }
+            else if key == "blueprint.node.tooltip.variables.set_dynamic" { return "Writes a dynamic variable value and continues execution."; }
+            else if key == "blueprint.node.tooltip.functions.return" { return "Finishes the current function and passes the return value."; }
+            else if key == "blueprint.node.tooltip.types.struct_make" { return "Builds an object-like structure from field data."; }
+            else if key == "blueprint.node.tooltip.types.enum_value" { return "Outputs a selected enum value as text."; }
+            else if key == "blueprint.node.tooltip.network.request" { return "Sends a server-side HTTP request and outputs the response text."; }
+            else if key == "blueprint.node.tooltip.db.query" { return "Runs a server-side database query and outputs returned rows."; }
+            else { return key; }
         }
 
-        if key == "Log-in Snappix Account" { "Вход в аккаунт Snappix" }
+        if key == "blueprint.node.tooltip.event.button" { "Запускается, когда привязанная кнопка получает click, hover или press." }
+        else if key == "blueprint.node.tooltip.event.input" { "Запускается, когда привязанное поле ввода меняет текст или состояние фокуса." }
+        else if key == "blueprint.node.tooltip.event.checkbox" { "Запускается, когда привязанный checkbox нажат или меняет состояние." }
+        else if key == "blueprint.node.tooltip.event.label" { "Запускается, когда привязанная метка получает click или hover." }
+        else if key == "blueprint.node.tooltip.event.fill" { "Запускается, когда элемент с заполнением получает или обновляет текст." }
+        else if key == "blueprint.node.tooltip.event.app_started" { "Запускает выполнение один раз при открытии приложения." }
+        else if key == "blueprint.node.tooltip.event.app_started_delayed" { "Запускает выполнение после задержки старта, когда UI уже готов." }
+        else if key == "blueprint.node.tooltip.event.page_changed" { "Запускает выполнение при смене активной страницы." }
+        else if key == "blueprint.node.tooltip.page.navigate" { "Переключает приложение на выбранную страницу и продолжает выполнение." }
+        else if key == "blueprint.node.tooltip.ui.set_opacity" { "Меняет прозрачность элемента через float-значение от 0.0 до 1.0." }
+        else if key == "blueprint.node.tooltip.ui.set_display_mode" { "Меняет отображение элемента: видимость, скрытие или режим layout." }
+        else if key == "blueprint.node.tooltip.flow.branch" { "Разделяет выполнение на ветки true и false по boolean-условию." }
+        else if key == "blueprint.node.tooltip.flow.delay" { "Ждет указанную длительность перед продолжением выполнения." }
+        else if key == "blueprint.node.tooltip.flow.loop" { "Повторяет ветку body, пока условие разрешает итерации." }
+        else if key == "blueprint.node.tooltip.flow.while" { "Выполняет body, пока boolean-условие остается true." }
+        else if key == "blueprint.node.tooltip.flow.for_range" { "Итерируется от начального int до конечного int и отдает текущий индекс." }
+        else if key == "blueprint.node.tooltip.flow.for_each" { "Итерируется по массиву и отдает текущий элемент и индекс." }
+        else if key == "blueprint.node.tooltip.value.bool_true" { "Отдает постоянное boolean-значение true." }
+        else if key == "blueprint.node.tooltip.value.bool_false" { "Отдает постоянное boolean-значение false." }
+        else if key == "blueprint.node.tooltip.value.int_zero" { "Отдает целочисленный литерал 0." }
+        else if key == "blueprint.node.tooltip.value.float_zero" { "Отдает дробный литерал 0.0." }
+        else if key == "blueprint.node.tooltip.value.string_empty" { "Отдает пустую строку." }
+        else if key == "blueprint.node.tooltip.bool.not" { "Инвертирует boolean-значение и отдает противоположный результат." }
+        else if key == "blueprint.node.tooltip.math.negate" { "Меняет знак числа и отдает отрицательное float-значение." }
+        else if key == "blueprint.node.tooltip.string.length" { "Считает символы в тексте и отдает длину как integer." }
+        else if key == "blueprint.node.tooltip.string.is_empty" { "Проверяет, пустой ли текст, и отдает boolean-результат." }
+        else if key == "blueprint.node.tooltip.convert.to_bool" { "Преобразует входящее значение в boolean." }
+        else if key == "blueprint.node.tooltip.convert.to_int" { "Преобразует входящее значение в integer." }
+        else if key == "blueprint.node.tooltip.convert.to_float" { "Преобразует входящее значение в float." }
+        else if key == "blueprint.node.tooltip.convert.to_string" { "Преобразует входящее значение в string." }
+        else if key == "blueprint.node.tooltip.math.int.add" { "Складывает два integer-значения и отдает integer-результат." }
+        else if key == "blueprint.node.tooltip.math.int.sub" { "Вычитает второй integer из первого и отдает integer-результат." }
+        else if key == "blueprint.node.tooltip.math.int.mul" { "Умножает два integer-значения и отдает integer-результат." }
+        else if key == "blueprint.node.tooltip.math.int.div" { "Делит первый integer на второй и отдает integer-результат." }
+        else if key == "blueprint.node.tooltip.math.int.mod" { "Отдает integer-остаток после деления." }
+        else if key == "blueprint.node.tooltip.math.int.pow" { "Возводит integer-основание в integer-степень." }
+        else if key == "blueprint.node.tooltip.math.float.add" { "Складывает два float-значения и отдает float-результат." }
+        else if key == "blueprint.node.tooltip.math.float.sub" { "Вычитает второй float из первого и отдает float-результат." }
+        else if key == "blueprint.node.tooltip.math.float.mul" { "Умножает два float-значения и отдает float-результат." }
+        else if key == "blueprint.node.tooltip.math.float.div" { "Делит первый float на второй и отдает float-результат." }
+        else if key == "blueprint.node.tooltip.math.float.mod" { "Отдает дробный остаток после деления." }
+        else if key == "blueprint.node.tooltip.math.float.pow" { "Возводит float-основание в float-степень." }
+        else if key == "blueprint.node.tooltip.math.int_float.add" { "Складывает integer и float, затем отдает float-результат." }
+        else if key == "blueprint.node.tooltip.math.int_float.sub" { "Вычитает float из integer и отдает float-результат." }
+        else if key == "blueprint.node.tooltip.math.int_float.mul" { "Умножает integer на float и отдает float-результат." }
+        else if key == "blueprint.node.tooltip.math.int_float.div" { "Делит integer на float и отдает float-результат." }
+        else if key == "blueprint.node.tooltip.math.int_float.mod" { "Отдает остаток от деления integer на float." }
+        else if key == "blueprint.node.tooltip.math.int_float.pow" { "Возводит integer-основание в float-степень." }
+        else if key == "blueprint.node.tooltip.string.concat" { "Соединяет два текста и отдает объединенную строку." }
+        else if key == "blueprint.node.tooltip.compare.gt" { "Проверяет, что левое значение больше правого." }
+        else if key == "blueprint.node.tooltip.compare.lt" { "Проверяет, что левое значение меньше правого." }
+        else if key == "blueprint.node.tooltip.compare.gte" { "Проверяет, что левое значение больше или равно правому." }
+        else if key == "blueprint.node.tooltip.compare.lte" { "Проверяет, что левое значение меньше или равно правому." }
+        else if key == "blueprint.node.tooltip.compare.eq" { "Проверяет, что два значения равны." }
+        else if key == "blueprint.node.tooltip.compare.neq" { "Проверяет, что два значения различаются." }
+        else if key == "blueprint.node.tooltip.variables.get_dynamic" { "Читает значение динамической переменной и отдает его как any." }
+        else if key == "blueprint.node.tooltip.variables.set_dynamic" { "Записывает значение динамической переменной и продолжает выполнение." }
+        else if key == "blueprint.node.tooltip.functions.return" { "Завершает текущую функцию и передает return-значение." }
+        else if key == "blueprint.node.tooltip.types.struct_make" { "Собирает объектную структуру из данных полей." }
+        else if key == "blueprint.node.tooltip.types.enum_value" { "Отдает выбранное enum-значение как текст." }
+        else if key == "blueprint.node.tooltip.network.request" { "Отправляет серверный HTTP-запрос и отдает текст ответа." }
+        else if key == "blueprint.node.tooltip.db.query" { "Выполняет серверный запрос к базе данных и отдает строки результата." }
+        else if key == "Log-in Snappix Account" { "Вход в аккаунт Snappix" }
         else if key == "Email or Username" { "Email или имя пользователя" }
         else if key == "Password" { "Пароль" }
         else if key == "Loading..." { "Загрузка..." }

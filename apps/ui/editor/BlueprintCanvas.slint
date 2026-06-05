@@ -1,24 +1,37 @@
 import { HorizontalBox, VerticalBox } from "std-widgets.slint";
 import { Themes, Separator-H } from "../components/Themes.slint";
+import { I18n } from "../components/I18n.slint";
 import { CanvasZoomControls } from "./CanvasZoomControls.slint";
-import { BlueprintLinkInfo, BlueprintNodeInfo, SelectionInfo } from "../models/EditorModels.slint";
+import { BlueprintLinkInfo, BlueprintNodeInfo, ProjectPageInfo, SelectionInfo } from "../models/EditorModels.slint";
 import { StringSearch } from "../utils/StringSearch.slint";
+import { BlueprintNodeCardBase } from "./BlueprintNodeCard.slint";
 
 component NodeMenuRow inherits Rectangle {
     in property <string> title: "";
     in property <string> descriptor-id: "";
     in property <string> query: "";
     callback selected(string);
+    callback tooltip-requested(string, length);
+    callback tooltip-cleared();
+
+    property <string> description: I18n.t("blueprint.node.tooltip." + root.descriptor-id);
 
     visible: query == "" || StringSearch.contains(title, query) || StringSearch.contains(descriptor-id, query);
     height: self.visible ? 28px : 0px;
     border-radius: 4px;
     background: touch.has-hover ? Themes.current.hover-color : transparent;
-    clip: true;
+    clip: false;
 
     touch := TouchArea {
         mouse-cursor: MouseCursor.pointer;
         clicked => { root.selected(root.descriptor-id); }
+        changed has-hover => {
+            if self.has-hover {
+                root.tooltip-requested(root.description, root.y + parent.y);
+            } else {
+                root.tooltip-cleared();
+            }
+        }
     }
 
     Text {
@@ -31,6 +44,7 @@ component NodeMenuRow inherits Rectangle {
         vertical-alignment: TextVerticalAlignment.center;
         overflow: elide;
     }
+
 }
 
 component MenuGroupHeader inherits Rectangle {
@@ -100,560 +114,15 @@ component NodeContextAction inherits Rectangle {
     }
 }
 
-component BlueprintNodeCard inherits Rectangle {
-    in property <string> node-id: "";
-    in property <string> title: "Getter";
-    in property <string> element-type: "";
-    in property <string> descriptor-id: "";
-    in property <bool> is-event: false;
-    in property <bool> is-bound-event: false;
-    in property <bool> has-exec-input: false;
-    in property <string> exec-output-1: "";
-    in property <string> exec-output-2: "";
-    in property <string> exec-output-3: "";
-    in property <bool> exec-output-1-connected: false;
-    in property <bool> exec-output-2-connected: false;
-    in property <bool> exec-output-3-connected: false;
-    in property <string> data-output-name: "value";
-    in property <string> data-output-type: "bool";
-    in property <color> data-output-color: #5ac68b;
-    in property <bool> data-output-connected: false;
-    in property <string> data-input-name: "";
-    in property <string> data-input-type: "";
-    in property <color> data-input-color: #5ac68b;
-    in property <float> world-x: 0;
-    in property <float> world-y: 0;
-    in property <float> live-world-x: 0;
-    in property <float> live-world-y: 0;
-    in property <length> screen-x: 0px;
-    in property <length> screen-y: 0px;
-    in property <float> zoom-level: 1.0;
-    in property <bool> is-selected: false;
-    in property <float> drag-delta-x: 0;
-    in property <float> drag-delta-y: 0;
-    in property <int> drag-commit-seq: 0;
-    in property <float> marquee-min-x: 0;
-    in property <float> marquee-max-x: 0;
-    in property <float> marquee-min-y: 0;
-    in property <float> marquee-max-y: 0;
-    in property <int> marquee-apply-seq: 0;
-
-    callback consume-canvas-left-down();
-    callback node-select-requested(string, bool);
-    callback node-menu-requested(string, string, bool, bool, length, length);
-    callback node-drag-started(string, float, float, length, length, bool);
-    callback node-drag-updated(length, length);
-    callback node-drag-finished();
-    callback node-drag-cancelled();
-    callback wire-started(string, string, int, color, length, length);
-    callback wire-updated(length, length);
-    callback wire-released(length, length);
-    callback node-moved-requested(string, float, float);
-    callback marquee-hit(string);
-
-    property <length> base-node-width: root.is-event ? 250px : 270px;
-    property <bool> is-getter: root.descriptor-id == "variable.get";
-    property <length> base-node-height:
-        root.is-getter ? 60px
-        : root.exec-output-3 != "" ? 150px
-        : root.exec-output-2 != "" ? 126px
-        : root.data-input-name != "" ? 118px
-        : 94px;
-    property <length> header-height: 34px * root.zoom-level;
-    property <length> exec-label-x: root.width - 108px * root.zoom-level;
-    property <length> exec-pin-x: root.width - 20px * root.zoom-level;
-    property <length> exec-input-y: root.header-height + 18px * root.zoom-level;
-    property <length> exec-row-1-label-y: root.header-height + 10px * root.zoom-level;
-    property <length> exec-row-1-pin-y: root.header-height + 18px * root.zoom-level;
-    property <length> exec-row-2-label-y: root.header-height + 38px * root.zoom-level;
-    property <length> exec-row-2-pin-y: root.header-height + 46px * root.zoom-level;
-    property <length> exec-row-3-label-y: root.header-height + 66px * root.zoom-level;
-    property <length> exec-row-3-pin-y: root.header-height + 74px * root.zoom-level;
-    property <length> data-label-y: root.is-getter ? root.header-height + 2px * root.zoom-level : root.header-height + 40px * root.zoom-level;
-    property <length> data-pin-y: root.is-getter ? root.header-height + 10px * root.zoom-level : root.header-height + 48px * root.zoom-level;
-    property <color> header-glow-color:
-        root.is-event ? #ea555c8a
-        : root.is-getter ? root.data-output-color.with-alpha(0.50)
-        : #676666;
-    property <length> node-width: root.is-event ? (root.base-node-width - 100px) * root.zoom-level : root.base-node-width * root.zoom-level;
-    property <length> node-height: root.base-node-height * root.zoom-level;
-    property <float> base-width-world: root.base-node-width / 1px;
-    property <float> base-height-world: root.base-node-height / 1px;
-    property <string> exec-arrow-commands:
-        "M 4 2 L 10 2 Q 11.5 2 12.5 3.5 L 18 10 Q 19 11 18 12 L 12.5 18.5 Q 11.5 20 10 20 L 4 20 Q 2 20 2 18 L 2 4 Q 2 2 4 2 Z";
-
-    x: root.screen-x;
-    y: root.screen-y;
-    width: root.node-width;
-    height: root.node-height;
-    border-radius: 7px * root.zoom-level;
-    border-width: root.is-selected ? 2px : 1px;
-    border-color: root.is-selected ? Themes.current.active-color : Themes.current.border-color;
-    background: Themes.secondary-background-transparent;
-
-    changed drag-commit-seq => {
-        if root.is-selected && (Math.abs(root.drag-delta-x) > 0.001 || Math.abs(root.drag-delta-y) > 0.001) {
-            root.node-moved-requested(
-                root.node-id,
-                root.world-x + root.drag-delta-x,
-                root.world-y + root.drag-delta-y
-            );
-        }
-    }
-
-    changed marquee-apply-seq => {
-        let node-min-x = root.world-x;
-        let node-max-x = root.world-x + root.base-width-world;
-        let node-min-y = root.world-y;
-        let node-max-y = root.world-y + root.base-height-world;
-        let intersects = node-max-x >= root.marquee-min-x
-            && node-min-x <= root.marquee-max-x
-            && node-max-y >= root.marquee-min-y
-            && node-min-y <= root.marquee-max-y;
-        if intersects {
-            root.marquee-hit(root.node-id);
-        }
-    }
-    Rectangle {
-        clip: true;
-
-        VerticalBox {
-            padding: 0;
-            z: 1;
-
-            header := Rectangle {
-                z: 3;
-                width: parent.width;
-                height: root.header-height;
-                border-radius: 7px * root.zoom-level;
-                background: transparent;
-
-                Rectangle {
-                    x: 8px * root.zoom-level;
-                    y: 5px * root.zoom-level;
-                    width: parent.width - 16px * root.zoom-level;
-                    drop-shadow-offset-y: -15px;
-                    height: parent.height - 10px * root.zoom-level;
-                    border-radius: self.height / 2;
-                    drop-shadow-blur: 40px * root.zoom-level;
-                    drop-shadow-color: root.header-glow-color;
-                }
-
-                Text {
-                    x: 12px * root.zoom-level;
-                    width: parent.width - 24px * root.zoom-level;
-                    height: parent.height;
-                    text: root.is-event ? root.element-type : root.title;
-                    color: Themes.current.primary-text;
-                    font-size: 12px * root.zoom-level;
-                    font-weight: 700;
-                    vertical-alignment: TextVerticalAlignment.center;
-                    overflow: elide;
-                }
-
-                TouchArea {
-                    z: 1;
-                    mouse-cursor: MouseCursor.move;
-                    pointer-event(ev) => {
-                        if ev.button == PointerEventButton.left && ev.kind == PointerEventKind.down {
-                            root.consume-canvas-left-down();
-                        }
-                        let sx = root.x + self.mouse-x;
-                        let sy = root.y + self.mouse-y;
-                        if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right {
-                            root.node-menu-requested(root.node-id, root.descriptor-id, root.is-event, root.is-bound-event, sx, sy);
-                        }
-                        if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
-                            root.node-drag-started(root.node-id, root.world-x, root.world-y, sx, sy, ev.modifiers.control);
-                        }
-                        if ev.kind == PointerEventKind.move {
-                            root.node-drag-updated(sx, sy);
-                        }
-                        if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left {
-                            root.node-drag-finished();
-                        }
-                        if ev.kind == PointerEventKind.cancel {
-                            root.node-drag-cancelled();
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if root.has-exec-input: Rectangle {
-        z: 3;
-        x: 5px * root.zoom-level;
-        y: root.exec-input-y;
-        width: 15px * root.zoom-level;
-        height: 15px * root.zoom-level;
-
-        Path {
-            width: parent.width;
-            height: parent.height;
-            viewbox-width: 20;
-            viewbox-height: 20;
-            fill: Themes.current.primary-text;
-            stroke: Themes.current.primary-text;
-            stroke-width: 2px;
-            commands: root.exec-arrow-commands;
-        }
-    }
-
-    if root.exec-output-1 != "": Text {
-        z: 3;
-        x: root.exec-label-x;
-        y: root.exec-row-1-label-y;
-        width: 80px * root.zoom-level;
-        height: 30px * root.zoom-level;
-        text: root.exec-output-1;
-        color: Themes.current.primary-text;
-        font-size: 13px * root.zoom-level;
-        horizontal-alignment: TextHorizontalAlignment.right;
-        vertical-alignment: TextVerticalAlignment.center;
-        overflow: elide;
-    }
-
-    if root.exec-output-1 != "": Rectangle {
-        z: 4;
-        x: root.exec-pin-x;
-        y: root.exec-row-1-pin-y;
-        width: 15px * root.zoom-level;
-        height: 15px * root.zoom-level;
-        background: transparent;
-
-        Path {
-            width: parent.width;
-            height: parent.height;
-            viewbox-width: 20;
-            viewbox-height: 20;
-            fill: root.exec-output-1-connected ? Themes.current.primary-text : transparent;
-            stroke: Themes.current.primary-text;
-            stroke-width: 2px;
-            commands: root.exec-arrow-commands;
-        }
-
-        TouchArea {
-            mouse-cursor: MouseCursor.crosshair;
-            pointer-event(ev) => {
-                let sx = root.x + parent.x + self.mouse-x;
-                let sy = root.y + parent.y + self.mouse-y;
-                if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
-                    root.consume-canvas-left-down();
-                    root.wire-started(root.node-id, "exec", 0, #f5f5f5, sx, sy);
-                }
-                if ev.kind == PointerEventKind.move && self.pressed {
-                    root.wire-updated(sx, sy);
-                }
-                if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left {
-                    root.wire-released(sx, sy);
-                }
-                if ev.kind == PointerEventKind.cancel {
-                    root.wire-released(sx, sy);
-                }
-            }
-        }
-    }
-
-    if root.exec-output-2 != "": Text {
-        z: 3;
-        x: root.exec-label-x;
-        y: root.exec-row-2-label-y;
-        width: 80px * root.zoom-level;
-        height: 30px * root.zoom-level;
-        text: root.exec-output-2;
-        color: Themes.current.primary-text;
-        font-size: 13px * root.zoom-level;
-        horizontal-alignment: TextHorizontalAlignment.right;
-        vertical-alignment: TextVerticalAlignment.center;
-        overflow: elide;
-    }
-
-    if root.exec-output-2 != "": Rectangle {
-        z: 4;
-        x: root.exec-pin-x;
-        y: root.exec-row-2-pin-y;
-        width: 15px * root.zoom-level;
-        height: 15px * root.zoom-level;
-        background: transparent;
-
-        Path {
-            width: parent.width;
-            height: parent.height;
-            viewbox-width: 20;
-            viewbox-height: 20;
-            fill: root.exec-output-2-connected ? Themes.current.primary-text : transparent;
-            stroke: Themes.current.primary-text;
-            stroke-width: 2px;
-            commands: root.exec-arrow-commands;
-        }
-
-        TouchArea {
-            mouse-cursor: MouseCursor.crosshair;
-            pointer-event(ev) => {
-                let sx = root.x + parent.x + self.mouse-x;
-                let sy = root.y + parent.y + self.mouse-y;
-                if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
-                    root.consume-canvas-left-down();
-                    root.wire-started(root.node-id, "exec", 1, #f5f5f5, sx, sy);
-                }
-                if ev.kind == PointerEventKind.move && self.pressed {
-                    root.wire-updated(sx, sy);
-                }
-                if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left {
-                    root.wire-released(sx, sy);
-                }
-                if ev.kind == PointerEventKind.cancel {
-                    root.wire-released(sx, sy);
-                }
-            }
-        }
-    }
-
-    if root.exec-output-3 != "": Text {
-        z: 3;
-        x: root.exec-label-x;
-        y: root.exec-row-3-label-y;
-        width: 80px * root.zoom-level;
-        height: 30px * root.zoom-level;
-        text: root.exec-output-3;
-        color: Themes.current.primary-text;
-        font-size: 13px * root.zoom-level;
-        horizontal-alignment: TextHorizontalAlignment.right;
-        vertical-alignment: TextVerticalAlignment.center;
-        overflow: elide;
-    }
-
-    if root.exec-output-3 != "": Rectangle {
-        z: 4;
-        x: root.exec-pin-x;
-        y: root.exec-row-3-pin-y;
-        width: 15px * root.zoom-level;
-        height: 15px * root.zoom-level;
-        background: transparent;
-
-        Path {
-            width: parent.width;
-            height: parent.height;
-            viewbox-width: 20;
-            viewbox-height: 20;
-            fill: root.exec-output-3-connected ? Themes.current.primary-text : transparent;
-            stroke: Themes.current.primary-text;
-            stroke-width: 2px;
-            commands: root.exec-arrow-commands;
-        }
-
-        TouchArea {
-            mouse-cursor: MouseCursor.crosshair;
-            pointer-event(ev) => {
-                let sx = root.x + parent.x + self.mouse-x;
-                let sy = root.y + parent.y + self.mouse-y;
-                if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
-                    root.consume-canvas-left-down();
-                    root.wire-started(root.node-id, "exec", 2, #f5f5f5, sx, sy);
-                }
-                if ev.kind == PointerEventKind.move && self.pressed {
-                    root.wire-updated(sx, sy);
-                }
-                if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left {
-                    root.wire-released(sx, sy);
-                }
-                if ev.kind == PointerEventKind.cancel {
-                    root.wire-released(sx, sy);
-                }
-            }
-        }
-    }
-
-    if root.data-output-name != "": Text {
-        z: 3;
-        x: parent.width - 160px * root.zoom-level;
-        y: root.data-label-y;
-        width: 132px * root.zoom-level;
-        height: 28px * root.zoom-level;
-        text: root.data-output-name + " : " + root.data-output-type;
-        color: Themes.current.secondary-text;
-        font-size: 11px * root.zoom-level;
-        horizontal-alignment: TextHorizontalAlignment.right;
-        vertical-alignment: TextVerticalAlignment.center;
-        overflow: elide;
-    }
-
-    if root.data-output-name != "": Rectangle {
-        z: 4;
-        x: parent.width - 15px * root.zoom-level;
-        y: root.data-pin-y;
-        width: 12px * root.zoom-level;
-        height: 12px * root.zoom-level;
-        border-radius: 6px * root.zoom-level;
-        border-width: 1px;
-        border-color: root.data-output-color;
-        background: root.data-output-connected ? root.data-output-color : transparent;
-
-        TouchArea {
-            mouse-cursor: MouseCursor.crosshair;
-            pointer-event(ev) => {
-                let sx = root.x + parent.x + self.mouse-x;
-                let sy = root.y + parent.y + self.mouse-y;
-                if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
-                    root.consume-canvas-left-down();
-                    root.wire-started(root.node-id, "data", 0, root.data-output-color, sx, sy);
-                }
-                if ev.kind == PointerEventKind.move && self.pressed {
-                    root.wire-updated(sx, sy);
-                }
-                if ev.kind == PointerEventKind.up && ev.button == PointerEventButton.left {
-                    root.wire-released(sx, sy);
-                }
-                if ev.kind == PointerEventKind.cancel {
-                    root.wire-released(sx, sy);
-                }
-            }
-        }
-    }
-
-    TouchArea {
-        y: 33px;
-        z: 1;
-        width: parent.width;
-        height: 60px;
-        mouse-cursor: MouseCursor.pointer;
-        pointer-event(ev) => {
-            if ev.button == PointerEventButton.left && ev.kind == PointerEventKind.down {
-                root.consume-canvas-left-down();
-                root.node-select-requested(root.node-id, ev.modifiers.control);
-            }
-            if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right {
-                root.node-menu-requested(root.node-id, root.descriptor-id, root.is-event, root.is-bound-event, root.x + self.mouse-x, root.y + self.mouse-y);
-            }
-        }
-    }
-
-    if root.data-input-name != "": Rectangle {
-        x: 5px * root.zoom-level;
-        y: root.data-pin-y;
-        width: 12px * root.zoom-level;
-        height: 12px * root.zoom-level;
-        border-radius: 6px * root.zoom-level;
-        background: root.data-input-color;
-    }
-
-    if root.data-input-name != "": Text {
-        x: 25px * root.zoom-level;
-        y: root.data-label-y;
-        width: 140px * root.zoom-level;
-        height: 28px * root.zoom-level;
-        text: root.data-input-name + " : " + root.data-input-type;
-        color: Themes.current.secondary-text;
-        font-size: 11px * root.zoom-level;
-        vertical-alignment: TextVerticalAlignment.center;
-        overflow: elide;
-    }
-}
-
 export component BlueprintCanvas inherits Rectangle {
     in-out property <float> zoom-level: 1.0;
     in-out property <length> offset-x: 0px;
     in-out property <length> offset-y: 0px;
     in property <[BlueprintNodeInfo]> nodes: [
-        {
-            node-id: "branch_1",
-            title: "Branch",
-            category: "Flow",
-            element-type: "",
-            descriptor-id: "flow.branch",
-
-            x: 500.0,
-            y: 150.0,
-
-            is-event: false,
-            is-bound-event: false,
-
-            has-exec-input: true,
-
-            exec-output-1: "True",
-            exec-output-2: "False",
-            exec-output-3: "",
-
-            exec-output-1-connected: false,
-            exec-output-2-connected: false,
-            exec-output-3-connected: false,
-
-            data-output-name: "",
-            data-output-type: "",
-            data-output-color: #000000,
-            data-output-connected: false,
-
-            data-input-name: "Condition",
-            data-input-type: "bool",
-            data-input-color: #5ac68b
-        },
-        {
-            node-id: "node_1",
-            title: "Get IsAlive",
-            category: "Variables",
-            element-type: "",
-            descriptor-id: "variable.get",
-
-            x: 100.0,
-            y: 200.0,
-
-            is-event: false,
-            is-bound-event: false,
-
-            has-exec-input: false,
-
-            exec-output-1: "",
-            exec-output-2: "",
-            exec-output-3: "",
-
-            exec-output-1-connected: false,
-            exec-output-2-connected: false,
-            exec-output-3-connected: false,
-
-            data-output-name: "IsAlive",
-            data-output-type: "bool",
-            data-output-color: #5ac68b,
-            data-output-connected: false,
-
-            data-input-name: "",
-            data-input-type: "",
-            data-input-color: #000000
-        },
-        {
-            node-id: "event_1",
-            title: "",
-            category: "Events",
-            element-type: "BeginPlay",
-            descriptor-id: "event.begin",
-
-            x: 50.0,
-            y: 50.0,
-
-            is-event: true,
-            is-bound-event: false,
-
-            has-exec-input: false,
-
-            exec-output-1: "execed",
-            exec-output-2: "execed",
-            exec-output-3: "execed",
-
-            exec-output-1-connected: false,
-            exec-output-2-connected: false,
-            exec-output-3-connected: false,
-
-            data-output-name: "",
-            data-output-type: "",
-            data-output-color: #000000,
-            data-output-connected: false,
-
-            data-input-name: "",
-            data-input-type: "",
-            data-input-color: #000000
-        },
     ];
-    in property <[BlueprintLinkInfo]> links: [];
+    in property <[BlueprintLinkInfo]> links: [
+    ];
+    in property <[ProjectPageInfo]> page-items: [];
     in property <[SelectionInfo]> scene-elements: [];
     in property <bool> grid-visible: true;
     in property <length> grid-size: 24px;
@@ -662,11 +131,15 @@ export component BlueprintCanvas inherits Rectangle {
     callback node-selected(string, bool);
     callback node-moved(string, float, float);
     callback node-delete-requested(string);
+    callback node-delete-selected-requested(string);
     callback node-copy-requested(string);
     callback node-paste-requested(float, float);
     callback node-duplicate-requested(string, float, float);
     callback node-create-requested(string, float, float);
+    callback node-create-connected-requested(string, string, int, string, float, float) -> bool;
     callback node-bind-source-requested(string, string);
+    callback node-set-object-requested(string, string, string, string);
+    callback node-input-value-changed(string, int, string);
     callback connect-blueprint-nodes(string, string, int, float, float) -> bool;
 
     property <bool> is-panning: false;
@@ -692,9 +165,18 @@ export component BlueprintCanvas inherits Rectangle {
     property <length> node-menu-x: 0px;
     property <length> node-menu-y: 0px;
     property <string> node-menu-target-id: "";
+    property <string> node-menu-target-variable-id: "";
     property <string> node-menu-target-descriptor-id: "";
+    property <string> node-menu-target-data-output-type: "";
     property <bool> node-menu-target-is-event: false;
     property <bool> node-menu-target-is-bound: false;
+    property <bool> node-menu-object-open: false;
+    property <bool> input-object-menu-open: false;
+    property <length> input-object-menu-x: 0px;
+    property <length> input-object-menu-y: 0px;
+    property <string> input-object-menu-node-id: "";
+    property <int> input-object-menu-slot: 0;
+    property <string> input-object-menu-type: "";
 
     property <bool> create-menu-open: false;
     property <length> create-menu-x: 0px;
@@ -702,11 +184,25 @@ export component BlueprintCanvas inherits Rectangle {
     property <float> create-menu-world-x: 0;
     property <float> create-menu-world-y: 0;
     property <string> create-menu-search: "";
+    property <bool> create-menu-tooltip-open: false;
+    property <string> create-menu-tooltip-text: "";
+    property <length> create-menu-tooltip-y: 0px;
+    property <length> create-menu-list-viewport-y: 0px;
+    property <bool> create-menu-connect-pending: false;
+    property <string> create-menu-source-node-id: "";
+    property <string> create-menu-source-kind: "exec";
+    property <int> create-menu-source-slot: 0;
     property <bool> all-nodes-open: false;
     property <bool> events-open: false;
     property <bool> ui-open: false;
     property <bool> pages-open: false;
     property <bool> flow-open: false;
+    property <bool> values-open: false;
+    property <bool> math-open: false;
+    property <bool> conditions-open: false;
+    property <bool> variables-open: false;
+    property <bool> functions-open: false;
+    property <bool> types-open: false;
     property <bool> network-open: false;
     property <bool> database-open: false;
 
@@ -894,17 +390,38 @@ export component BlueprintCanvas inherits Rectangle {
     function close-menus() {
         root.create-menu-open = false;
         root.node-menu-open = false;
+        root.input-object-menu-open = false;
+        root.close-create-menu-tooltip();
+    }
+
+    function create-menu-row-matches(title: string, descriptor-id: string) -> bool {
+        root.create-menu-search == ""
+            || StringSearch.contains(title, root.create-menu-search)
+            || StringSearch.contains(descriptor-id, root.create-menu-search)
     }
 
     function open-create-menu(screen-x: length, screen-y: length) {
         root.node-menu-open = false;
+        root.input-object-menu-open = false;
+        root.create-menu-connect-pending = false;
+        root.create-menu-source-node-id = "";
+        root.create-menu-source-kind = "exec";
+        root.create-menu-source-slot = 0;
         root.create-menu-open = true;
         root.create-menu-search = "";
+        root.create-menu-list-viewport-y = 0px;
+        root.close-create-menu-tooltip();
         root.all-nodes-open = false;
         root.events-open = false;
         root.ui-open = false;
         root.pages-open = false;
         root.flow-open = false;
+        root.values-open = false;
+        root.math-open = false;
+        root.conditions-open = false;
+        root.variables-open = false;
+        root.functions-open = false;
+        root.types-open = false;
         root.network-open = false;
         root.database-open = false;
         root.create-menu-x = Math.max(0px, Math.min(root.width - 320px, screen-x));
@@ -913,20 +430,73 @@ export component BlueprintCanvas inherits Rectangle {
         root.create-menu-world-y = root.world-y(screen-y);
     }
 
-    function create-node(descriptor-id: string) {
-        root.node-create-requested(descriptor-id, root.create-menu-world-x, root.create-menu-world-y);
-        root.create-menu-open = false;
+    function open-create-menu-for-wire(screen-x: length, screen-y: length) {
+        root.open-create-menu(screen-x, screen-y);
+        root.create-menu-connect-pending = true;
+        root.create-menu-source-node-id = root.wire-source-node-id;
+        root.create-menu-source-kind = root.wire-source-kind;
+        root.create-menu-source-slot = root.wire-source-slot;
     }
 
-    function open-node-menu(node-id: string, descriptor-id: string, is-event: bool, is-bound: bool, screen-x: length, screen-y: length) {
+    function create-node(descriptor-id: string) {
+        if root.create-menu-connect-pending {
+            root.node-create-connected-requested(
+                root.create-menu-source-node-id,
+                root.create-menu-source-kind,
+                root.create-menu-source-slot,
+                descriptor-id,
+                root.create-menu-world-x,
+                root.create-menu-world-y
+            );
+        } else {
+            root.node-create-requested(descriptor-id, root.create-menu-world-x, root.create-menu-world-y);
+        }
         root.create-menu-open = false;
+        root.create-menu-connect-pending = false;
+        root.create-menu-source-node-id = "";
+        root.create-menu-source-kind = "exec";
+        root.create-menu-source-slot = 0;
+        root.input-object-menu-open = false;
+        root.close-create-menu-tooltip();
+    }
+
+    function open-create-menu-tooltip(text: string, row-y: length) {
+        root.create-menu-tooltip-text = text;
+        root.create-menu-tooltip-y = row-y - root.create-menu-list-viewport-y;
+        root.create-menu-tooltip-open = text != "";
+    }
+
+    function close-create-menu-tooltip() {
+        root.create-menu-tooltip-open = false;
+        root.create-menu-tooltip-text = "";
+        root.create-menu-tooltip-y = 0px;
+    }
+
+    function open-node-menu(node-id: string, variable-id: string, descriptor-id: string, data-output-type: string, is-event: bool, is-bound: bool, screen-x: length, screen-y: length) {
+        root.create-menu-open = false;
+        root.input-object-menu-open = false;
+        root.close-create-menu-tooltip();
         root.node-menu-open = true;
         root.node-menu-target-id = node-id;
+        root.node-menu-target-variable-id = variable-id;
         root.node-menu-target-descriptor-id = descriptor-id;
+        root.node-menu-target-data-output-type = data-output-type;
         root.node-menu-target-is-event = is-event;
         root.node-menu-target-is-bound = is-bound;
+        root.node-menu-object-open = false;
         root.node-menu-x = Math.max(0px, Math.min(root.width - 230px, screen-x));
         root.node-menu-y = Math.max(0px, Math.min(root.height - 260px, screen-y));
+    }
+
+    function open-input-object-menu(node-id: string, input-slot: int, pin-type: string, screen-x: length, screen-y: length) {
+        root.create-menu-open = false;
+        root.node-menu-open = false;
+        root.input-object-menu-open = true;
+        root.input-object-menu-node-id = node-id;
+        root.input-object-menu-slot = input-slot;
+        root.input-object-menu-type = pin-type.to-lowercase();
+        root.input-object-menu-x = Math.max(0px, Math.min(root.width - 210px, screen-x));
+        root.input-object-menu-y = Math.max(0px, Math.min(root.height - 190px, screen-y));
     }
 
     function start-pan(pointer-x: length, pointer-y: length) {
@@ -986,8 +556,8 @@ export component BlueprintCanvas inherits Rectangle {
     }
 
     public function delete-selected-node() {
-        if root.selected-node-id != "" {
-            root.node-delete-requested(root.selected-node-id);
+        if root.selected-node-ids != "|" {
+            root.node-delete-selected-requested(root.selected-node-ids);
             root.clear-selection();
         }
     }
@@ -1132,9 +702,10 @@ export component BlueprintCanvas inherits Rectangle {
         }
     }
 
-    for node in root.nodes: BlueprintNodeCard {
+    for node in root.nodes: BlueprintNodeCardBase {
         z: 20;
         node-id: node.node-id;
+        variable-id: node.variable-id;
         title: node.title;
         element-type: node.element-type;
         descriptor-id: node.descriptor-id;
@@ -1151,10 +722,27 @@ export component BlueprintCanvas inherits Rectangle {
         data-output-type: node.data-output-type;
         data-output-color: node.data-output-color;
         data-output-connected: node.data-output-connected;
+        data-output-2-name: node.data-output-2-name;
+        data-output-2-type: node.data-output-2-type;
+        data-output-2-color: node.data-output-2-color;
+        data-output-2-connected: node.data-output-2-connected;
         data-input-name: node.data-input-name;
         data-input-type: node.data-input-type;
         clip: false;
         data-input-color: node.data-input-color;
+        data-input-connected: node.data-input-connected;
+        data-input-value: node.data-input-value;
+        data-input-display-value: node.data-input-display-value;
+        data-input-2-name: node.data-input-2-name;
+        data-input-2-type: node.data-input-2-type;
+        data-input-2-color: node.data-input-2-color;
+        data-input-2-connected: node.data-input-2-connected;
+        data-input-2-value: node.data-input-2-value;
+        data-input-2-display-value: node.data-input-2-display-value;
+        validation-severity: node.validation-severity;
+        validation-message: node.validation-message;
+        page-items: root.page-items;
+        scene-elements: root.scene-elements;
         world-x: node.x;
         world-y: node.y;
         live-world-x: root.live-node-world-x(node.node-id, node.x);
@@ -1178,11 +766,11 @@ export component BlueprintCanvas inherits Rectangle {
         node-select-requested(node-id, additive) => {
             root.select-node(node-id, additive);
         }
-        node-menu-requested(node-id, descriptor-id, is-event, is-bound, screen-x, screen-y) => {
+        node-menu-requested(node-id, variable-id, descriptor-id, data-output-type, is-event, is-bound, screen-x, screen-y) => {
             if !root.is-node-selected(node-id) {
                 root.select-node(node-id, false);
             }
-            root.open-node-menu(node-id, descriptor-id, is-event, is-bound, screen-x, screen-y);
+            root.open-node-menu(node-id, variable-id, descriptor-id, data-output-type, is-event, is-bound, screen-x, screen-y);
         }
         node-drag-started(node-id, world-x, world-y, pointer-x, pointer-y, additive) => {
             root.close-menus();
@@ -1255,7 +843,7 @@ export component BlueprintCanvas inherits Rectangle {
                 root.cursor-world-y
             );
             if !connected {
-                root.open-create-menu(pointer-x, pointer-y);
+                root.open-create-menu-for-wire(pointer-x, pointer-y);
             }
             root.wire-active = false;
             root.dragging-wire-elbow = false;
@@ -1266,6 +854,12 @@ export component BlueprintCanvas inherits Rectangle {
         }
         node-moved-requested(node-id, x, y) => {
             root.node-moved(node-id, x, y);
+        }
+        node-input-value-changed(node-id, input-slot, value) => {
+            root.node-input-value-changed(node-id, input-slot, value);
+        }
+        node-object-input-menu-requested(node-id, input-slot, pin-type, screen-x, screen-y) => {
+            root.open-input-object-menu(node-id, input-slot, pin-type, screen-x, screen-y);
         }
         marquee-hit(node-id) => {
             root.append-selected-node(node-id);
@@ -1407,10 +1001,14 @@ export component BlueprintCanvas inherits Rectangle {
                 }
             }
 
-            Flickable {
+            create-menu-list := Flickable {
                 vertical-stretch: 1;
                 viewport-width: self.width;
                 viewport-height: menu-content.preferred-height;
+                changed viewport-y => {
+                    root.create-menu-list-viewport-y = self.viewport-y;
+                    root.close-create-menu-tooltip();
+                }
 
                 menu-content := VerticalBox {
                     spacing: 4px;
@@ -1418,54 +1016,210 @@ export component BlueprintCanvas inherits Rectangle {
 
                     MenuGroupHeader { title: "All Nodes"; expanded <=> root.all-nodes-open; }
                     if root.all-nodes-open || root.create-menu-search != "": VerticalBox {
-                        spacing: 2px;
-                        NodeMenuRow { title: "Event Button"; descriptor-id: "event.button"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
-                        NodeMenuRow { title: "Event Input"; descriptor-id: "event.input"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
-                        NodeMenuRow { title: "Event Checkbox"; descriptor-id: "event.checkbox"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
-                        NodeMenuRow { title: "Event Label"; descriptor-id: "event.label"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
-                        NodeMenuRow { title: "Navigate Page"; descriptor-id: "page.navigate"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
-                        NodeMenuRow { title: "Set Opacity"; descriptor-id: "ui.set_opacity"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
-                        NodeMenuRow { title: "Set Display Mode"; descriptor-id: "ui.set_display_mode"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
-                        NodeMenuRow { title: "Branch"; descriptor-id: "flow.branch"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
-                        NodeMenuRow { title: "HTTP Request"; descriptor-id: "network.request"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
-                        NodeMenuRow { title: "Database Query"; descriptor-id: "db.query"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
+                        spacing: root.create-menu-search == "" ? 2px : 0px;
+                        NodeMenuRow { title: "Event Button"; descriptor-id: "event.button"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Event Input"; descriptor-id: "event.input"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Event Checkbox"; descriptor-id: "event.checkbox"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Event Label"; descriptor-id: "event.label"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Event Fill"; descriptor-id: "event.fill"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Event App Started"; descriptor-id: "event.app_started"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Event App Started Delayed"; descriptor-id: "event.app_started_delayed"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Event Page Changed"; descriptor-id: "event.page_changed"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Navigate Page"; descriptor-id: "page.navigate"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Set Opacity"; descriptor-id: "ui.set_opacity"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Set Display Mode"; descriptor-id: "ui.set_display_mode"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Branch"; descriptor-id: "flow.branch"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Delay"; descriptor-id: "flow.delay"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Loop"; descriptor-id: "flow.loop"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "While"; descriptor-id: "flow.while"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "For Range"; descriptor-id: "flow.for_range"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "For Each"; descriptor-id: "flow.for_each"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Bool True"; descriptor-id: "value.bool_true"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Bool False"; descriptor-id: "value.bool_false"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Int 0"; descriptor-id: "value.int_zero"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Float 0.0"; descriptor-id: "value.float_zero"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "String Empty"; descriptor-id: "value.string_empty"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Bool Not"; descriptor-id: "bool.not"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Math Negate"; descriptor-id: "math.negate"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "String Length"; descriptor-id: "string.length"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "String Is Empty"; descriptor-id: "string.is_empty"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "To Bool"; descriptor-id: "convert.to_bool"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "To Int"; descriptor-id: "convert.to_int"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "To Float"; descriptor-id: "convert.to_float"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "To String"; descriptor-id: "convert.to_string"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Int Add"; descriptor-id: "math.int.add"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Int Subtract"; descriptor-id: "math.int.sub"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Int Multiply"; descriptor-id: "math.int.mul"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Int Divide"; descriptor-id: "math.int.div"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Int Modulo"; descriptor-id: "math.int.mod"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Int Power"; descriptor-id: "math.int.pow"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Float Add"; descriptor-id: "math.float.add"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Float Subtract"; descriptor-id: "math.float.sub"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Float Multiply"; descriptor-id: "math.float.mul"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Float Divide"; descriptor-id: "math.float.div"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Float Modulo"; descriptor-id: "math.float.mod"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Float Power"; descriptor-id: "math.float.pow"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Int + Float"; descriptor-id: "math.int_float.add"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Int - Float"; descriptor-id: "math.int_float.sub"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Int * Float"; descriptor-id: "math.int_float.mul"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Int / Float"; descriptor-id: "math.int_float.div"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Int % Float"; descriptor-id: "math.int_float.mod"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Int ^ Float"; descriptor-id: "math.int_float.pow"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "String Concat"; descriptor-id: "string.concat"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Greater Than"; descriptor-id: "compare.gt"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Less Than"; descriptor-id: "compare.lt"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Greater Or Equal"; descriptor-id: "compare.gte"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Less Or Equal"; descriptor-id: "compare.lte"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Equal"; descriptor-id: "compare.eq"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Not Equal"; descriptor-id: "compare.neq"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Get Variable (Dynamic)"; descriptor-id: "variables.get_dynamic"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Set Variable (Dynamic)"; descriptor-id: "variables.set_dynamic"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Function Return"; descriptor-id: "functions.return"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Struct Make"; descriptor-id: "types.struct_make"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Enum Value"; descriptor-id: "types.enum_value"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "HTTP Request"; descriptor-id: "network.request"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Database Query"; descriptor-id: "db.query"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
                     }
 
-                    Separator-H {}
+                    if root.create-menu-search == "": Separator-H {}
 
-                    MenuGroupHeader { title: "Events"; expanded <=> root.events-open; }
-                    if root.events-open || root.create-menu-search != "": VerticalBox {
+                    if root.create-menu-search == "": MenuGroupHeader { title: "Events"; expanded <=> root.events-open; }
+                    if root.events-open && root.create-menu-search == "": VerticalBox {
                         spacing: 2px;
-                        NodeMenuRow { title: "Event Button"; descriptor-id: "event.button"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
-                        NodeMenuRow { title: "Event Input"; descriptor-id: "event.input"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
-                        NodeMenuRow { title: "Event Checkbox"; descriptor-id: "event.checkbox"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
-                        NodeMenuRow { title: "Event Label"; descriptor-id: "event.label"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
-                        NodeMenuRow { title: "Event Fill"; descriptor-id: "event.fill"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
-                        NodeMenuRow { title: "Event App Started"; descriptor-id: "event.app_started"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
-                        NodeMenuRow { title: "Event App Started Delayed"; descriptor-id: "event.app_started_delayed"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
-                        NodeMenuRow { title: "Event Page Changed"; descriptor-id: "event.page_changed"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
+                        NodeMenuRow { title: "Event Button"; descriptor-id: "event.button"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Event Input"; descriptor-id: "event.input"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Event Checkbox"; descriptor-id: "event.checkbox"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Event Label"; descriptor-id: "event.label"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Event Fill"; descriptor-id: "event.fill"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Event App Started"; descriptor-id: "event.app_started"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Event App Started Delayed"; descriptor-id: "event.app_started_delayed"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Event Page Changed"; descriptor-id: "event.page_changed"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
                     }
 
-                    MenuGroupHeader { title: "UI"; expanded <=> root.ui-open; }
-                    if root.ui-open || root.create-menu-search != "": VerticalBox {
+                    if root.create-menu-search == "": MenuGroupHeader { title: "UI"; expanded <=> root.ui-open; }
+                    if root.ui-open && root.create-menu-search == "": VerticalBox {
                         spacing: 2px;
-                        NodeMenuRow { title: "Set Opacity"; descriptor-id: "ui.set_opacity"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
-                        NodeMenuRow { title: "Set Display Mode"; descriptor-id: "ui.set_display_mode"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
+                        NodeMenuRow { title: "Set Opacity"; descriptor-id: "ui.set_opacity"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Set Display Mode"; descriptor-id: "ui.set_display_mode"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
                     }
 
-                    MenuGroupHeader { title: "Pages"; expanded <=> root.pages-open; }
-                    if root.pages-open || root.create-menu-search != "": NodeMenuRow { title: "Navigate Page"; descriptor-id: "page.navigate"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
+                    if root.create-menu-search == "": MenuGroupHeader { title: "Pages"; expanded <=> root.pages-open; }
+                    if root.pages-open && root.create-menu-search == "": NodeMenuRow { title: "Navigate Page"; descriptor-id: "page.navigate"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
 
-                    MenuGroupHeader { title: "Flow"; expanded <=> root.flow-open; }
-                    if root.flow-open || root.create-menu-search != "": NodeMenuRow { title: "Branch"; descriptor-id: "flow.branch"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
+                    if root.create-menu-search == "": MenuGroupHeader { title: "Flow"; expanded <=> root.flow-open; }
+                    if root.flow-open && root.create-menu-search == "": VerticalBox {
+                        spacing: 2px;
+                        NodeMenuRow { title: "Branch"; descriptor-id: "flow.branch"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Delay"; descriptor-id: "flow.delay"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Loop"; descriptor-id: "flow.loop"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "While"; descriptor-id: "flow.while"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "For Range"; descriptor-id: "flow.for_range"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "For Each"; descriptor-id: "flow.for_each"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                    }
 
-                    MenuGroupHeader { title: "Network"; expanded <=> root.network-open; }
-                    if root.network-open || root.create-menu-search != "": NodeMenuRow { title: "HTTP Request"; descriptor-id: "network.request"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
+                    if root.create-menu-search == "": MenuGroupHeader { title: "Values"; expanded <=> root.values-open; }
+                    if root.values-open && root.create-menu-search == "": VerticalBox {
+                        spacing: 2px;
+                        NodeMenuRow { title: "Bool True"; descriptor-id: "value.bool_true"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Bool False"; descriptor-id: "value.bool_false"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Int 0"; descriptor-id: "value.int_zero"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Float 0.0"; descriptor-id: "value.float_zero"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "String Empty"; descriptor-id: "value.string_empty"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Bool Not"; descriptor-id: "bool.not"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Math Negate"; descriptor-id: "math.negate"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "String Length"; descriptor-id: "string.length"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "String Is Empty"; descriptor-id: "string.is_empty"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "To Bool"; descriptor-id: "convert.to_bool"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "To Int"; descriptor-id: "convert.to_int"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "To Float"; descriptor-id: "convert.to_float"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "To String"; descriptor-id: "convert.to_string"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                    }
 
-                    MenuGroupHeader { title: "Database"; expanded <=> root.database-open; }
-                    if root.database-open || root.create-menu-search != "": NodeMenuRow { title: "Database Query"; descriptor-id: "db.query"; query: root.create-menu-search; selected(id) => { root.create-node(id); } }
+                    if root.create-menu-search == "": MenuGroupHeader { title: "Math"; expanded <=> root.math-open; }
+                    if root.math-open && root.create-menu-search == "": VerticalBox {
+                        spacing: 2px;
+                        NodeMenuRow { title: "Int Add"; descriptor-id: "math.int.add"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Int Subtract"; descriptor-id: "math.int.sub"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Int Multiply"; descriptor-id: "math.int.mul"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Int Divide"; descriptor-id: "math.int.div"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Int Modulo"; descriptor-id: "math.int.mod"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Int Power"; descriptor-id: "math.int.pow"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Float Add"; descriptor-id: "math.float.add"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Float Subtract"; descriptor-id: "math.float.sub"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Float Multiply"; descriptor-id: "math.float.mul"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Float Divide"; descriptor-id: "math.float.div"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Float Modulo"; descriptor-id: "math.float.mod"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Float Power"; descriptor-id: "math.float.pow"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Int + Float"; descriptor-id: "math.int_float.add"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Int - Float"; descriptor-id: "math.int_float.sub"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Int * Float"; descriptor-id: "math.int_float.mul"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Int / Float"; descriptor-id: "math.int_float.div"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Int % Float"; descriptor-id: "math.int_float.mod"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Int ^ Float"; descriptor-id: "math.int_float.pow"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "String Concat"; descriptor-id: "string.concat"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                    }
+
+                    if root.create-menu-search == "": MenuGroupHeader { title: "Conditions"; expanded <=> root.conditions-open; }
+                    if root.conditions-open && root.create-menu-search == "": VerticalBox {
+                        spacing: 2px;
+                        NodeMenuRow { title: "Greater Than"; descriptor-id: "compare.gt"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Less Than"; descriptor-id: "compare.lt"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Greater Or Equal"; descriptor-id: "compare.gte"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Less Or Equal"; descriptor-id: "compare.lte"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Equal"; descriptor-id: "compare.eq"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Not Equal"; descriptor-id: "compare.neq"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                    }
+
+                    if root.create-menu-search == "": MenuGroupHeader { title: "Variables"; expanded <=> root.variables-open; }
+                    if root.variables-open && root.create-menu-search == "": VerticalBox {
+                        spacing: 2px;
+                        NodeMenuRow { title: "Get Variable (Dynamic)"; descriptor-id: "variables.get_dynamic"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Set Variable (Dynamic)"; descriptor-id: "variables.set_dynamic"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                    }
+
+                    if root.create-menu-search == "": MenuGroupHeader { title: "Functions"; expanded <=> root.functions-open; }
+                    if root.functions-open && root.create-menu-search == "": NodeMenuRow { title: "Function Return"; descriptor-id: "functions.return"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+
+                    if root.create-menu-search == "": MenuGroupHeader { title: "Types"; expanded <=> root.types-open; }
+                    if root.types-open && root.create-menu-search == "": VerticalBox {
+                        spacing: 2px;
+                        NodeMenuRow { title: "Struct Make"; descriptor-id: "types.struct_make"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                        NodeMenuRow { title: "Enum Value"; descriptor-id: "types.enum_value"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+                    }
+
+                    if root.create-menu-search == "": MenuGroupHeader { title: "Network"; expanded <=> root.network-open; }
+                    if root.network-open && root.create-menu-search == "": NodeMenuRow { title: "HTTP Request"; descriptor-id: "network.request"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
+
+                    if root.create-menu-search == "": MenuGroupHeader { title: "Database"; expanded <=> root.database-open; }
+                    if root.database-open && root.create-menu-search == "": NodeMenuRow { title: "Database Query"; descriptor-id: "db.query"; query: root.create-menu-search; selected(id) => { root.create-node(id); } tooltip-requested(text, row-y) => { root.open-create-menu-tooltip(text, row-y); } tooltip-cleared => { root.close-create-menu-tooltip(); } }
                 }
             }
+        }
+    }
+
+    if root.create-menu-open && root.create-menu-tooltip-open: Rectangle {
+        z: 130;
+        x: Math.max(0px, Math.min(root.width - 270px, root.create-menu-x + 258px));
+        y: Math.max(0px, Math.min(root.height - 78px, root.create-menu-y + 46px + root.create-menu-tooltip-y));
+        width: 260px;
+        height: 70px;
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: Themes.current.border-color;
+        background: Themes.secondary-background-transparent;
+        drop-shadow-blur: Themes.shadow-size;
+        drop-shadow-color: Themes.shadow-color;
+
+        Text {
+            x: 10px;
+            y: 8px;
+            width: parent.width - 20px;
+            height: parent.height - 16px;
+            text: root.create-menu-tooltip-text;
+            color: Themes.current.primary-text;
+            font-size: 11px;
+            wrap: word-wrap;
+            vertical-alignment: TextVerticalAlignment.center;
         }
     }
 
@@ -1474,7 +1228,13 @@ export component BlueprintCanvas inherits Rectangle {
         x: root.node-menu-x;
         y: root.node-menu-y;
         width: 230px;
-        height: root.node-menu-target-is-event && !root.node-menu-target-is-bound ? 252px : 132px;
+        height: root.node-menu-target-is-event && !root.node-menu-target-is-bound
+            ? 252px
+            : root.node-menu-target-descriptor-id == "variable.get" && root.node-menu-target-data-output-type == "Object" && root.node-menu-object-open
+                ? 320px
+                : root.node-menu-target-descriptor-id == "variable.get" && root.node-menu-target-data-output-type == "Object"
+                    ? 168px
+                    : 132px;
         border-radius: 7px;
         border-width: 1px;
         border-color: Themes.current.border-color;
@@ -1522,6 +1282,45 @@ export component BlueprintCanvas inherits Rectangle {
 
             if root.node-menu-target-is-event: Separator-H {}
 
+            if root.node-menu-target-descriptor-id == "variable.get" && root.node-menu-target-data-output-type == "Object": NodeContextAction {
+                title: root.node-menu-object-open ? "Hide objects" : "Choose object";
+                selected => {
+                    root.node-menu-object-open = !root.node-menu-object-open;
+                }
+            }
+
+            if root.node-menu-target-descriptor-id == "variable.get" && root.node-menu-target-data-output-type == "Object" && root.node-menu-object-open: Flickable {
+                height: 152px;
+                viewport-width: self.width;
+                viewport-height: object-list.preferred-height;
+
+                object-list := VerticalBox {
+                    spacing: 2px;
+
+                    Text {
+                        height: 20px;
+                        text: "Pages";
+                        color: Themes.current.secondary-text;
+                        font-size: 11px;
+                        font-weight: 700;
+                        vertical-alignment: TextVerticalAlignment.center;
+                    }
+
+                    for page in root.page-items: NodeContextAction {
+                        title: page.page-name;
+                        selected => {
+                            root.node-set-object-requested(
+                                root.node-menu-target-variable-id,
+                                "page",
+                                page.page-id,
+                                page.page-name
+                            );
+                            root.node-menu-open = false;
+                        }
+                    }
+                }
+            }
+
             NodeContextAction {
                 title: "Copy";
                 selected => {
@@ -1541,6 +1340,90 @@ export component BlueprintCanvas inherits Rectangle {
         }
     }
 
+    if root.input-object-menu-open: Rectangle {
+        z: 140;
+        x: root.input-object-menu-x;
+        y: root.input-object-menu-y;
+        width: 210px;
+        height: 190px;
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: Themes.current.border-color;
+        background: Themes.secondary-background-transparent;
+        drop-shadow-blur: Themes.shadow-size;
+        drop-shadow-color: Themes.shadow-color;
+        clip: true;
+
+        Flickable {
+            x: 6px;
+            y: 6px;
+            width: parent.width - 12px;
+            height: parent.height - 12px;
+            viewport-width: self.width;
+            viewport-height: object-input-list.preferred-height;
+
+            object-input-list := VerticalBox {
+                spacing: 2px;
+
+                NodeContextAction {
+                    title: "None";
+                    selected => {
+                        root.node-input-value-changed(root.input-object-menu-node-id, root.input-object-menu-slot, "");
+                        root.input-object-menu-open = false;
+                    }
+                }
+
+                Text {
+                    visible: root.input-object-menu-type == "object" || root.input-object-menu-type == "page";
+                    height: self.visible ? 18px : 0px;
+                    text: "Pages";
+                    color: Themes.current.secondary-text;
+                    font-size: 11px;
+                    font-weight: 700;
+                    vertical-alignment: TextVerticalAlignment.center;
+                }
+
+                for page in root.page-items: NodeContextAction {
+                    visible: root.input-object-menu-type == "object" || root.input-object-menu-type == "page";
+                    height: self.visible ? 28px : 0px;
+                    title: page.page-name;
+                    selected => {
+                        root.node-input-value-changed(
+                            root.input-object-menu-node-id,
+                            root.input-object-menu-slot,
+                            root.input-object-menu-type == "page" ? page.page-id : "{\"kind\":\"page\",\"id\":\"" + page.page-id + "\",\"name\":\"" + page.page-name + "\"}"
+                        );
+                        root.input-object-menu-open = false;
+                    }
+                }
+
+                Text {
+                    visible: root.input-object-menu-type == "object" || root.input-object-menu-type == "element";
+                    height: self.visible ? 18px : 0px;
+                    text: "Elements";
+                    color: Themes.current.secondary-text;
+                    font-size: 11px;
+                    font-weight: 700;
+                    vertical-alignment: TextVerticalAlignment.center;
+                }
+
+                for element in root.scene-elements: NodeContextAction {
+                    visible: root.input-object-menu-type == "object" || root.input-object-menu-type == "element";
+                    height: self.visible ? 28px : 0px;
+                    title: element.element-name == "" ? element.element-type : element.element-name;
+                    selected => {
+                        root.node-input-value-changed(
+                            root.input-object-menu-node-id,
+                            root.input-object-menu-slot,
+                            root.input-object-menu-type == "element" ? element.element-id : "{\"kind\":\"element\",\"id\":\"" + element.element-id + "\",\"name\":\"" + (element.element-name == "" ? element.element-type : element.element-name) + "\"}"
+                        );
+                        root.input-object-menu-open = false;
+                    }
+                }
+            }
+        }
+    }
+
     if root.ui-helpers-visible: CanvasZoomControls {
         z: 120;
         x: 12px;
@@ -1551,3 +1434,4 @@ export component BlueprintCanvas inherits Rectangle {
         reset-view-requested => { root.reset-view(); }
     }
 }
+

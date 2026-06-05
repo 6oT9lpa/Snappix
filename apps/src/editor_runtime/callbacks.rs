@@ -3,7 +3,7 @@ use image::{ImageFormat, RgbaImage};
 use rfd::FileDialog;
 use shared::{log, log_fields, LogCategory, LogLevel, LogMessage};
 use slint::{ComponentHandle, Model, SharedString};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -18,9 +18,39 @@ use crate::editor_runtime::{
     sync,
 };
 use crate::{AppScene, AppWindow, StringSearch};
+use project_core::{
+    is_finite_geometry, is_finite_style_values, normalize_rotation_degrees, rects_intersect,
+    rotated_selection_bounds, selected_and_descendant_ids, selected_root_ids, selection_center,
+};
 use project_manager::operations;
 
 const PREVIEW_SYNC_INTERVAL: std::time::Duration = std::time::Duration::from_millis(16);
+
+fn save_current_project_for_shutdown(state: &EditorState, reason: &str, include_history: bool) {
+    let mut pm = state.project_manager.borrow_mut();
+    if let Some(project) = pm.current_project_mut() {
+        shared::log_info!(
+            "apps.editor_runtime.callbacks",
+            "Saving current project before shutdown: reason='{}', path='{}', include_history={}",
+            reason,
+            project.spx_file_path().display(),
+            include_history
+        );
+        helpers::save_project_forced(project, reason);
+
+        // Normal app-driven close can still access HistoryManager, so persist it
+        // here. OS-level hard termination is intentionally not handled in this path.
+        if include_history {
+            save_project_history_silent(project, state);
+        }
+    } else {
+        shared::log_warn!(
+            "apps.editor_runtime.callbacks",
+            "Shutdown save skipped: reason='{}', cause='no active project'",
+            reason
+        );
+    }
+}
 
 pub fn register_callbacks(ui: &AppWindow, state: &EditorState) {
     register_window_callbacks(ui, state);
@@ -43,11 +73,7 @@ fn register_window_callbacks(ui: &AppWindow, state: &EditorState) {
                 LogCategory::App,
                 LogMessage::AppCloseRequested,
             );
-            let mut pm = close_window_state.project_manager.borrow_mut();
-            if let Some(project) = pm.current_project_mut() {
-                save_project_history_silent(project, &close_window_state);
-            }
-            drop(pm);
+            save_current_project_for_shutdown(&close_window_state, "window-close", true);
 
             if let Err(err) = slint::quit_event_loop() {
                 log_fields(
@@ -102,8 +128,30 @@ fn register_window_callbacks(ui: &AppWindow, state: &EditorState) {
 
     use slint::winit_030::{winit, EventResult, WinitWindowAccessor};
     let ui_weak = ui.as_weak();
+    let close_requested_state = state.clone();
     ui.window().on_winit_window_event(move |_window, event| {
         match event {
+            winit::event::WindowEvent::CloseRequested => {
+                log(
+                    LogLevel::Info,
+                    LogCategory::App,
+                    LogMessage::AppCloseRequested,
+                );
+                save_current_project_for_shutdown(
+                    &close_requested_state,
+                    "winit-close-requested",
+                    true,
+                );
+                if let Err(err) = slint::quit_event_loop() {
+                    log_fields(
+                        LogLevel::Error,
+                        LogCategory::App,
+                        LogMessage::AppCloseFailed,
+                        [("error", err.to_string())],
+                    );
+                }
+                return EventResult::PreventDefault;
+            }
             winit::event::WindowEvent::Resized(_)
             | winit::event::WindowEvent::Moved(_)
             | winit::event::WindowEvent::ScaleFactorChanged { .. } => {
@@ -846,6 +894,91 @@ fn register_page_callbacks(ui: &AppWindow, state: &EditorState) {
     });
 
     let ui_weak = ui.as_weak();
+    let duplicate_blueprint_variable_state = state.clone();
+    ui.on_duplicate_blueprint_variable_internal(move |variable_id| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        if !exit_history_preview_mode(&ui, &duplicate_blueprint_variable_state) {
+            return;
+        }
+        let Some(variable_id) = helpers::parse_uuid(variable_id.as_str()) else {
+            return;
+        };
+        let mut pm = duplicate_blueprint_variable_state
+            .project_manager
+            .borrow_mut();
+        let Some(project) = pm.current_project_mut() else {
+            return;
+        };
+        let before_snapshot =
+            capture_project_snapshot(project, &duplicate_blueprint_variable_state);
+        if project
+            .duplicate_local_variable_in_active_blueprint(variable_id)
+            .is_none()
+        {
+            return;
+        }
+        helpers::save_project_silent(project);
+        if let (Some(before_snapshot), Some(after_snapshot)) = (
+            before_snapshot,
+            capture_project_snapshot(project, &duplicate_blueprint_variable_state),
+        ) {
+            duplicate_blueprint_variable_state
+                .history
+                .borrow_mut()
+                .record_change(
+                    HistoryActionKind::CreateObject,
+                    "Duplicate blueprint variable",
+                    variable_id.to_string(),
+                    before_snapshot,
+                    after_snapshot,
+                );
+        }
+        sync::sync_editor_models(&ui, project);
+    });
+
+    let ui_weak = ui.as_weak();
+    let delete_blueprint_variable_state = state.clone();
+    ui.on_delete_blueprint_variable_internal(move |variable_id| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        if !exit_history_preview_mode(&ui, &delete_blueprint_variable_state) {
+            return;
+        }
+        let Some(variable_id) = helpers::parse_uuid(variable_id.as_str()) else {
+            return;
+        };
+        let mut pm = delete_blueprint_variable_state.project_manager.borrow_mut();
+        let Some(project) = pm.current_project_mut() else {
+            return;
+        };
+        let before_snapshot = capture_project_snapshot(project, &delete_blueprint_variable_state);
+        if !project.delete_local_variable_from_active_blueprint(variable_id) {
+            return;
+        }
+        helpers::save_project_silent(project);
+        if let (Some(before_snapshot), Some(after_snapshot)) = (
+            before_snapshot,
+            capture_project_snapshot(project, &delete_blueprint_variable_state),
+        ) {
+            delete_blueprint_variable_state
+                .history
+                .borrow_mut()
+                .record_change(
+                    HistoryActionKind::DeleteObject,
+                    "Delete blueprint variable",
+                    variable_id.to_string(),
+                    before_snapshot,
+                    after_snapshot,
+                );
+        }
+        sync::sync_editor_models(&ui, project);
+        refresh_canvas(&ui, project, &delete_blueprint_variable_state);
+    });
+
+    let ui_weak = ui.as_weak();
     let add_blueprint_catalog_node_state = state.clone();
     ui.on_add_blueprint_catalog_node_internal(move |descriptor_id, x, y| {
         let Some(ui) = ui_weak.upgrade() else {
@@ -887,6 +1020,62 @@ fn register_page_callbacks(ui: &AppWindow, state: &EditorState) {
         sync::sync_editor_models(&ui, project);
         refresh_canvas(&ui, project, &add_blueprint_catalog_node_state);
     });
+
+    let ui_weak = ui.as_weak();
+    let add_connected_blueprint_catalog_node_state = state.clone();
+    ui.on_add_connected_blueprint_catalog_node_internal(
+        move |source_node_id, source_pin_kind, source_pin_slot, descriptor_id, x, y| {
+            let Some(ui) = ui_weak.upgrade() else {
+                return false;
+            };
+            if !exit_history_preview_mode(&ui, &add_connected_blueprint_catalog_node_state) {
+                return false;
+            }
+            let Some(source_node_id) = helpers::parse_uuid(source_node_id.as_str()) else {
+                return false;
+            };
+            let mut pm = add_connected_blueprint_catalog_node_state
+                .project_manager
+                .borrow_mut();
+            let Some(project) = pm.current_project_mut() else {
+                return false;
+            };
+            let before_snapshot =
+                capture_project_snapshot(project, &add_connected_blueprint_catalog_node_state);
+            if project
+                .add_catalog_node_and_connect_from_active_blueprint(
+                    source_node_id,
+                    source_pin_kind.as_str(),
+                    source_pin_slot,
+                    descriptor_id.as_str(),
+                    x,
+                    y,
+                )
+                .is_none()
+            {
+                return false;
+            }
+            helpers::save_project_silent(project);
+            if let (Some(before_snapshot), Some(after_snapshot)) = (
+                before_snapshot,
+                capture_project_snapshot(project, &add_connected_blueprint_catalog_node_state),
+            ) {
+                add_connected_blueprint_catalog_node_state
+                    .history
+                    .borrow_mut()
+                    .record_change(
+                        HistoryActionKind::CreateObject,
+                        "Add connected blueprint node",
+                        descriptor_id.to_string(),
+                        before_snapshot,
+                        after_snapshot,
+                    );
+            }
+            sync::sync_editor_models(&ui, project);
+            refresh_canvas(&ui, project, &add_connected_blueprint_catalog_node_state);
+            true
+        },
+    );
 
     let ui_weak = ui.as_weak();
     let move_blueprint_node_state = state.clone();
@@ -933,6 +1122,49 @@ fn register_page_callbacks(ui: &AppWindow, state: &EditorState) {
         // can stall large projects because blueprint edits do not affect scene geometry.
         sync::sync_editor_models(&ui, project);
         sync::sync_timeline(&ui, &delete_blueprint_node_state.history.borrow());
+    });
+
+    let ui_weak = ui.as_weak();
+    let delete_blueprint_node_batch_state = state.clone();
+    ui.on_delete_blueprint_node_batch_internal(move |node_ids_token| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        if !exit_history_preview_mode(&ui, &delete_blueprint_node_batch_state) {
+            return;
+        }
+
+        let node_ids: Vec<Uuid> = node_ids_token
+            .split('|')
+            .filter_map(|segment| {
+                let trimmed = segment.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    helpers::parse_uuid(trimmed)
+                }
+            })
+            .collect();
+        if node_ids.is_empty() {
+            return;
+        }
+
+        let mut pm = delete_blueprint_node_batch_state
+            .project_manager
+            .borrow_mut();
+        let Some(project) = pm.current_project_mut() else {
+            return;
+        };
+        let mut changed = false;
+        for node_id in node_ids {
+            changed |= project.delete_node_from_active_blueprint(node_id);
+        }
+        if !changed {
+            return;
+        }
+        helpers::save_project_silent(project);
+        sync::sync_editor_models(&ui, project);
+        sync::sync_timeline(&ui, &delete_blueprint_node_batch_state.history.borrow());
     });
 
     let ui_weak = ui.as_weak();
@@ -1021,6 +1253,50 @@ fn register_page_callbacks(ui: &AppWindow, state: &EditorState) {
         }
         sync::sync_editor_models(&ui, project);
         refresh_canvas(&ui, project, &bind_blueprint_event_source_state);
+    });
+
+    let ui_weak = ui.as_weak();
+    let set_blueprint_input_value_state = state.clone();
+    ui.on_set_blueprint_node_input_value_internal(move |node_id, input_slot, value| {
+        let Some(ui) = ui_weak.upgrade() else {
+            return;
+        };
+        if !exit_history_preview_mode(&ui, &set_blueprint_input_value_state) {
+            return;
+        }
+        let Some(node_id) = helpers::parse_uuid(node_id.as_str()) else {
+            return;
+        };
+        let mut pm = set_blueprint_input_value_state.project_manager.borrow_mut();
+        let Some(project) = pm.current_project_mut() else {
+            return;
+        };
+        let before_snapshot = capture_project_snapshot(project, &set_blueprint_input_value_state);
+        if !project.set_input_pin_value_in_active_blueprint(
+            node_id,
+            input_slot.max(0) as usize,
+            value.as_str(),
+        ) {
+            return;
+        }
+        helpers::save_project_silent(project);
+        if let (Some(before_snapshot), Some(after_snapshot)) = (
+            before_snapshot,
+            capture_project_snapshot(project, &set_blueprint_input_value_state),
+        ) {
+            set_blueprint_input_value_state
+                .history
+                .borrow_mut()
+                .record_change(
+                    HistoryActionKind::ModifyObject,
+                    "Edit blueprint input",
+                    format!("Input slot changed: node={node_id}, slot={input_slot}"),
+                    before_snapshot,
+                    after_snapshot,
+                );
+        }
+        sync::sync_editor_models(&ui, project);
+        refresh_canvas(&ui, project, &set_blueprint_input_value_state);
     });
 
     let ui_weak = ui.as_weak();
@@ -2615,6 +2891,25 @@ fn register_comment_callbacks(ui: &AppWindow, state: &EditorState) {
 }
 
 fn register_hotkey_callbacks(ui: &AppWindow, state: &EditorState) {
+    let save_project_state = state.clone();
+    ui.on_save_project_internal(move || {
+        let mut pm = save_project_state.project_manager.borrow_mut();
+        let Some(project) = pm.current_project_mut() else {
+            shared::log_warn!(
+                "apps.editor_runtime.callbacks",
+                "Save hotkey ignored: reason='no active project'"
+            );
+            return;
+        };
+
+        shared::log_info!(
+            "apps.editor_runtime.callbacks",
+            "Save hotkey accepted: path='{}'",
+            project.spx_file_path().display()
+        );
+        helpers::save_project_forced(project, "hotkey");
+    });
+
     let ui_weak = ui.as_weak();
     let toggle_hidden_state = state.clone();
     ui.on_toggle_hidden_selection_internal(move || {
@@ -3041,12 +3336,7 @@ fn register_hotkey_callbacks(ui: &AppWindow, state: &EditorState) {
         let Some(ui) = ui_weak.upgrade() else {
             return;
         };
-        {
-            let mut pm = exit_project_state.project_manager.borrow_mut();
-            if let Some(project) = pm.current_project_mut() {
-                save_project_history_silent(project, &exit_project_state);
-            }
-        }
+        save_current_project_for_shutdown(&exit_project_state, "exit-project", true);
         exit_project_state.history.borrow_mut().reset();
         exit_project_state.clipboard.borrow_mut().clear();
         clear_selection_and_outline(&exit_project_state);
@@ -3602,79 +3892,6 @@ fn exit_history_preview_mode(ui: &AppWindow, state: &EditorState) -> bool {
     true
 }
 
-fn selected_root_ids(project: &Project, selected_ids: &[Uuid]) -> Vec<Uuid> {
-    let selected_set: HashSet<Uuid> = selected_ids.iter().copied().collect();
-    let mut roots = Vec::new();
-
-    for selected_id in selected_ids {
-        let mut parent = project.element_parent_on_active_page(*selected_id);
-        let mut has_selected_ancestor = false;
-        while let Some(parent_id) = parent {
-            if selected_set.contains(&parent_id) {
-                has_selected_ancestor = true;
-                break;
-            }
-            parent = project.element_parent_on_active_page(parent_id);
-        }
-
-        if !has_selected_ancestor && !roots.contains(selected_id) {
-            roots.push(*selected_id);
-        }
-    }
-
-    roots
-}
-
-fn selected_and_descendant_ids(project: &Project, selected_ids: &[Uuid]) -> Vec<Uuid> {
-    let all_elements = project.active_page_elements();
-    let existing: HashSet<Uuid> = all_elements.iter().map(|element| element.id).collect();
-    let mut children_map: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
-
-    for element in &all_elements {
-        let parent_id = element
-            .properties
-            .as_object()
-            .and_then(|props| props.get("parent_id"))
-            .and_then(|value| value.as_str())
-            .and_then(|value| Uuid::parse_str(value).ok())
-            .filter(|parent_id| *parent_id != element.id && existing.contains(parent_id));
-        if let Some(parent_id) = parent_id {
-            children_map.entry(parent_id).or_default().push(element.id);
-        }
-    }
-
-    let mut out = Vec::new();
-    let mut visited = HashSet::new();
-    for selected_id in selected_ids {
-        collect_descendants_for_toggle(
-            *selected_id,
-            &existing,
-            &children_map,
-            &mut visited,
-            &mut out,
-        );
-    }
-    out
-}
-
-fn collect_descendants_for_toggle(
-    element_id: Uuid,
-    existing: &HashSet<Uuid>,
-    children_map: &HashMap<Uuid, Vec<Uuid>>,
-    visited: &mut HashSet<Uuid>,
-    out: &mut Vec<Uuid>,
-) {
-    if !existing.contains(&element_id) || !visited.insert(element_id) {
-        return;
-    }
-    out.push(element_id);
-    if let Some(children) = children_map.get(&element_id) {
-        for child_id in children {
-            collect_descendants_for_toggle(*child_id, existing, children_map, visited, out);
-        }
-    }
-}
-
 fn select_outline_neighbor(project: &Project, state: &EditorState, step: i32) -> Option<Uuid> {
     let outline_order =
         sync::visible_outline_order(project, &state.collapsed_outline_nodes.borrow());
@@ -3844,38 +4061,6 @@ fn take_transform_preview(state: &EditorState, element_id: Uuid) -> Option<Trans
     }
 }
 
-fn selection_center(project: &Project, element_ids: &[Uuid]) -> Option<(f32, f32)> {
-    let mut min_x = f32::INFINITY;
-    let mut min_y = f32::INFINITY;
-    let mut max_x = f32::NEG_INFINITY;
-    let mut max_y = f32::NEG_INFINITY;
-
-    for element_id in element_ids {
-        let Some(element) = project.get_element_on_active_page(*element_id) else {
-            continue;
-        };
-        let (bx1, by1, bx2, by2) = rotated_selection_bounds(&element);
-        min_x = min_x.min(bx1);
-        min_y = min_y.min(by1);
-        max_x = max_x.max(bx2);
-        max_y = max_y.max(by2);
-    }
-
-    if !(min_x.is_finite() && min_y.is_finite() && max_x.is_finite() && max_y.is_finite()) {
-        return None;
-    }
-
-    Some((min_x + (max_x - min_x) / 2.0, min_y + (max_y - min_y) / 2.0))
-}
-
-fn normalize_rotation_degrees(rotation: f32) -> f32 {
-    let mut normalized = (rotation + 180.0).rem_euclid(360.0) - 180.0;
-    if normalized <= -180.0 {
-        normalized += 360.0;
-    }
-    normalized
-}
-
 fn flip_selected_elements(project: &mut Project, state: &EditorState, horizontal: bool) -> usize {
     let selected_snapshot = state.selected_elements.borrow().clone();
     let root_ids = selected_root_ids(project, &selected_snapshot);
@@ -3940,45 +4125,6 @@ fn flip_selected_elements(project: &mut Project, state: &EditorState, horizontal
     }
 
     changed
-}
-
-fn rotated_selection_bounds(
-    element: &crate::app::project::CanvasElementData,
-) -> (f32, f32, f32, f32) {
-    let radians = element.rotation.to_radians();
-    let abs_cos = radians.cos().abs();
-    let abs_sin = radians.sin().abs();
-    let bbox_w = element.width * abs_cos + element.height * abs_sin;
-    let bbox_h = element.width * abs_sin + element.height * abs_cos;
-    let center_x = element.x + element.width / 2.0;
-    let center_y = element.y + element.height / 2.0;
-    (
-        center_x - bbox_w / 2.0,
-        center_y - bbox_h / 2.0,
-        center_x + bbox_w / 2.0,
-        center_y + bbox_h / 2.0,
-    )
-}
-
-fn rects_intersect(
-    a_min_x: f32,
-    a_min_y: f32,
-    a_max_x: f32,
-    a_max_y: f32,
-    b_min_x: f32,
-    b_min_y: f32,
-    b_max_x: f32,
-    b_max_y: f32,
-) -> bool {
-    a_max_x >= b_min_x && a_min_x <= b_max_x && a_max_y >= b_min_y && a_min_y <= b_max_y
-}
-
-fn is_finite_geometry(x: f32, y: f32, w: f32, h: f32, r: f32) -> bool {
-    x.is_finite() && y.is_finite() && w.is_finite() && h.is_finite() && r.is_finite()
-}
-
-fn is_finite_style_values(border_width: f32, border_radius: f32, font_size: f32) -> bool {
-    border_width.is_finite() && border_radius.is_finite() && font_size.is_finite()
 }
 
 fn parse_platform(index: i32) -> Platform {

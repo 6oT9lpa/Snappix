@@ -5,8 +5,8 @@ use std::rc::Rc;
 use uuid::Uuid;
 
 use core_blueprint::{
-    builtin_node_descriptor, BlueprintNodeKind, BlueprintPinDirection, BlueprintPinKind,
-    BlueprintPinType,
+    builtin_node_descriptor, default_input_pin_value, BlueprintNodeKind, BlueprintPin,
+    BlueprintDiagnosticSeverity, BlueprintPinDirection, BlueprintPinKind, BlueprintPinType,
 };
 
 use crate::app::project::{CanvasElementData, Project};
@@ -114,6 +114,12 @@ pub fn sync_editor_models(ui: &AppWindow, project: &Project) {
         .iter()
         .enumerate()
         .map(|(idx, name)| ProjectPageInfo {
+            page_id: SharedString::from(
+                project
+                    .page_id_by_index(idx)
+                    .map(|page_id| page_id.to_string())
+                    .unwrap_or_default(),
+            ),
             page_index: idx as i32,
             page_name: SharedString::from(name.clone()),
             is_open: open_set.contains(&idx),
@@ -161,6 +167,21 @@ pub fn sync_blueprint_models(ui: &AppWindow, project: &Project) {
 
     let blueprint_nodes = project.active_blueprint_nodes();
     let blueprint_links = project.active_blueprint_links();
+    let mut node_validation: HashMap<Uuid, (BlueprintDiagnosticSeverity, String)> = HashMap::new();
+    for diagnostic in project.active_blueprint_diagnostics() {
+        let Some(node_id) = diagnostic.node_id else {
+            continue;
+        };
+        let should_replace = node_validation
+            .get(&node_id)
+            .map(|(severity, _)| {
+                validation_severity_rank(diagnostic.severity) > validation_severity_rank(*severity)
+            })
+            .unwrap_or(true);
+        if should_replace {
+            node_validation.insert(node_id, (diagnostic.severity, diagnostic.message));
+        }
+    }
     let exec_output_pin_ids: HashSet<Uuid> = blueprint_nodes
         .iter()
         .flat_map(|node| {
@@ -183,6 +204,8 @@ pub fn sync_blueprint_models(ui: &AppWindow, project: &Project) {
         .iter()
         .map(|link| link.from_pin_id)
         .collect();
+    let linked_input_pin_ids: HashSet<Uuid> =
+        blueprint_links.iter().map(|link| link.to_pin_id).collect();
 
     let node_exec_connected: HashMap<Uuid, [bool; 3]> = blueprint_nodes
         .iter()
@@ -233,12 +256,26 @@ pub fn sync_blueprint_models(ui: &AppWindow, project: &Project) {
                 })
                 .map(|pin| pin.name.clone())
                 .collect();
-            let data_output = node.pins.iter().find(|pin| {
-                pin.direction == BlueprintPinDirection::Output && pin.kind == BlueprintPinKind::Data
-            });
-            let data_input = node.pins.iter().find(|pin| {
-                pin.direction == BlueprintPinDirection::Input && pin.kind == BlueprintPinKind::Data
-            });
+            let data_outputs: Vec<_> = node
+                .pins
+                .iter()
+                .filter(|pin| {
+                    pin.direction == BlueprintPinDirection::Output
+                        && pin.kind == BlueprintPinKind::Data
+                })
+                .collect();
+            let data_inputs: Vec<_> = node
+                .pins
+                .iter()
+                .filter(|pin| {
+                    pin.direction == BlueprintPinDirection::Input
+                        && pin.kind == BlueprintPinKind::Data
+                })
+                .collect();
+            let data_output = data_outputs.first().copied();
+            let data_output_2 = data_outputs.get(1).copied();
+            let data_input = data_inputs.first().copied();
+            let data_input_2 = data_inputs.get(1).copied();
             let has_exec_input = node.pins.iter().any(|pin| {
                 pin.direction == BlueprintPinDirection::Input && pin.kind == BlueprintPinKind::Exec
             });
@@ -247,6 +284,11 @@ pub fn sync_blueprint_models(ui: &AppWindow, project: &Project) {
                 blueprint_node_display_meta(&node.kind);
             BlueprintNodeInfo {
                 node_id: SharedString::from(node.id.to_string()),
+                variable_id: SharedString::from(match &node.kind {
+                    BlueprintNodeKind::VariableGet { variable_id }
+                    | BlueprintNodeKind::VariableSet { variable_id } => variable_id.to_string(),
+                    _ => String::new(),
+                }),
                 title: SharedString::from(node.title.clone()),
                 category: SharedString::from(category),
                 element_type: SharedString::from(element_type),
@@ -287,6 +329,22 @@ pub fn sync_blueprint_models(ui: &AppWindow, project: &Project) {
                 data_output_connected: data_output
                     .map(|pin| linked_output_pin_ids.contains(&pin.id))
                     .unwrap_or(false),
+                data_output_2_name: SharedString::from(
+                    data_output_2
+                        .map(|pin| pin.name.clone())
+                        .unwrap_or_default(),
+                ),
+                data_output_2_type: SharedString::from(
+                    data_output_2
+                        .map(|pin| pin_type_label(pin.data_type))
+                        .unwrap_or(""),
+                ),
+                data_output_2_color: data_output_2
+                    .map(|pin| pin_type_color(pin.data_type))
+                    .unwrap_or_else(|| Color::from_rgb_u8(90, 198, 139)),
+                data_output_2_connected: data_output_2
+                    .map(|pin| linked_output_pin_ids.contains(&pin.id))
+                    .unwrap_or(false),
                 data_input_name: SharedString::from(
                     data_input.map(|pin| pin.name.clone()).unwrap_or_default(),
                 ),
@@ -298,6 +356,49 @@ pub fn sync_blueprint_models(ui: &AppWindow, project: &Project) {
                 data_input_color: data_input
                     .map(|pin| pin_type_color(pin.data_type))
                     .unwrap_or_else(|| Color::from_rgb_u8(90, 198, 139)),
+                data_input_connected: data_input
+                    .map(|pin| linked_input_pin_ids.contains(&pin.id))
+                    .unwrap_or(false),
+                data_input_value: SharedString::from(
+                    data_input.map(pin_input_value_string).unwrap_or_default(),
+                ),
+                data_input_display_value: SharedString::from(
+                    data_input.map(pin_input_display_value).unwrap_or_default(),
+                ),
+                data_input_2_name: SharedString::from(
+                    data_input_2.map(|pin| pin.name.clone()).unwrap_or_default(),
+                ),
+                data_input_2_type: SharedString::from(
+                    data_input_2
+                        .map(|pin| pin_type_label(pin.data_type))
+                        .unwrap_or(""),
+                ),
+                data_input_2_color: data_input_2
+                    .map(|pin| pin_type_color(pin.data_type))
+                    .unwrap_or_else(|| Color::from_rgb_u8(90, 198, 139)),
+                data_input_2_connected: data_input_2
+                    .map(|pin| linked_input_pin_ids.contains(&pin.id))
+                    .unwrap_or(false),
+                data_input_2_value: SharedString::from(
+                    data_input_2.map(pin_input_value_string).unwrap_or_default(),
+                ),
+                data_input_2_display_value: SharedString::from(
+                    data_input_2
+                        .map(pin_input_display_value)
+                        .unwrap_or_default(),
+                ),
+                validation_severity: SharedString::from(
+                    node_validation
+                        .get(&node.id)
+                        .map(|(severity, _)| validation_severity_label(*severity))
+                        .unwrap_or(""),
+                ),
+                validation_message: SharedString::from(
+                    node_validation
+                        .get(&node.id)
+                        .map(|(_, message)| message.as_str())
+                        .unwrap_or(""),
+                ),
             }
         })
         .collect();
@@ -321,6 +422,10 @@ pub fn sync_blueprint_models(ui: &AppWindow, project: &Project) {
             let to_pin = to_node.pins.iter().find(|pin| pin.id == link.to_pin_id)?;
             let from_is_event = blueprint_node_uses_compact_event_width(from_node);
             let to_is_event = blueprint_node_uses_compact_event_width(to_node);
+
+            // BlueprintCanvas renders event nodes 100px narrower than their logical
+            // layout width. Link anchors need the rendered width, while overlap and
+            // placement still use the core layout size.
             let from_render_width = if from_is_event {
                 (from_width - 100.0).max(0.0)
             } else {
@@ -342,6 +447,13 @@ pub fn sync_blueprint_models(ui: &AppWindow, project: &Project) {
             } else {
                 0.0
             };
+            let to_data_input_shift_x = if to_pin.kind == BlueprintPinKind::Data
+                && to_pin.direction == BlueprintPinDirection::Input
+            {
+                11.0
+            } else {
+                0.0
+            };
             let link_color = if from_pin.kind == BlueprintPinKind::Data {
                 pin_type_color(from_pin.data_type)
             } else {
@@ -352,7 +464,7 @@ pub fn sync_blueprint_models(ui: &AppWindow, project: &Project) {
                 to_node_id: SharedString::from(link.to_node_id.to_string()),
                 from_x: from_x + from_render_width + from_exec_output_shift_x,
                 from_y: from_y + node_pin_anchor_offset_y(from_node, link.from_pin_id),
-                to_x: to_x + to_exec_input_shift_x,
+                to_x: to_x + to_exec_input_shift_x + to_data_input_shift_x,
                 to_y: to_y + node_pin_anchor_offset_y(to_node, link.to_pin_id),
                 link_color,
             })
@@ -371,10 +483,76 @@ fn blueprint_node_uses_compact_event_width(node: &core_blueprint::BlueprintNode)
     }
 }
 
+// Keep this predicate aligned with BlueprintCanvas.slint and project-core.
+// It is geometry-only: non-getter value nodes become compact without inheriting getter styles.
+fn blueprint_node_uses_compact_data_output_size(node: &core_blueprint::BlueprintNode) -> bool {
+    if matches!(
+        node.kind,
+        BlueprintNodeKind::VariableGet { .. }
+            | BlueprintNodeKind::UiEvent { .. }
+            | BlueprintNodeKind::CatalogEvent { .. }
+    ) {
+        return false;
+    }
+
+    let has_exec_input = node.pins.iter().any(|pin| {
+        pin.direction == BlueprintPinDirection::Input && pin.kind == BlueprintPinKind::Exec
+    });
+    let has_exec_output = node.pins.iter().any(|pin| {
+        pin.direction == BlueprintPinDirection::Output && pin.kind == BlueprintPinKind::Exec
+    });
+    let has_data_input = node.pins.iter().any(|pin| {
+        pin.direction == BlueprintPinDirection::Input && pin.kind == BlueprintPinKind::Data
+    });
+    let data_output_count = node
+        .pins
+        .iter()
+        .filter(|pin| {
+            pin.direction == BlueprintPinDirection::Output && pin.kind == BlueprintPinKind::Data
+        })
+        .count();
+
+    !has_exec_input && !has_exec_output && !has_data_input && data_output_count == 1
+}
+
+fn blueprint_node_uses_operator_size(node: &core_blueprint::BlueprintNode) -> bool {
+    let descriptor_id = match &node.kind {
+        BlueprintNodeKind::Catalog { descriptor_id }
+        | BlueprintNodeKind::CatalogEvent { descriptor_id, .. } => descriptor_id.as_str(),
+        BlueprintNodeKind::Functional { node_id } => node_id.as_str(),
+        _ => return false,
+    };
+
+    descriptor_id.starts_with("math.")
+        || descriptor_id.starts_with("compare.")
+        || descriptor_id == "string.concat"
+}
+
 fn node_pin_anchor_offset_y(node: &core_blueprint::BlueprintNode, pin_id: Uuid) -> f32 {
     let Some(pin) = node.pins.iter().find(|pin| pin.id == pin_id) else {
         return 58.0;
     };
+
+    // These offsets mirror BlueprintCanvas.slint. If the visual pin positions
+    // change, update this mapper and project-core together so existing links
+    // and live drag/drop targeting stay on the same anchor points.
+    let exec_output_count = node
+        .pins
+        .iter()
+        .filter(|candidate| {
+            candidate.direction == BlueprintPinDirection::Output
+                && candidate.kind == BlueprintPinKind::Exec
+        })
+        .count();
+    let data_input_count = node
+        .pins
+        .iter()
+        .filter(|candidate| {
+            candidate.direction == BlueprintPinDirection::Input
+                && candidate.kind == BlueprintPinKind::Data
+        })
+        .count();
+
     match (pin.direction, pin.kind) {
         (BlueprintPinDirection::Output, BlueprintPinKind::Exec) => {
             let exec_outputs: Vec<Uuid> = node
@@ -393,12 +571,63 @@ fn node_pin_anchor_offset_y(node: &core_blueprint::BlueprintNode, pin_id: Uuid) 
             60.0 + index as f32 * 28.0
         }
         (BlueprintPinDirection::Input, BlueprintPinKind::Exec) => 58.0,
-        (_, BlueprintPinKind::Data) => {
-            if matches!(node.kind, BlueprintNodeKind::VariableGet { .. }) {
-                50.0
+        (BlueprintPinDirection::Input, BlueprintPinKind::Data) => {
+            let data_inputs: Vec<Uuid> = node
+                .pins
+                .iter()
+                .filter(|candidate| {
+                    candidate.direction == BlueprintPinDirection::Input
+                        && candidate.kind == BlueprintPinKind::Data
+                })
+                .map(|candidate| candidate.id)
+                .collect();
+            let input_index = data_inputs
+                .iter()
+                .position(|candidate_id| *candidate_id == pin_id)
+                .unwrap_or(0);
+            let has_compact_exec_rows = exec_output_count >= 2;
+            let base = if matches!(node.kind, BlueprintNodeKind::VariableGet { .. })
+                || blueprint_node_uses_compact_data_output_size(node)
+            {
+                24.0
+            } else if blueprint_node_uses_operator_size(node) {
+                26.0
+            } else if has_compact_exec_rows {
+                112.0
             } else {
                 88.0
-            }
+            };
+            base + input_index as f32 * 24.0
+        }
+        (BlueprintPinDirection::Output, BlueprintPinKind::Data) => {
+            let data_outputs: Vec<Uuid> = node
+                .pins
+                .iter()
+                .filter(|candidate| {
+                    candidate.direction == BlueprintPinDirection::Output
+                        && candidate.kind == BlueprintPinKind::Data
+                })
+                .map(|candidate| candidate.id)
+                .collect();
+            let output_index = data_outputs
+                .iter()
+                .position(|candidate_id| *candidate_id == pin_id)
+                .unwrap_or(0);
+            let has_compact_exec_rows = exec_output_count >= 2;
+            let base = if matches!(node.kind, BlueprintNodeKind::VariableGet { .. })
+                || blueprint_node_uses_compact_data_output_size(node)
+            {
+                24.0
+            } else if blueprint_node_uses_operator_size(node) {
+                38.0
+            } else if has_compact_exec_rows {
+                112.0
+            } else if data_input_count >= 2 {
+                108.0
+            } else {
+                88.0
+            };
+            base + output_index as f32 * 24.0
         }
     }
 }
@@ -505,6 +734,20 @@ fn blueprint_node_display_meta(kind: &BlueprintNodeKind) -> (String, String, Str
     }
 }
 
+fn validation_severity_rank(severity: BlueprintDiagnosticSeverity) -> u8 {
+    match severity {
+        BlueprintDiagnosticSeverity::Warning => 1,
+        BlueprintDiagnosticSeverity::Error => 2,
+    }
+}
+
+fn validation_severity_label(severity: BlueprintDiagnosticSeverity) -> &'static str {
+    match severity {
+        BlueprintDiagnosticSeverity::Warning => "warning",
+        BlueprintDiagnosticSeverity::Error => "error",
+    }
+}
+
 fn pin_type_label(pin_type: BlueprintPinType) -> &'static str {
     match pin_type {
         BlueprintPinType::Exec => "exec",
@@ -526,6 +769,69 @@ fn pin_type_label(pin_type: BlueprintPinType) -> &'static str {
     }
 }
 
+fn pin_input_value_string(pin: &BlueprintPin) -> String {
+    let value = pin
+        .value
+        .clone()
+        .or_else(|| default_input_pin_value(pin.data_type));
+    let Some(value) = value else {
+        return String::new();
+    };
+    match pin.data_type {
+        BlueprintPinType::Bool => value.as_bool().unwrap_or(true).to_string(),
+        BlueprintPinType::Int => value.as_i64().unwrap_or(0).to_string(),
+        BlueprintPinType::Float => {
+            let value = value.as_f64().unwrap_or(0.0);
+            if value.fract().abs() < f64::EPSILON {
+                format!("{value:.1}")
+            } else {
+                value.to_string()
+            }
+        }
+        BlueprintPinType::String
+        | BlueprintPinType::Color
+        | BlueprintPinType::UiElementRef
+        | BlueprintPinType::PageRef
+        | BlueprintPinType::ApiRef => value.as_str().unwrap_or_default().to_string(),
+        BlueprintPinType::Object => {
+            if value.is_null() {
+                String::new()
+            } else {
+                serde_json::to_string(&value).unwrap_or_default()
+            }
+        }
+        _ => String::new(),
+    }
+}
+
+fn pin_input_display_value(pin: &BlueprintPin) -> String {
+    let value = pin
+        .value
+        .clone()
+        .or_else(|| default_input_pin_value(pin.data_type));
+    let Some(value) = value else {
+        return String::new();
+    };
+    match pin.data_type {
+        BlueprintPinType::Object => value
+            .as_object()
+            .and_then(|object| object.get("name"))
+            .and_then(|name| name.as_str())
+            .or_else(|| {
+                value
+                    .as_object()
+                    .and_then(|object| object.get("id"))
+                    .and_then(|id| id.as_str())
+            })
+            .unwrap_or_default()
+            .to_string(),
+        BlueprintPinType::UiElementRef | BlueprintPinType::PageRef | BlueprintPinType::ApiRef => {
+            value.as_str().unwrap_or_default().to_string()
+        }
+        _ => pin_input_value_string(pin),
+    }
+}
+
 fn variable_type_label(data_type: BlueprintPinType, item_type: Option<BlueprintPinType>) -> String {
     let base = pin_type_label(data_type);
     match data_type {
@@ -543,14 +849,15 @@ fn variable_type_label(data_type: BlueprintPinType, item_type: Option<BlueprintP
 fn pin_type_color(pin_type: BlueprintPinType) -> Color {
     match pin_type {
         BlueprintPinType::Bool => Color::from_rgb_u8(220, 68, 79),
-        BlueprintPinType::Int | BlueprintPinType::Float => Color::from_rgb_u8(76, 137, 219),
+        BlueprintPinType::Int => Color::from_rgb_u8(65, 126, 226),
+        BlueprintPinType::Float => Color::from_rgb_u8(74, 188, 214),
         BlueprintPinType::String => Color::from_rgb_u8(218, 171, 64),
         BlueprintPinType::Color => Color::from_rgb_u8(181, 93, 205),
         BlueprintPinType::Object => Color::from_rgb_u8(70, 190, 124),
-        BlueprintPinType::Array
-        | BlueprintPinType::Vector
-        | BlueprintPinType::HashSet
-        | BlueprintPinType::HashMap => Color::from_rgb_u8(225, 128, 65),
+        BlueprintPinType::Array => Color::from_rgb_u8(223, 128, 58),
+        BlueprintPinType::Vector => Color::from_rgb_u8(210, 114, 184),
+        BlueprintPinType::HashSet => Color::from_rgb_u8(202, 158, 56),
+        BlueprintPinType::HashMap => Color::from_rgb_u8(152, 103, 214),
         BlueprintPinType::UiElementRef => Color::from_rgb_u8(62, 168, 137),
         BlueprintPinType::PageRef | BlueprintPinType::ApiRef => Color::from_rgb_u8(70, 137, 145),
         BlueprintPinType::Any => Color::from_rgb_u8(132, 139, 150),
@@ -578,7 +885,13 @@ pub fn sync_canvas(
     hidden_element_ids: &HashSet<Uuid>,
 ) {
     let elements = project.active_page_elements();
-    sync_canvas_view(ui, project, selected_ids, Some(&elements), hidden_element_ids);
+    sync_canvas_view(
+        ui,
+        project,
+        selected_ids,
+        Some(&elements),
+        hidden_element_ids,
+    );
     sync_canvas_comments(ui, project);
     sync_outline_view(
         ui,

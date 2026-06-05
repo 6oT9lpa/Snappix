@@ -1,8 +1,17 @@
-use shared::{log_fields, LogCategory, LogLevel, LogMessage};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
+
 use uuid::Uuid;
 
 use crate::app::project::{CanvasElementData, Project};
 use crate::app_errors::{self, AppErrorCode};
+
+const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(30);
+const LOGGER_TARGET: &str = "apps.editor_runtime.helpers";
+
+static LAST_PROJECT_SAVE: OnceLock<Mutex<HashMap<PathBuf, Instant>>> = OnceLock::new();
 
 pub fn clamp_rotated_geometry_to_page(
     x: f32,
@@ -91,34 +100,79 @@ pub fn parse_uuid(text: &str) -> Option<Uuid> {
 }
 
 pub fn save_project_silent(project: &Project) {
-    log_fields(
-        LogLevel::Debug,
-        LogCategory::Project,
-        LogMessage::ProjectSaveRequested,
-        [(
-            "path",
-            project.spx_file_path().to_string_lossy().to_string(),
-        )],
+    save_project_autosave(project, "autosave");
+}
+
+pub fn save_project_forced(project: &Project, reason: &str) {
+    save_project_now(project, reason, true);
+}
+
+fn save_project_autosave(project: &Project, reason: &str) {
+    let path = project.spx_file_path();
+
+    // UI callbacks can fire many times during drag/selection updates. Throttle
+    // autosave here so callers do not need to remember whether they are noisy.
+    if let Some(elapsed) = autosave_elapsed_since_last_save(&path) {
+        if elapsed < AUTOSAVE_INTERVAL {
+            shared::log_trace!(
+                LOGGER_TARGET,
+                "Autosave skipped: path='{}', reason='{}', elapsed_ms={}, next_allowed_ms={}",
+                path.display(),
+                reason,
+                elapsed.as_millis(),
+                AUTOSAVE_INTERVAL.saturating_sub(elapsed).as_millis()
+            );
+            return;
+        }
+    }
+
+    save_project_now(project, reason, false);
+}
+
+fn save_project_now(project: &Project, reason: &str, forced: bool) {
+    let path = project.spx_file_path();
+    shared::log_info!(
+        LOGGER_TARGET,
+        "Project save requested: path='{}', reason='{}', forced={}",
+        path.display(),
+        reason,
+        forced
     );
     if let Err(err) = project.save() {
-        log_fields(
-            LogLevel::Error,
-            LogCategory::Project,
-            LogMessage::ProjectSaveFailed,
-            [("error", err.to_string())],
+        shared::log_error!(
+            LOGGER_TARGET,
+            "Project save failed: path='{}', reason='{}', error='{}'",
+            path.display(),
+            reason,
+            err
         );
         app_errors::report(AppErrorCode::ProjectSaveFailed);
     } else {
-        log_fields(
-            LogLevel::Debug,
-            LogCategory::Project,
-            LogMessage::ProjectSaved,
-            [(
-                "path",
-                project.spx_file_path().to_string_lossy().to_string(),
-            )],
+        mark_project_saved(path.as_path());
+        shared::log_info!(
+            LOGGER_TARGET,
+            "Project saved: path='{}', reason='{}', forced={}",
+            path.display(),
+            reason,
+            forced
         );
     }
+}
+
+fn autosave_elapsed_since_last_save(path: &Path) -> Option<Duration> {
+    let saves = LAST_PROJECT_SAVE.get_or_init(|| Mutex::new(HashMap::new()));
+    let saves = saves
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    saves.get(path).map(Instant::elapsed)
+}
+
+fn mark_project_saved(path: &Path) {
+    let saves = LAST_PROJECT_SAVE.get_or_init(|| Mutex::new(HashMap::new()));
+    saves
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(path.to_path_buf(), Instant::now());
 }
 
 fn rotated_bounding_box(width: f32, height: f32, rotation_deg: f32) -> (f32, f32) {

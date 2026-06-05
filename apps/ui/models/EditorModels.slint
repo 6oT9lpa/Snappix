@@ -109,6 +109,7 @@ export struct SelectionInfo {
 }
 
 export struct ProjectPageInfo {
+    page-id: string,
     page-index: int,
     page-name: string,
     is-open: bool,
@@ -156,6 +157,7 @@ export struct BlueprintFunctionInfo {
 
 export struct BlueprintNodeInfo {
     node-id: string,
+    variable-id: string,
     title: string,
     category: string,
     element-type: string,
@@ -175,9 +177,24 @@ export struct BlueprintNodeInfo {
     data-output-type: string,
     data-output-color: color,
     data-output-connected: bool,
+    data-output-2-name: string,
+    data-output-2-type: string,
+    data-output-2-color: color,
+    data-output-2-connected: bool,
     data-input-name: string,
     data-input-type: string,
     data-input-color: color,
+    data-input-connected: bool,
+    data-input-value: string,
+    data-input-display-value: string,
+    data-input-2-name: string,
+    data-input-2-type: string,
+    data-input-2-color: color,
+    data-input-2-connected: bool,
+    data-input-2-value: string,
+    data-input-2-display-value: string,
+    validation-severity: string,
+    validation-message: string,
 }
 
 export struct BlueprintLinkInfo {

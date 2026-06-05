@@ -139,11 +139,16 @@ component VariableTypeDropdown inherits Rectangle {
 
     function type-color(type-name: string) -> color {
         type-name == "bool" ? #dc444f
-            : type-name == "int" || type-name == "float" ? #4c89db
+            : type-name == "int" ? #417ee2
+            : type-name == "float" ? #4abcd6
             : type-name == "Object" ? #46be7c
             : type-name == "String" ? #daab40
             : type-name == "Color" ? #b55dcd
-            : #e18041;
+            : type-name == "Array" ? #df803a
+            : type-name == "Vector" ? #d272b8
+            : type-name == "Set" ? #ca9e38
+            : type-name == "HashMap" ? #9867d6
+            : #848b96;
     }
 
     function is-current-type(type-name: string) -> bool {
@@ -191,10 +196,12 @@ component VariableItemTypeDropdown inherits Rectangle {
 
     function type-color(type-name: string) -> color {
         type-name == "bool" ? #dc444f
-            : type-name == "int" || type-name == "float" ? #4c89db
+            : type-name == "int" ? #417ee2
+            : type-name == "float" ? #4abcd6
             : type-name == "Object" ? #46be7c
             : type-name == "String" ? #daab40
-            : #b55dcd;
+            : type-name == "Color" ? #b55dcd
+            : #848b96;
     }
 
     width: 118px;
@@ -240,6 +247,8 @@ export component BlueprintSidebar inherits Rectangle {
     callback add-blueprint-variable();
     callback add-blueprint-function();
     callback add-blueprint-variable-node(string, string);
+    callback duplicate-blueprint-variable(string);
+    callback delete-blueprint-variable(string);
     callback rename-blueprint-variable(string, string);
     callback set-blueprint-variable-type(string, string);
     callback set-blueprint-variable-item-type(string, string);
@@ -312,7 +321,7 @@ export component BlueprintSidebar inherits Rectangle {
         value-label: string
     ) {
         root.variable-context-id = variable-id;
-        root.variable-context-menu-y = Math.max(8px, Math.min(root.height - 310px - 8px, y));
+        root.variable-context-menu-y = Math.max(8px, Math.min(root.height - 370px - 8px, y));
         root.variable-context-is-object = is-object;
         root.variable-context-object-open = false;
         root.variable-context-value-label = value-label;
@@ -611,7 +620,7 @@ export component BlueprintSidebar inherits Rectangle {
         x: root.width - 142px;
         y: root.variable-context-menu-y;
         width: 134px;
-        height: root.variable-context-is-object && root.variable-context-object-open ? 314px : (root.variable-context-is-object ? 102px : 70px);
+        height: root.variable-context-is-object && root.variable-context-object-open ? 370px : (root.variable-context-is-object ? 158px : 126px);
         border-radius: 6px;
         border-width: 1px;
         border-color: Themes.current.divider-color;
@@ -635,6 +644,24 @@ export component BlueprintSidebar inherits Rectangle {
                 label: "Setter";
                 selected => {
                     root.add-blueprint-variable-node(root.variable-context-id, "set");
+                    root.variable-context-id = "";
+                }
+            }
+
+            Separator-H {}
+
+            MenuActionRow {
+                label: "Duplicate";
+                selected => {
+                    root.duplicate-blueprint-variable(root.variable-context-id);
+                    root.variable-context-id = "";
+                }
+            }
+
+            MenuActionRow {
+                label: "Delete";
+                selected => {
+                    root.delete-blueprint-variable(root.variable-context-id);
                     root.variable-context-id = "";
                 }
             }

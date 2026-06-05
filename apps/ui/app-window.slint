@@ -228,6 +228,7 @@ export component AppWindow inherits Window {
     in-out property <HotkeyBinding> redo-hotkey: { key: "z", ctrl: false, shift: true, alt: false };
     in-out property <HotkeyBinding> cut-hotkey: { key: "x", ctrl: true, shift: false, alt: false };
     in-out property <HotkeyBinding> copy-hotkey: { key: "c", ctrl: true, shift: false, alt: false };
+    in-out property <HotkeyBinding> save-hotkey: { key: "s", ctrl: true, shift: false, alt: false };
     in-out property <HotkeyBinding> paste-hotkey: { key: "v", ctrl: true, shift: false, alt: false };
     in-out property <HotkeyBinding> paste-replace-hotkey: { key: "r", ctrl: true, shift: false, alt: false };
     in-out property <HotkeyBinding> hide-selection-hotkey: { key: "h", ctrl: true, shift: false, alt: false };
@@ -289,6 +290,7 @@ export component AppWindow inherits Window {
     callback redo-internal();
     callback cut-internal();
     callback copy-internal();
+    callback save-project-internal();
     callback paste-internal(float, float);
     callback paste-replace-internal(float, float);
     callback toggle-hidden-selection-internal();
@@ -306,12 +308,17 @@ export component AppWindow inherits Window {
     callback add-blueprint-variable-internal();
     callback add-blueprint-function-internal();
     callback add-blueprint-variable-node-internal(string, string, float, float);
+    callback duplicate-blueprint-variable-internal(string);
+    callback delete-blueprint-variable-internal(string);
     callback add-blueprint-catalog-node-internal(string, float, float);
+    callback add-connected-blueprint-catalog-node-internal(string, string, int, string, float, float) -> bool;
     callback move-blueprint-node-internal(string, float, float);
     callback delete-blueprint-node-internal(string);
+    callback delete-blueprint-node-batch-internal(string);
     callback duplicate-blueprint-node-internal(string, float, float);
     callback connect-blueprint-nodes-internal(string, string, int, float, float) -> bool;
     callback bind-blueprint-event-source-internal(string, string);
+    callback set-blueprint-node-input-value-internal(string, int, string);
     callback rename-blueprint-variable-internal(string, string);
     callback set-blueprint-variable-type-internal(string, string);
     callback set-blueprint-variable-item-type-internal(string, string);
@@ -576,6 +583,7 @@ export component AppWindow inherits Window {
         project-page-items: root.project-page-items;
         active-page-index: root.active-page-index;
         reset-view-hotkey: root.reset-view-hotkey;
+        save-hotkey: root.save-hotkey;
 
         document-selected(idx) => {
             root.select-document-internal(idx);
@@ -613,8 +621,20 @@ export component AppWindow inherits Window {
             root.add-blueprint-variable-node-internal(variable-id, access-kind, x, y);
         }
 
+        duplicate-blueprint-variable(variable-id) => {
+            root.duplicate-blueprint-variable-internal(variable-id);
+        }
+
+        delete-blueprint-variable(variable-id) => {
+            root.delete-blueprint-variable-internal(variable-id);
+        }
+
         add-blueprint-catalog-node(descriptor-id, x, y) => {
             root.add-blueprint-catalog-node-internal(descriptor-id, x, y);
+        }
+
+        add-connected-blueprint-catalog-node(source-node-id, source-pin-kind, source-pin-slot, descriptor-id, x, y) => {
+            root.add-connected-blueprint-catalog-node-internal(source-node-id, source-pin-kind, source-pin-slot, descriptor-id, x, y)
         }
 
         move-blueprint-node(node-id, x, y) => {
@@ -623,6 +643,9 @@ export component AppWindow inherits Window {
 
         delete-blueprint-node(node-id) => {
             root.delete-blueprint-node-internal(node-id);
+        }
+        delete-blueprint-node-batch(node-ids-token) => {
+            root.delete-blueprint-node-batch-internal(node-ids-token);
         }
 
         duplicate-blueprint-node(node-id, x, y) => {
@@ -633,8 +656,16 @@ export component AppWindow inherits Window {
             root.bind-blueprint-event-source-internal(node-id, element-id);
         }
 
+        set-blueprint-node-input-value(node-id, input-slot, value) => {
+            root.set-blueprint-node-input-value-internal(node-id, input-slot, value);
+        }
+
         connect-blueprint-nodes(source-node-id, source-pin-kind, source-pin-slot, x, y) => {
             root.connect-blueprint-nodes-internal(source-node-id, source-pin-kind, source-pin-slot, x, y)
+        }
+
+        save-project-requested => {
+            root.save-project-internal();
         }
 
         rename-blueprint-variable(variable-id, name) => {
@@ -738,6 +769,7 @@ export component AppWindow inherits Window {
             redo-hotkey: root.redo-hotkey;
             cut-hotkey: root.cut-hotkey;
             copy-hotkey: root.copy-hotkey;
+            save-hotkey: root.save-hotkey;
             paste-hotkey: root.paste-hotkey;
             paste-replace-hotkey: root.paste-replace-hotkey;
             hide-selection-hotkey: root.hide-selection-hotkey;
@@ -896,6 +928,7 @@ export component AppWindow inherits Window {
             redo-requested => { root.redo-internal(); }
             cut-requested => { root.cut-internal(); }
             copy-requested => { root.copy-internal(); }
+            save-project-requested => { root.save-project-internal(); }
             paste-requested(x, y) => { root.paste-internal(x, y); }
             paste-replace-requested(x, y) => { root.paste-replace-internal(x, y); }
             hide-selection-requested => { root.toggle-hidden-selection-internal(); }

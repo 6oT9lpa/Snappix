@@ -20,6 +20,7 @@ export component BlueprintEditorScene inherits Rectangle {
     in-out property <[SelectionInfo]> outline-elements: [];
     in-out property <int> active-page-index: 0;
     in-out property <HotkeyBinding> reset-view-hotkey: { key: "0", ctrl: true, shift: false, alt: false };
+    in-out property <HotkeyBinding> save-hotkey: { key: "s", ctrl: true, shift: false, alt: false };
 
     property <float> blueprint-zoom-level: 1.0;
     property <length> blueprint-offset-x: 0px;
@@ -39,12 +40,18 @@ export component BlueprintEditorScene inherits Rectangle {
     callback add-blueprint-variable();
     callback add-blueprint-function();
     callback add-blueprint-variable-node(string, string, float, float);
+    callback duplicate-blueprint-variable(string);
+    callback delete-blueprint-variable(string);
     callback add-blueprint-catalog-node(string, float, float);
+    callback add-connected-blueprint-catalog-node(string, string, int, string, float, float) -> bool;
     callback move-blueprint-node(string, float, float);
     callback delete-blueprint-node(string);
+    callback delete-blueprint-node-batch(string);
     callback duplicate-blueprint-node(string, float, float);
     callback connect-blueprint-nodes(string, string, int, float, float) -> bool;
     callback bind-blueprint-event-source(string, string);
+    callback set-blueprint-node-input-value(string, int, string);
+    callback save-project-requested();
     callback rename-blueprint-variable(string, string);
     callback set-blueprint-variable-type(string, string);
     callback set-blueprint-variable-item-type(string, string);
@@ -52,6 +59,7 @@ export component BlueprintEditorScene inherits Rectangle {
 
     function normalize-control-hotkey(text: string) -> string {
         text == "\u{3}" ? "c"
+            : text == "\u{13}" ? "s"
             : text == "\u{16}" ? "v"
             : text;
     }
@@ -131,6 +139,16 @@ export component BlueprintEditorScene inherits Rectangle {
                 blueprint-canvas.copy-selected-node();
                 return accept;
             }
+            if root.matches-hotkey-binding(
+                event.text,
+                event.modifiers.control,
+                event.modifiers.shift,
+                event.modifiers.alt,
+                root.save-hotkey
+            ) {
+                root.save-project-requested();
+                return accept;
+            }
             if event.modifiers.control && root.normalize-hotkey-text(event.text) == "v" {
                 blueprint-canvas.paste-node-at-cursor();
                 return accept;
@@ -162,6 +180,12 @@ export component BlueprintEditorScene inherits Rectangle {
                 blueprint-canvas.visible-center-world-x(),
                 blueprint-canvas.visible-center-world-y()
             );
+        }
+        duplicate-blueprint-variable(variable-id) => {
+            root.duplicate-blueprint-variable(variable-id);
+        }
+        delete-blueprint-variable(variable-id) => {
+            root.delete-blueprint-variable(variable-id);
         }
         rename-blueprint-variable(variable-id, name) => {
             root.rename-blueprint-variable(variable-id, name);
@@ -235,6 +259,7 @@ export component BlueprintEditorScene inherits Rectangle {
             offset-y <=> root.blueprint-offset-y;
             nodes: root.blueprint-node-items;
             links: root.blueprint-link-items;
+            page-items: root.project-page-items;
             scene-elements: root.outline-elements;
             grid-visible: true;
             grid-size: 24px;
@@ -249,6 +274,9 @@ export component BlueprintEditorScene inherits Rectangle {
             node-delete-requested(node-id) => {
                 root.delete-blueprint-node(node-id);
             }
+            node-delete-selected-requested(node-ids-token) => {
+                root.delete-blueprint-node-batch(node-ids-token);
+            }
             node-copy-requested(_node-id) => { }
             node-paste-requested(_x, _y) => { }
             node-duplicate-requested(node-id, x, y) => {
@@ -257,8 +285,17 @@ export component BlueprintEditorScene inherits Rectangle {
             node-create-requested(descriptor-id, x, y) => {
                 root.add-blueprint-catalog-node(descriptor-id, x, y);
             }
+            node-create-connected-requested(source-node-id, source-pin-kind, source-pin-slot, descriptor-id, x, y) => {
+                root.add-connected-blueprint-catalog-node(source-node-id, source-pin-kind, source-pin-slot, descriptor-id, x, y)
+            }
             node-bind-source-requested(node-id, element-id) => {
                 root.bind-blueprint-event-source(node-id, element-id);
+            }
+            node-set-object-requested(variable-id, object-kind, object-id, object-name) => {
+                root.set-blueprint-variable-object(variable-id, object-kind, object-id, object-name);
+            }
+            node-input-value-changed(node-id, input-slot, value) => {
+                root.set-blueprint-node-input-value(node-id, input-slot, value);
             }
             connect-blueprint-nodes(source-node-id, source-pin-kind, source-pin-slot, x, y) => {
                 root.connect-blueprint-nodes(source-node-id, source-pin-kind, source-pin-slot, x, y)
