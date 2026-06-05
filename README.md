@@ -1,65 +1,94 @@
 # Snappix
 
-Snappix — визуальный редактор проектов, где UI, логика и ассеты хранятся в одном архиве `.spx`.
-Он нужен для быстрого прототипирования интерфейсов и логики без ручной сборки файлов и папок.
+Snappix is a desktop visual application builder written in Rust with a Slint UI.
+It combines a Canvas editor for interface design, a Blueprint editor for
+application logic, and a portable `.spx` project archive format.
 
-## Для кого
+The product is designed as a local-first no-code/low-code environment: project
+data, assets, UI structure, Blueprint graphs, workspace state, history snapshots
+and logs are processed on the user's machine without sending project data to
+external services.
 
-- Дизайнеры и продуктовые команды, которым нужен быстрый визуальный прототип.
-- Разработчики, которым важна структурированная логика и единый формат проекта.
-- Команды, которым нужен единый архив для передачи и хранения проекта.
+## What Snappix Provides
 
-## Что уже реализовано
+- Visual Canvas editor for building application pages with drag-and-drop.
+- Component tree, properties panel, selection, grouping, comments and hotkeys.
+- Managed layout containers: Stack, Flex and Grid.
+- Blueprint editor with typed exec/data pins, event nodes, flow nodes,
+  variables, math, compare, conversion and UI action nodes.
+- Page Blueprint and Server Blueprint document types.
+- Blueprint validation before compilation.
+- Rust code generation and `cargo check` verification for generated Blueprint
+  projects.
+- `.spx` archive format based on ZIP + MessagePack.
+- Project history, undo/redo, autosave and explicit save through `Ctrl+S`.
+- Structured logging with MSK timestamps and log rotation.
 
-- Визуальный редактор UI на базе Slint.
-- Блюпринты для логики UI и серверной части (backend) на базе blueprint.
-- `.spx` как ZIP-архив с бинарными данными проекта и ассетами.
-- История изменений (последние 100 действий).
-- Ассеты изображений с автоматическим удалением неиспользуемых файлов.
-- Файловые ассоциации `.spx` (Windows и Linux).
+## Repository Structure
 
-## Что планируется
+```text
+apps/                    Slint desktop application and UI adapter layer
+crates/shared/           common errors, ids, serialization and logging
+crates/core-ui-graphs/   base UI graph/layout data structures
+crates/core-blueprint/   Blueprint model, catalog, validation, lowering, codegen
+crates/project-core/     project domain API: pages, elements, assets, history
+crates/project-manager/  .spx format, storage and filesystem operations
+docs/                    technical documentation
+```
 
-- Полноценный менеджер ассетов (поиск, замены, оптимизация).
-- Расширенные шаблоны проектов.
-- Экспорт в платформенные форматы.
-- Расширение API для блюпринтов и UI-компонентов.
+`apps/` should stay focused on UI, user interaction and mapping domain data into
+Slint models. The core product logic belongs in `crates/`.
 
-## Формат `.spx`
+## Quick Start
 
-`.spx` — ZIP-архив с бинарными файлами и ресурсами проекта. Подробная структура:  
-`docs/FORMAT_SPX.md`
-
-## Архитектура и разработка
-
-- Архитектура: `docs/ARCHITECTURE.md`
-- Разработка: `docs/DEVELOPMENT.md`
-
-## Быстрый старт
-
-1. Установите Rust (stable) и `cargo`.
-2. Соберите и запустите приложение:
+Install stable Rust and run:
 
 ```bash
-cargo build
 cargo run -p slint-rust
 ```
 
-## Структура репозитория
+Useful commands:
 
-- `apps/` — приложение и UI (Slint).
-- `crates/` — ядро, формат `.spx`, компиляция блюпринтов.
-- `docs/` — документация проекта.
+```bash
+cargo check --workspace
+cargo test --workspace
+cargo check -p slint-rust
+cargo test -p core-blueprint -p project-core -p shared
+```
 
-## Поддерживаемые платформы
+The repository also includes a `justfile` with common commands, although some
+comments in that file may still contain legacy encoding artifacts.
 
-- Windows
-- Linux (через `xdg-mime`)
+## Documentation
 
-## Статус проекта
+- [Documentation Index](docs/README.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Project Core](docs/PROJECT_CORE.md)
+- [Canvas Editor](docs/CANVAS_EDITOR.md)
+- [Blueprint System](docs/BLUEPRINT.md)
+- [SPX Format](docs/FORMAT_SPX.md)
+- [Logging](docs/LOGGING.md)
+- [Security](docs/SECURITY.md)
+- [Testing](docs/TESTING.md)
+- [Development Guide](docs/DEVELOPMENT.md)
 
-Проект активно развивается. Формат `.spx` уже стабилен, но часть функций находится в стадии доработки.
+## Current Engineering Status
 
-## Лицензия
+The current architecture separates the UI adapter from the domain core:
 
-Лицензия уточняется. Если нужна конкретная модель лицензирования — напишите, добавим.
+- `project-core` owns the `Project` facade, page operations, element operations,
+  comments, history, clipboard, selection helpers, Blueprint wrappers and
+  save/load integration.
+- `core-blueprint` owns Blueprint graph semantics, catalog descriptors,
+  diagnostics, lowering and code generation.
+- `project-manager` owns archive storage and filesystem-facing operations.
+- `apps` wires Slint callbacks to domain operations and synchronizes Slint
+  models after state changes.
+
+At the time this documentation was rewritten, the workspace contains 90 Rust
+tests across the core crates and application runtime modules.
+
+## License
+
+The repository contains a `LICENSE` file. Confirm the final distribution model
+before public release.
