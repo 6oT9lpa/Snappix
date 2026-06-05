@@ -15,8 +15,8 @@ pub use error::{Result, SnappixError};
 pub use id::generate_id;
 pub use log_messages::LogMessage;
 pub use logging::{
-    clear_log_entries, configure_logger, default_log_file_path, log, log_fields,
-    recent_log_entries, LogCategory, LogEntry, LogField, LogLevel, LoggerConfig,
+    clear_log_entries, configure_logger, default_log_file_path, log, log_fields, logger,
+    recent_log_entries, LogCategory, LogEntry, LogField, LogLevel, Logger, LoggerConfig,
 };
 pub use position::{Position, Rect};
 pub use serialization::{from_msgpack, to_msgpack};

@@ -6,7 +6,7 @@ use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 
 use crate::format::{
-    BlueprintIndex, BlueprintPageIndex, ProjectArchiveHeader, ProjectFile, ARCHIVE_VERSION,
+    BlueprintIndex, BlueprintPageIndex, ProjectArchiveHeader, ProjectFile, UiData, ARCHIVE_VERSION,
 };
 use core_blueprint::{BlueprintDocument, BlueprintDocumentKind, BlueprintOwner};
 use shared::{from_msgpack, to_msgpack, Result, SnappixError};
@@ -22,6 +22,7 @@ const BLUEPRINT_SERVER_PATH: &str = "blueprints/server.bin";
 const HISTORY_PATH: &str = "history/timeline.bin";
 const ICON_PATH: &str = "meta/icon.png";
 const DEFAULT_ICON_PNG: &[u8] = include_bytes!("../../../apps/resources/icons/icon.png");
+const LOGGER_TARGET: &str = "project_manager.storage";
 
 #[derive(Debug)]
 pub struct ProjectStorage {
@@ -59,7 +60,21 @@ impl ProjectStorage {
         path: &Path,
         assets_root: Option<&Path>,
     ) -> Result<()> {
+        shared::log_info!(
+            LOGGER_TARGET,
+            "Saving project: name='{}', path='{}', assets_root='{}'",
+            project.manifest.project_name,
+            path.display(),
+            assets_root
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "<project-dir>".to_string())
+        );
         if let Some(parent) = path.parent() {
+            shared::log_debug!(
+                LOGGER_TARGET,
+                "Ensuring project directory exists: path='{}'",
+                parent.display()
+            );
             fs::create_dir_all(parent)?;
         }
 
@@ -68,21 +83,50 @@ impl ProjectStorage {
 
     /// Загрузка проекта с диска.
     pub fn load(&self, path: &Path) -> Result<ProjectFile> {
+        shared::log_info!(LOGGER_TARGET, "Loading project: path='{}'", path.display());
         if let Ok(project) = self.load_archive(path) {
+            shared::log_info!(
+                LOGGER_TARGET,
+                "Project loaded from archive: path='{}', name='{}'",
+                path.display(),
+                project.manifest.project_name
+            );
             return Ok(project);
         }
+        shared::log_warn!(
+            LOGGER_TARGET,
+            "Archive load failed, trying legacy formats: path='{}'",
+            path.display()
+        );
         let content = fs::read(path)?;
 
         // Бинарный формат с MessagePack
-        if let Ok(project) = from_msgpack(&content) {
+        if let Ok(project) = from_msgpack::<ProjectFile>(&content) {
+            shared::log_info!(
+                LOGGER_TARGET,
+                "Project loaded from legacy MessagePack: path='{}', name='{}'",
+                path.display(),
+                project.manifest.project_name
+            );
             return Ok(project);
         }
 
         // Json формат
-        if let Ok(project) = serde_json::from_slice(&content) {
+        if let Ok(project) = serde_json::from_slice::<ProjectFile>(&content) {
+            shared::log_info!(
+                LOGGER_TARGET,
+                "Project loaded from legacy JSON: path='{}', name='{}'",
+                path.display(),
+                project.manifest.project_name
+            );
             return Ok(project);
         }
 
+        shared::log_error!(
+            LOGGER_TARGET,
+            "Project load failed: path='{}', reason='invalid format'",
+            path.display()
+        );
         Err(SnappixError::Project(
             "Invalid project file format".to_string(),
         ))
@@ -94,46 +138,92 @@ impl ProjectStorage {
         path: &Path,
         assets_root: Option<&Path>,
     ) -> Result<()> {
+        shared::log_info!(
+            LOGGER_TARGET,
+            "Saving archive: name='{}', path='{}'",
+            project.manifest.project_name,
+            path.display()
+        );
+        shared::log_debug!(
+            LOGGER_TARGET,
+            "Creating archive file: path='{}'",
+            path.display()
+        );
         let file = File::create(path)?;
         let mut zip = ZipWriter::new(file);
         let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
 
+        shared::log_debug!(
+            LOGGER_TARGET,
+            "Preparing archive header: version='{}', project='{}'",
+            ARCHIVE_VERSION,
+            project.manifest.project_name
+        );
         let header = ProjectArchiveHeader {
             version: ARCHIVE_VERSION.to_string(),
             manifest: project.manifest.clone(),
             workspace_data: project.workspace_data.clone(),
             icon_path: Some(ICON_PATH.to_string()),
         };
-        write_zip_entry(&mut zip, PROJECT_BIN_PATH, &to_msgpack(&header)?, options)?;
-        write_zip_entry(
-            &mut zip,
+        let header_bytes = to_msgpack(&header)?;
+        shared::log_debug!(
+            LOGGER_TARGET,
+            "Writing archive entry: name='{}', bytes={}",
+            PROJECT_BIN_PATH,
+            header_bytes.len()
+        );
+        write_zip_entry(&mut zip, PROJECT_BIN_PATH, &header_bytes, options)?;
+
+        let ui_bytes = to_msgpack(&project.ui_data)?;
+        shared::log_debug!(
+            LOGGER_TARGET,
+            "Writing archive entry: name='{}', pages={}, bytes={}",
             UI_BIN_PATH,
-            &to_msgpack(&project.ui_data)?,
-            options,
-        )?;
+            project.ui_data.pages.len(),
+            ui_bytes.len()
+        );
+        write_zip_entry(&mut zip, UI_BIN_PATH, &ui_bytes, options)?;
 
         let mut page_entries = Vec::new();
         let mut server_path = None;
+
+        // Blueprints are split into independent archive entries so page logic can
+        // be loaded, indexed, or migrated without rewriting one monolithic blob.
+        shared::log_debug!(
+            LOGGER_TARGET,
+            "Writing blueprint documents: count={}",
+            project.logic_data.documents.len()
+        );
         for document in &project.logic_data.documents {
             match (document.kind, &document.owner) {
                 (BlueprintDocumentKind::PageBlueprint, BlueprintOwner::Page { page_id }) => {
-                    let path = format!("{}/{}.bin", BLUEPRINT_PAGES_DIR, page_id);
+                    let entry_path = format!("{}/{}.bin", BLUEPRINT_PAGES_DIR, page_id);
+                    let document_bytes = to_msgpack(document)?;
+                    shared::log_debug!(
+                        LOGGER_TARGET,
+                        "Writing page blueprint: page_id='{}', entry='{}', bytes={}",
+                        page_id,
+                        entry_path,
+                        document_bytes.len()
+                    );
                     page_entries.push(BlueprintPageIndex {
                         page_id: *page_id,
-                        path: path.clone(),
+                        path: entry_path.clone(),
                     });
-                    write_zip_entry(&mut zip, &path, &to_msgpack(document)?, options)?;
+                    write_zip_entry(&mut zip, &entry_path, &document_bytes, options)?;
                 }
                 (BlueprintDocumentKind::ServerBlueprint, BlueprintOwner::Project) => {
                     if server_path.is_none() {
                         server_path = Some(BLUEPRINT_SERVER_PATH.to_string());
                     }
-                    write_zip_entry(
-                        &mut zip,
+                    let document_bytes = to_msgpack(document)?;
+                    shared::log_debug!(
+                        LOGGER_TARGET,
+                        "Writing server blueprint: entry='{}', bytes={}",
                         BLUEPRINT_SERVER_PATH,
-                        &to_msgpack(document)?,
-                        options,
-                    )?;
+                        document_bytes.len()
+                    );
+                    write_zip_entry(&mut zip, BLUEPRINT_SERVER_PATH, &document_bytes, options)?;
                 }
                 _ => {}
             }
@@ -144,58 +234,144 @@ impl ProjectStorage {
             pages: page_entries,
             server: server_path,
         };
-        write_zip_entry(
-            &mut zip,
+        let index_bytes = to_msgpack(&index)?;
+        shared::log_debug!(
+            LOGGER_TARGET,
+            "Writing blueprint index: entry='{}', pages={}, server={}, bytes={}",
             BLUEPRINT_INDEX_PATH,
-            &to_msgpack(&index)?,
-            options,
-        )?;
+            index.pages.len(),
+            index.server.is_some(),
+            index_bytes.len()
+        );
+        write_zip_entry(&mut zip, BLUEPRINT_INDEX_PATH, &index_bytes, options)?;
 
         let root_dir = assets_root.unwrap_or_else(|| path.parent().unwrap_or(Path::new(".")));
-        add_assets_to_archive(&mut zip, root_dir, options)?;
+        shared::log_debug!(
+            LOGGER_TARGET,
+            "Adding assets to archive: root='{}'",
+            root_dir.display()
+        );
+        let asset_count = add_assets_to_archive(&mut zip, root_dir, options)?;
+        shared::log_debug!(
+            LOGGER_TARGET,
+            "Assets added to archive: root='{}', count={}",
+            root_dir.display(),
+            asset_count
+        );
 
         if let Ok(Some(history_bytes)) = load_history(path) {
+            shared::log_debug!(
+                LOGGER_TARGET,
+                "Writing project history: entry='{}', bytes={}",
+                HISTORY_PATH,
+                history_bytes.len()
+            );
             write_zip_entry(&mut zip, HISTORY_PATH, &history_bytes, options)?;
+        } else {
+            shared::log_debug!(
+                LOGGER_TARGET,
+                "Project history was not added: path='{}'",
+                path.display()
+            );
         }
 
+        shared::log_debug!(
+            LOGGER_TARGET,
+            "Writing archive icon: entry='{}', bytes={}",
+            ICON_PATH,
+            DEFAULT_ICON_PNG.len()
+        );
         write_zip_entry(&mut zip, ICON_PATH, DEFAULT_ICON_PNG, options)?;
 
+        shared::log_debug!(
+            LOGGER_TARGET,
+            "Finishing archive: path='{}'",
+            path.display()
+        );
         zip.finish()
             .map_err(|err| SnappixError::Project(format!("Zip error: {err}")))?;
+        shared::log_info!(
+            LOGGER_TARGET,
+            "Archive saved: name='{}', path='{}', pages={}, blueprints={}, assets={}",
+            project.manifest.project_name,
+            path.display(),
+            project.ui_data.pages.len(),
+            project.logic_data.documents.len(),
+            asset_count
+        );
         Ok(())
     }
 
     fn load_archive(&self, path: &Path) -> Result<ProjectFile> {
+        shared::log_debug!(
+            LOGGER_TARGET,
+            "Opening project archive: path='{}'",
+            path.display()
+        );
         let file = File::open(path)?;
         let mut archive = ZipArchive::new(file)
             .map_err(|err| SnappixError::Project(format!("Invalid archive: {err}")))?;
 
         let header: ProjectArchiveHeader = {
+            shared::log_debug!(
+                LOGGER_TARGET,
+                "Reading archive entry: name='{}'",
+                PROJECT_BIN_PATH
+            );
             let bytes = read_zip_entry(&mut archive, PROJECT_BIN_PATH)?;
             from_msgpack(&bytes)?
         };
-        let ui_data = {
+        let ui_data: UiData = {
+            shared::log_debug!(
+                LOGGER_TARGET,
+                "Reading archive entry: name='{}'",
+                UI_BIN_PATH
+            );
             let bytes = read_zip_entry(&mut archive, UI_BIN_PATH)?;
             from_msgpack(&bytes)?
         };
 
         let index: BlueprintIndex = {
+            shared::log_debug!(
+                LOGGER_TARGET,
+                "Reading archive entry: name='{}'",
+                BLUEPRINT_INDEX_PATH
+            );
             let bytes = read_zip_entry(&mut archive, BLUEPRINT_INDEX_PATH)?;
             from_msgpack(&bytes)?
         };
 
         let mut documents: Vec<BlueprintDocument> = Vec::new();
         for page in index.pages {
+            shared::log_debug!(
+                LOGGER_TARGET,
+                "Reading page blueprint: page_id='{}', entry='{}'",
+                page.page_id,
+                page.path
+            );
             let bytes = read_zip_entry(&mut archive, &page.path)?;
             let doc: BlueprintDocument = from_msgpack(&bytes)?;
             documents.push(doc);
         }
         if let Some(server_path) = index.server {
+            shared::log_debug!(
+                LOGGER_TARGET,
+                "Reading server blueprint: entry='{}'",
+                server_path
+            );
             let bytes = read_zip_entry(&mut archive, &server_path)?;
             let doc: BlueprintDocument = from_msgpack(&bytes)?;
             documents.push(doc);
         }
 
+        shared::log_debug!(
+            LOGGER_TARGET,
+            "Archive loaded: path='{}', name='{}', pages={}, blueprints={}",
+            path.display(),
+            header.manifest.project_name,
+            ui_data.pages.len(),
+            documents.len()
+        );
         Ok(ProjectFile {
             version: header.version,
             manifest: header.manifest,
@@ -371,12 +547,18 @@ fn add_assets_to_archive(
     zip: &mut ZipWriter<File>,
     root_dir: &Path,
     options: FileOptions,
-) -> Result<()> {
+) -> Result<usize> {
     let assets_dir = root_dir.join("assets");
     if !assets_dir.exists() {
-        return Ok(());
+        shared::log_debug!(
+            LOGGER_TARGET,
+            "Assets directory does not exist: path='{}'",
+            assets_dir.display()
+        );
+        return Ok(0);
     }
 
+    let mut added = 0;
     for entry in WalkDir::new(&assets_dir)
         .into_iter()
         .filter_map(|entry| entry.ok())
@@ -387,9 +569,16 @@ fn add_assets_to_archive(
         let relative = entry.path().strip_prefix(root_dir).unwrap_or(entry.path());
         let name = relative.to_string_lossy().replace('\\', "/");
         let bytes = fs::read(entry.path())?;
+        shared::log_debug!(
+            LOGGER_TARGET,
+            "Writing asset: entry='{}', bytes={}",
+            name,
+            bytes.len()
+        );
         write_zip_entry(zip, &name, &bytes, options)?;
+        added += 1;
     }
-    Ok(())
+    Ok(added)
 }
 
 pub fn extract_assets_from_archive(archive: &mut ZipArchive<File>, root_dir: &Path) -> Result<()> {
