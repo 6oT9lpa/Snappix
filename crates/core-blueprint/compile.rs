@@ -562,4 +562,54 @@ mod tests {
             result.diagnostics
         );
     }
+
+    #[test]
+    fn compiles_flow_return_with_literal_value() {
+        let page_id = Uuid::new_v4();
+        let mut document = BlueprintDocument::new_page(page_id, "Main");
+        let event = builtin_node_descriptor("event.app_started")
+            .expect("app started descriptor")
+            .instantiate(BlueprintPoint::default());
+        let flow_return = builtin_node_descriptor("flow.return")
+            .expect("flow return descriptor")
+            .instantiate(BlueprintPoint::default());
+        let literal_true = builtin_node_descriptor("value.bool_true")
+            .expect("bool literal descriptor")
+            .instantiate(BlueprintPoint::default());
+
+        document.graphs[0].entrypoints = vec![event.id];
+        document.graphs[0].nodes = vec![event.clone(), flow_return.clone(), literal_true.clone()];
+        document.graphs[0].links = vec![
+            BlueprintLink::new(
+                event.id,
+                event.pin_named("start").expect("event start").id,
+                flow_return.id,
+                flow_return.pin_named("in").expect("return input").id,
+            ),
+            BlueprintLink::new(
+                literal_true.id,
+                literal_true.pin_named("value").expect("literal output").id,
+                flow_return.id,
+                flow_return
+                    .pin_named("value")
+                    .expect("return value input")
+                    .id,
+            ),
+        ];
+
+        let api = page_api(page_id, Vec::new(), Vec::new());
+        let output_dir = tempdir().expect("temp dir");
+        let result = compile_project(
+            "snappix_flow_return_test",
+            &[document, BlueprintDocument::new_server()],
+            &api,
+            output_dir.path(),
+        );
+
+        assert!(
+            result.success,
+            "expected compile success, diagnostics: {:?}",
+            result.diagnostics
+        );
+    }
 }

@@ -120,6 +120,15 @@ pub trait BlueprintRuntime {
     ) {
         let _ = (variable_id, variable_name, value);
     }
+    fn mutate_blueprint_collection_variable(
+        &mut self,
+        variable_id: &str,
+        variable_name: &str,
+        operation: &str,
+        value: BlueprintValue,
+    ) {
+        let _ = (variable_id, variable_name, operation, value);
+    }
     fn call_server_function(
         &mut self,
         function_name: &str,
@@ -354,6 +363,40 @@ fn build_statement(
                 column: 1,
             });
         }
+        BlueprintIrStatement::MutateCollectionVariable {
+            node_id,
+            variable_id,
+            variable_name,
+            operation,
+            value,
+        } => {
+            let operation_name = format!("collection_operation_{}", *temp_index);
+            *temp_index += 1;
+            let value_name = format!("collection_value_{}", *temp_index);
+            *temp_index += 1;
+            writer.push_line(format!(
+                "let {} = value_to_string(&{});",
+                operation_name,
+                value_expr(operation)
+            ));
+            writer.push_line(format!("let {} = {};", value_name, value_expr(value)));
+            writer.push_line(format!(
+                "runtime.mutate_blueprint_collection_variable({:?}, {:?}, &{}, {});",
+                variable_id.to_string(),
+                variable_name,
+                operation_name,
+                value_name
+            ));
+            spans.push(GeneratedNodeSpan {
+                document_id: document.id,
+                graph_id: function.graph_id,
+                node_id: *node_id,
+                pin_id: None,
+                file: path.to_string(),
+                line: line_before,
+                column: 1,
+            });
+        }
         BlueprintIrStatement::Branch {
             node_id,
             condition_pin_id,
@@ -511,9 +554,39 @@ fn build_statement(
 
 fn value_expr(value: &BlueprintIrValue) -> String {
     match value {
+        BlueprintIrValue::BoolLiteral { value, .. } => {
+            format!("BlueprintValue::Bool({value})")
+        }
+        BlueprintIrValue::IntLiteral { value, .. } => {
+            format!("BlueprintValue::Int({value})")
+        }
+        BlueprintIrValue::FloatLiteral { value, .. } => {
+            format!("BlueprintValue::Float({value})")
+        }
         BlueprintIrValue::StringLiteral { value, .. } => {
             format!("BlueprintValue::String({value:?}.to_string())")
         }
+        BlueprintIrValue::ObjectLiteral { value, .. } => {
+            let json = serde_json::to_string(value).unwrap_or_else(|_| "null".to_string());
+            format!("BlueprintValue::Object(serde_json::json!({json}))")
+        }
+        BlueprintIrValue::ColorLiteral { value, .. } => {
+            format!("BlueprintValue::Color({value:?}.to_string())")
+        }
+        BlueprintIrValue::ReferenceLiteral {
+            data_type, value, ..
+        } => match data_type {
+            BlueprintPinType::UiElementRef => {
+                format!("BlueprintValue::UiElementRef({value:?}.to_string())")
+            }
+            BlueprintPinType::PageRef => {
+                format!("BlueprintValue::PageRef({value:?}.to_string())")
+            }
+            BlueprintPinType::ApiRef => {
+                format!("BlueprintValue::ApiRef({value:?}.to_string())")
+            }
+            _ => default_value_expr(*data_type),
+        },
         BlueprintIrValue::Parameter { name, .. } => sanitize_ident(name.clone()),
         BlueprintIrValue::Variable {
             variable_id,
@@ -524,6 +597,26 @@ fn value_expr(value: &BlueprintIrValue) -> String {
             variable_id.to_string(),
             variable_name
         ),
+        BlueprintIrValue::FunctionalCall {
+            functional_node_id,
+            arguments,
+            output_type,
+            ..
+        } => {
+            let args_expr = format!(
+                "&[{}]",
+                arguments
+                    .iter()
+                    .map(value_expr)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            let fallback = default_value_expr(*output_type);
+            format!(
+                "{{ let value = runtime.execute_functional_node({:?}, {}); if matches!(value, BlueprintValue::Void) {{ {} }} else {{ value }} }}",
+                functional_node_id, args_expr, fallback
+            )
+        }
         BlueprintIrValue::Default(pin_type) => default_value_expr(*pin_type),
     }
 }

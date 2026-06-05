@@ -203,17 +203,27 @@ impl BlueprintNode {
     }
 
     pub fn variable_set(variable: &BlueprintLocalVariable) -> Self {
+        let mut pins = vec![BlueprintPin::exec_input("in")];
+        if variable.data_type.is_collection() {
+            pins.push(BlueprintPin::data_input(
+                "value",
+                variable.item_type.unwrap_or(BlueprintPinType::String),
+            ));
+            let mut mode_pin = BlueprintPin::data_input("mode", BlueprintPinType::String);
+            mode_pin.value = Some(serde_json::json!("push"));
+            pins.push(mode_pin);
+        } else {
+            pins.push(BlueprintPin::data_input("value", variable.data_type));
+        }
+        pins.push(BlueprintPin::exec_output("then"));
+
         Self {
             id: Uuid::new_v4(),
             title: format!("Set {}", variable.name),
             kind: BlueprintNodeKind::VariableSet {
                 variable_id: variable.id,
             },
-            pins: vec![
-                BlueprintPin::exec_input("in"),
-                BlueprintPin::data_input("value", variable.data_type),
-                BlueprintPin::exec_output("then"),
-            ],
+            pins,
             position: BlueprintPoint::default(),
         }
     }
@@ -272,6 +282,10 @@ impl BlueprintNode {
     pub fn pin_named(&self, name: &str) -> Option<&BlueprintPin> {
         self.pins.iter().find(|pin| pin.name == name)
     }
+
+    pub fn pin_named_mut(&mut self, name: &str) -> Option<&mut BlueprintPin> {
+        self.pins.iter_mut().find(|pin| pin.name == name)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -322,6 +336,8 @@ pub struct BlueprintPin {
     pub direction: BlueprintPinDirection,
     pub kind: BlueprintPinKind,
     pub data_type: BlueprintPinType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<serde_json::Value>,
 }
 
 impl BlueprintPin {
@@ -332,6 +348,7 @@ impl BlueprintPin {
             direction: BlueprintPinDirection::Input,
             kind: BlueprintPinKind::Exec,
             data_type: BlueprintPinType::Exec,
+            value: None,
         }
     }
 
@@ -342,6 +359,7 @@ impl BlueprintPin {
             direction: BlueprintPinDirection::Output,
             kind: BlueprintPinKind::Exec,
             data_type: BlueprintPinType::Exec,
+            value: None,
         }
     }
 
@@ -352,6 +370,7 @@ impl BlueprintPin {
             direction: BlueprintPinDirection::Input,
             kind: BlueprintPinKind::Data,
             data_type,
+            value: default_input_pin_value(data_type),
         }
     }
 
@@ -362,7 +381,23 @@ impl BlueprintPin {
             direction: BlueprintPinDirection::Output,
             kind: BlueprintPinKind::Data,
             data_type,
+            value: None,
         }
+    }
+}
+
+pub fn default_input_pin_value(data_type: BlueprintPinType) -> Option<serde_json::Value> {
+    match data_type {
+        BlueprintPinType::Bool => Some(serde_json::json!(true)),
+        BlueprintPinType::Int => Some(serde_json::json!(0)),
+        BlueprintPinType::Float => Some(serde_json::json!(0.0)),
+        BlueprintPinType::String => Some(serde_json::json!("")),
+        BlueprintPinType::Color => Some(serde_json::json!("#ffffff")),
+        BlueprintPinType::Object => Some(serde_json::Value::Null),
+        BlueprintPinType::UiElementRef | BlueprintPinType::PageRef | BlueprintPinType::ApiRef => {
+            Some(serde_json::json!(""))
+        }
+        _ => None,
     }
 }
 
@@ -402,6 +437,13 @@ pub enum BlueprintPinType {
 }
 
 impl BlueprintPinType {
+    pub fn is_collection(self) -> bool {
+        matches!(
+            self,
+            Self::Array | Self::Vector | Self::HashSet | Self::HashMap
+        )
+    }
+
     pub fn is_numeric(self) -> bool {
         matches!(self, Self::Int | Self::Float)
     }

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use uuid::Uuid;
 
@@ -6,8 +6,8 @@ use crate::api::BlueprintProjectApi;
 use crate::catalog::{builtin_node_descriptor, BlueprintNodeContext};
 use crate::model::{
     BlueprintDocument, BlueprintDocumentKind, BlueprintFunctionSignature, BlueprintFunctionTarget,
-    BlueprintGraph, BlueprintNode, BlueprintNodeKind, BlueprintOwner, BlueprintPin,
-    BlueprintPinDirection, BlueprintPinType,
+    BlueprintGraph, BlueprintLink, BlueprintNode, BlueprintNodeKind, BlueprintOwner, BlueprintPin,
+    BlueprintPinDirection, BlueprintPinKind, BlueprintPinType,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,6 +41,28 @@ impl BlueprintDiagnostic {
     ) -> Self {
         Self {
             severity: BlueprintDiagnosticSeverity::Error,
+            code: code.into(),
+            message: message.into(),
+            document_id,
+            graph_id,
+            node_id,
+            pin_id,
+            file: None,
+            line: None,
+            column: None,
+        }
+    }
+
+    fn warning(
+        code: impl Into<String>,
+        message: impl Into<String>,
+        document_id: Option<Uuid>,
+        graph_id: Option<Uuid>,
+        node_id: Option<Uuid>,
+        pin_id: Option<Uuid>,
+    ) -> Self {
+        Self {
+            severity: BlueprintDiagnosticSeverity::Warning,
             code: code.into(),
             message: message.into(),
             document_id,
@@ -333,8 +355,7 @@ fn validate_node(
                 ));
             }
         }
-        BlueprintNodeKind::VariableGet { variable_id }
-        | BlueprintNodeKind::VariableSet { variable_id } => {
+        BlueprintNodeKind::VariableGet { variable_id } => {
             if graph
                 .local_variables
                 .iter()
@@ -348,6 +369,26 @@ fn validate_node(
                     Some(node.id),
                     None,
                 ));
+            }
+        }
+        BlueprintNodeKind::VariableSet { variable_id } => {
+            let Some(variable) = graph
+                .local_variables
+                .iter()
+                .find(|variable| variable.id == *variable_id)
+            else {
+                diagnostics.push(BlueprintDiagnostic::error(
+                    "variable_missing",
+                    "Variable node references a missing local variable.",
+                    Some(document.id),
+                    Some(graph.id),
+                    Some(node.id),
+                    None,
+                ));
+                return diagnostics;
+            };
+            if variable.data_type.is_collection() {
+                diagnostics.extend(validate_collection_variable_setter(document, graph, node));
             }
         }
         BlueprintNodeKind::FunctionResult { return_type } => {
@@ -422,6 +463,16 @@ fn validate_node(
                         Some(graph.id),
                         Some(node.id),
                         None,
+                    ));
+                }
+                if descriptor_id == "ui.set_display_mode" {
+                    diagnostics.extend(validate_mode_pin_value(
+                        document,
+                        graph,
+                        node,
+                        "mode",
+                        &["visible", "none"],
+                        "display_mode",
                     ));
                 }
             } else {
@@ -546,8 +597,286 @@ fn validate_node(
     diagnostics
 }
 
+fn validate_collection_variable_setter(
+    document: &BlueprintDocument,
+    graph: &BlueprintGraph,
+    node: &BlueprintNode,
+) -> Vec<BlueprintDiagnostic> {
+    let mut diagnostics = Vec::new();
+    let Some(mode_pin) = node.pin_named("mode") else {
+        diagnostics.push(BlueprintDiagnostic::error(
+            "collection_mode_pin_missing",
+            "Collection setter requires a mode input pin.",
+            Some(document.id),
+            Some(graph.id),
+            Some(node.id),
+            None,
+        ));
+        return diagnostics;
+    };
+    if mode_pin.kind != BlueprintPinKind::Data || mode_pin.direction != BlueprintPinDirection::Input
+    {
+        diagnostics.push(BlueprintDiagnostic::error(
+            "collection_mode_pin_invalid",
+            "Collection setter mode pin must be an input data pin.",
+            Some(document.id),
+            Some(graph.id),
+            Some(node.id),
+            Some(mode_pin.id),
+        ));
+    }
+
+    diagnostics.extend(validate_mode_pin_value(
+        document,
+        graph,
+        node,
+        "mode",
+        &["push", "pop"],
+        "collection",
+    ));
+
+    let mode_connected = graph.links.iter().any(|link| link.to_pin_id == mode_pin.id);
+    let static_mode = resolve_mode_pin_string_input(graph, node, mode_pin)
+        .unwrap_or_else(|| "push".to_string())
+        .trim()
+        .to_ascii_lowercase();
+    if static_mode == "push" || (mode_connected && static_mode != "pop") {
+        let Some(value_pin) = node.pin_named("value") else {
+            diagnostics.push(BlueprintDiagnostic::error(
+                "collection_value_pin_missing",
+                "Collection setter push mode requires a value input pin.",
+                Some(document.id),
+                Some(graph.id),
+                Some(node.id),
+                None,
+            ));
+            return diagnostics;
+        };
+        let value_connected = graph
+            .links
+            .iter()
+            .any(|link| link.to_pin_id == value_pin.id);
+        if !value_connected && input_value_is_empty(value_pin) {
+            diagnostics.push(BlueprintDiagnostic::error(
+                "collection_push_value_empty",
+                "Collection setter push mode requires a non-empty value or a connected value pin.",
+                Some(document.id),
+                Some(graph.id),
+                Some(node.id),
+                Some(value_pin.id),
+            ));
+        }
+    }
+
+    diagnostics
+}
+
+fn validate_mode_pin_value(
+    document: &BlueprintDocument,
+    graph: &BlueprintGraph,
+    node: &BlueprintNode,
+    pin_name: &str,
+    allowed: &[&str],
+    code_prefix: &str,
+) -> Vec<BlueprintDiagnostic> {
+    let mut diagnostics = Vec::new();
+    let Some(pin) = node.pin_named(pin_name) else {
+        return diagnostics;
+    };
+    let Some(mode) = resolve_mode_pin_string_input(graph, node, pin) else {
+        return diagnostics;
+    };
+    let normalized = mode.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        diagnostics.push(BlueprintDiagnostic::warning(
+            format!("{code_prefix}_mode_empty"),
+            format!("Mode pin '{pin_name}' must not be empty."),
+            Some(document.id),
+            Some(graph.id),
+            Some(node.id),
+            Some(pin.id),
+        ));
+    } else if !allowed.iter().any(|allowed| *allowed == normalized) {
+        diagnostics.push(BlueprintDiagnostic::warning(
+            format!("{code_prefix}_mode_invalid"),
+            format!(
+                "Mode pin '{pin_name}' must be one of: {}.",
+                allowed.join(", ")
+            ),
+            Some(document.id),
+            Some(graph.id),
+            Some(node.id),
+            Some(pin.id),
+        ));
+    }
+    diagnostics
+}
+
+fn resolve_mode_pin_string_input(
+    graph: &BlueprintGraph,
+    node: &BlueprintNode,
+    target_pin: &BlueprintPin,
+) -> Option<String> {
+    let static_value = resolve_known_string_input(graph, node, target_pin);
+    let Some(variable_id) = connected_variable_get_id(graph, target_pin) else {
+        return static_value;
+    };
+
+    resolve_string_variable_assignment_before_node(graph, node.id, variable_id, &mut HashSet::new())
+        .or(static_value)
+}
+
+fn resolve_known_string_input(
+    graph: &BlueprintGraph,
+    node: &BlueprintNode,
+    target_pin: &BlueprintPin,
+) -> Option<String> {
+    let Some(link) = graph
+        .links
+        .iter()
+        .find(|link| link.to_pin_id == target_pin.id)
+    else {
+        return target_pin
+            .value
+            .as_ref()
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string());
+    };
+    let source_node = graph
+        .nodes
+        .iter()
+        .find(|node| node.id == link.from_node_id)?;
+    match &source_node.kind {
+        BlueprintNodeKind::VariableGet { variable_id } => graph
+            .local_variables
+            .iter()
+            .find(|variable| variable.id == *variable_id)
+            .and_then(|variable| variable.value.as_ref())
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string())
+            .or_else(|| Some(String::new())),
+        BlueprintNodeKind::LiteralString { value } => Some(value.clone()),
+        BlueprintNodeKind::Catalog { descriptor_id } if descriptor_id == "value.string_empty" => {
+            Some(String::new())
+        }
+        _ => node
+            .pins
+            .iter()
+            .find(|pin| pin.id == target_pin.id)
+            .and_then(|pin| pin.value.as_ref())
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string()),
+    }
+}
+
+fn connected_variable_get_id(graph: &BlueprintGraph, target_pin: &BlueprintPin) -> Option<Uuid> {
+    let link = graph
+        .links
+        .iter()
+        .find(|link| link.to_pin_id == target_pin.id)?;
+    let source_node = graph.nodes.iter().find(|node| node.id == link.from_node_id)?;
+    match &source_node.kind {
+        BlueprintNodeKind::VariableGet { variable_id } => Some(*variable_id),
+        _ => None,
+    }
+}
+
+fn resolve_string_variable_assignment_before_node(
+    graph: &BlueprintGraph,
+    node_id: Uuid,
+    variable_id: Uuid,
+    visited: &mut HashSet<Uuid>,
+) -> Option<String> {
+    if !visited.insert(node_id) {
+        return None;
+    }
+
+    for link in graph
+        .links
+        .iter()
+        .filter(|link| link.to_node_id == node_id && link_targets_exec_input(graph, link))
+    {
+        let Some(source_node) = graph.nodes.iter().find(|node| node.id == link.from_node_id) else {
+            continue;
+        };
+        if !link_sources_exec_output(source_node, link) {
+            continue;
+        }
+
+        if matches!(
+            &source_node.kind,
+            BlueprintNodeKind::VariableSet {
+                variable_id: source_variable_id
+            } if *source_variable_id == variable_id
+        ) {
+            if let Some(value_pin) = source_node.pin_named("value") {
+                if let Some(value) = resolve_known_string_input(graph, source_node, value_pin) {
+                    return Some(value);
+                }
+            }
+        }
+
+        if let Some(value) = resolve_string_variable_assignment_before_node(
+            graph,
+            source_node.id,
+            variable_id,
+            visited,
+        ) {
+            return Some(value);
+        }
+    }
+
+    None
+}
+
+fn link_targets_exec_input(graph: &BlueprintGraph, link: &BlueprintLink) -> bool {
+    graph
+        .nodes
+        .iter()
+        .find(|node| node.id == link.to_node_id)
+        .and_then(|node| node.pins.iter().find(|pin| pin.id == link.to_pin_id))
+        .is_some_and(|pin| {
+            pin.kind == BlueprintPinKind::Exec && pin.direction == BlueprintPinDirection::Input
+        })
+}
+
+fn link_sources_exec_output(node: &BlueprintNode, link: &BlueprintLink) -> bool {
+    node.pins
+        .iter()
+        .find(|pin| pin.id == link.from_pin_id)
+        .is_some_and(|pin| {
+            pin.kind == BlueprintPinKind::Exec && pin.direction == BlueprintPinDirection::Output
+        })
+}
+
+fn input_value_is_empty(pin: &BlueprintPin) -> bool {
+    match pin.value.as_ref() {
+        None => true,
+        Some(value) if value.is_null() => true,
+        Some(value) if value.as_str().is_some_and(|text| text.trim().is_empty()) => true,
+        _ => false,
+    }
+}
+
 fn pin_types_are_compatible(from: BlueprintPinType, to: BlueprintPinType) -> bool {
-    from == to || from == BlueprintPinType::Any || to == BlueprintPinType::Any
+    from == to
+        || from == BlueprintPinType::Any
+        || to == BlueprintPinType::Any
+        || (from == BlueprintPinType::Int && to == BlueprintPinType::Float)
+        || (from == BlueprintPinType::Object
+            && matches!(
+                to,
+                BlueprintPinType::UiElementRef
+                    | BlueprintPinType::PageRef
+                    | BlueprintPinType::ApiRef
+            ))
+        || (to == BlueprintPinType::Object
+            && matches!(
+                from,
+                BlueprintPinType::UiElementRef
+                    | BlueprintPinType::PageRef
+                    | BlueprintPinType::ApiRef
+            ))
 }
 
 fn descriptor_context_matches_document(
@@ -679,10 +1008,11 @@ mod tests {
     use crate::catalog::builtin_node_descriptor;
     use crate::model::{
         BlueprintDocument, BlueprintFunctionSignature, BlueprintGraph, BlueprintGraphKind,
-        BlueprintLink, BlueprintNode, BlueprintNodeKind, BlueprintPinType, BlueprintPoint,
+        BlueprintLink, BlueprintLocalVariable, BlueprintNode, BlueprintNodeKind, BlueprintPinType,
+        BlueprintPoint,
     };
 
-    use super::validate_project;
+    use super::{validate_project, BlueprintDiagnosticSeverity};
 
     #[test]
     fn reports_missing_ui_element_reference() {
@@ -864,6 +1194,122 @@ mod tests {
         assert!(!diagnostics
             .iter()
             .any(|diagnostic| diagnostic.code == "catalog_node_context_invalid"));
+    }
+
+    #[test]
+    fn rejects_invalid_static_display_mode() {
+        let page_id = Uuid::new_v4();
+        let mut document = BlueprintDocument::new_page(page_id, "Main");
+        let mut node = builtin_node_descriptor("ui.set_display_mode")
+            .expect("display descriptor")
+            .instantiate(BlueprintPoint::default());
+        node.pin_named_mut("mode").expect("mode pin").value = Some(serde_json::json!("collapsed"));
+        document.graphs[0].nodes.push(node);
+
+        let diagnostics = validate_project(&[document], &BlueprintProjectApi::default());
+        assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "display_mode_mode_invalid"));
+    }
+
+    #[test]
+    fn rejects_empty_string_variable_connected_to_collection_mode() {
+        let page_id = Uuid::new_v4();
+        let mut document = BlueprintDocument::new_page(page_id, "Main");
+        let variable = BlueprintLocalVariable {
+            id: Uuid::new_v4(),
+            name: "items".to_string(),
+            data_type: BlueprintPinType::Array,
+            item_type: Some(BlueprintPinType::Object),
+            value: None,
+        };
+        let mode_variable = BlueprintLocalVariable {
+            id: Uuid::new_v4(),
+            name: "mode".to_string(),
+            data_type: BlueprintPinType::String,
+            item_type: None,
+            value: None,
+        };
+        let setter = BlueprintNode::variable_set(&variable);
+        let getter = BlueprintNode::variable_get(&mode_variable);
+        let mode_pin_id = setter.pin_named("mode").expect("mode pin").id;
+        let getter_pin_id = getter.pin_named("value").expect("getter pin").id;
+        document.graphs[0].local_variables.push(variable);
+        document.graphs[0].local_variables.push(mode_variable);
+        document.graphs[0].links.push(BlueprintLink::new(
+            getter.id,
+            getter_pin_id,
+            setter.id,
+            mode_pin_id,
+        ));
+        document.graphs[0].nodes.push(getter);
+        document.graphs[0].nodes.push(setter);
+
+        let diagnostics = validate_project(&[document], &BlueprintProjectApi::default());
+        assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "collection_mode_empty"
+                && diagnostic.severity == BlueprintDiagnosticSeverity::Warning));
+    }
+
+    #[test]
+    fn allows_string_variable_mode_when_exec_setter_assigns_value_before_use() {
+        let page_id = Uuid::new_v4();
+        let mut document = BlueprintDocument::new_page(page_id, "Main");
+        let collection_variable = BlueprintLocalVariable {
+            id: Uuid::new_v4(),
+            name: "items".to_string(),
+            data_type: BlueprintPinType::Array,
+            item_type: Some(BlueprintPinType::Object),
+            value: None,
+        };
+        let mode_variable = BlueprintLocalVariable {
+            id: Uuid::new_v4(),
+            name: "mode".to_string(),
+            data_type: BlueprintPinType::String,
+            item_type: None,
+            value: None,
+        };
+
+        let mut mode_setter = BlueprintNode::variable_set(&mode_variable);
+        mode_setter.pin_named_mut("value").expect("value pin").value =
+            Some(serde_json::json!("pop"));
+        let mode_getter = BlueprintNode::variable_get(&mode_variable);
+        let collection_setter = BlueprintNode::variable_set(&collection_variable);
+
+        let mode_getter_pin_id = mode_getter.pin_named("value").expect("getter pin").id;
+        let collection_mode_pin_id = collection_setter
+            .pin_named("mode")
+            .expect("collection mode pin")
+            .id;
+        let mode_setter_exec_out = mode_setter.pin_named("then").expect("exec out").id;
+        let collection_exec_in = collection_setter.pin_named("in").expect("exec in").id;
+
+        document.graphs[0].local_variables.push(collection_variable);
+        document.graphs[0].local_variables.push(mode_variable);
+        document.graphs[0].links.push(BlueprintLink::new(
+            mode_getter.id,
+            mode_getter_pin_id,
+            collection_setter.id,
+            collection_mode_pin_id,
+        ));
+        document.graphs[0].links.push(BlueprintLink::new(
+            mode_setter.id,
+            mode_setter_exec_out,
+            collection_setter.id,
+            collection_exec_in,
+        ));
+        document.graphs[0].nodes.push(mode_setter);
+        document.graphs[0].nodes.push(mode_getter);
+        document.graphs[0].nodes.push(collection_setter);
+
+        let diagnostics = validate_project(&[document], &BlueprintProjectApi::default());
+        assert!(!diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "collection_mode_empty"));
+        assert!(!diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "collection_mode_invalid"));
     }
 
     #[test]

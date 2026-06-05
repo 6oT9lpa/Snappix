@@ -5,9 +5,9 @@ use uuid::Uuid;
 use crate::api::BlueprintProjectApi;
 use crate::catalog::builtin_node_descriptor;
 use crate::model::{
-    BlueprintDocument, BlueprintDocumentKind, BlueprintFunctionSignature, BlueprintFunctionTarget,
-    BlueprintGraph, BlueprintLink, BlueprintLocalVariable, BlueprintNode, BlueprintNodeKind,
-    BlueprintOwner, BlueprintPinDirection, BlueprintPinType,
+    default_input_pin_value, BlueprintDocument, BlueprintDocumentKind, BlueprintFunctionSignature,
+    BlueprintFunctionTarget, BlueprintGraph, BlueprintLink, BlueprintLocalVariable, BlueprintNode,
+    BlueprintNodeKind, BlueprintOwner, BlueprintPin, BlueprintPinDirection, BlueprintPinType,
 };
 use crate::validate::{validate_project, BlueprintDiagnostic, BlueprintDiagnosticSeverity};
 
@@ -60,6 +60,13 @@ pub enum BlueprintIrStatement {
         variable_name: String,
         value: BlueprintIrValue,
     },
+    MutateCollectionVariable {
+        node_id: Uuid,
+        variable_id: Uuid,
+        variable_name: String,
+        operation: BlueprintIrValue,
+        value: BlueprintIrValue,
+    },
     Branch {
         node_id: Uuid,
         condition_pin_id: Option<Uuid>,
@@ -86,9 +93,40 @@ pub enum BlueprintIrStatement {
 
 #[derive(Debug, Clone)]
 pub enum BlueprintIrValue {
+    BoolLiteral {
+        node_id: Uuid,
+        pin_id: Uuid,
+        value: bool,
+    },
+    IntLiteral {
+        node_id: Uuid,
+        pin_id: Uuid,
+        value: i64,
+    },
+    FloatLiteral {
+        node_id: Uuid,
+        pin_id: Uuid,
+        value: f64,
+    },
     StringLiteral {
         node_id: Uuid,
         pin_id: Uuid,
+        value: String,
+    },
+    ObjectLiteral {
+        node_id: Uuid,
+        pin_id: Uuid,
+        value: serde_json::Value,
+    },
+    ColorLiteral {
+        node_id: Uuid,
+        pin_id: Uuid,
+        value: String,
+    },
+    ReferenceLiteral {
+        node_id: Uuid,
+        pin_id: Uuid,
+        data_type: BlueprintPinType,
         value: String,
     },
     Parameter {
@@ -102,6 +140,13 @@ pub enum BlueprintIrValue {
         variable_id: Uuid,
         variable_name: String,
         data_type: BlueprintPinType,
+    },
+    FunctionalCall {
+        node_id: Uuid,
+        pin_id: Uuid,
+        functional_node_id: String,
+        arguments: Vec<BlueprintIrValue>,
+        output_type: BlueprintPinType,
     },
     Default(BlueprintPinType),
 }
@@ -411,16 +456,46 @@ fn follow_exec_chain(
             }
             BlueprintNodeKind::VariableSet { variable_id } => {
                 if let Some(variable) = variable_map.get(variable_id).copied() {
-                    let value_pin = node.pin_named("value");
-                    let value = value_pin
-                        .map(|pin| resolve_value(node, pin.id, node_map, variable_map, data_links))
-                        .unwrap_or(BlueprintIrValue::Default(variable.data_type));
-                    statements.push(BlueprintIrStatement::SetVariable {
-                        node_id: node.id,
-                        variable_id: variable.id,
-                        variable_name: variable.name.clone(),
-                        value,
-                    });
+                    if variable.data_type.is_collection() {
+                        let operation = node
+                            .pin_named("mode")
+                            .map(|pin| {
+                                resolve_value(node, pin.id, node_map, variable_map, data_links)
+                            })
+                            .unwrap_or_else(|| BlueprintIrValue::StringLiteral {
+                                node_id: node.id,
+                                pin_id: Uuid::nil(),
+                                value: "push".to_string(),
+                            });
+                        let value = node
+                            .pin_named("value")
+                            .map(|pin| {
+                                resolve_value(node, pin.id, node_map, variable_map, data_links)
+                            })
+                            .unwrap_or(BlueprintIrValue::Default(
+                                variable.item_type.unwrap_or(BlueprintPinType::String),
+                            ));
+                        statements.push(BlueprintIrStatement::MutateCollectionVariable {
+                            node_id: node.id,
+                            variable_id: variable.id,
+                            variable_name: variable.name.clone(),
+                            operation,
+                            value,
+                        });
+                    } else {
+                        let value_pin = node.pin_named("value");
+                        let value = value_pin
+                            .map(|pin| {
+                                resolve_value(node, pin.id, node_map, variable_map, data_links)
+                            })
+                            .unwrap_or(BlueprintIrValue::Default(variable.data_type));
+                        statements.push(BlueprintIrStatement::SetVariable {
+                            node_id: node.id,
+                            variable_id: variable.id,
+                            variable_name: variable.name.clone(),
+                            value,
+                        });
+                    }
                 }
             }
             BlueprintNodeKind::Functional { node_id } => {
@@ -505,6 +580,39 @@ fn follow_exec_chain(
                     });
                     break;
                 }
+                if descriptor_id == "flow.sequence" {
+                    let first_pin = node.pin_named("first").map(|pin| pin.id);
+                    let then_pin = node.pin_named("then").map(|pin| pin.id);
+                    statements.extend(follow_exec_chain(
+                        document,
+                        first_pin,
+                        node_map,
+                        variable_map,
+                        exec_links,
+                        data_links,
+                        visited_nodes.clone(),
+                    ));
+                    statements.extend(follow_exec_chain(
+                        document,
+                        then_pin,
+                        node_map,
+                        variable_map,
+                        exec_links,
+                        data_links,
+                        visited_nodes.clone(),
+                    ));
+                    break;
+                }
+                if descriptor_id == "flow.return" || descriptor_id == "functions.return" {
+                    let value = node
+                        .pin_named("value")
+                        .map(|pin| resolve_value(node, pin.id, node_map, variable_map, data_links));
+                    statements.push(BlueprintIrStatement::Return {
+                        node_id: node.id,
+                        value,
+                    });
+                    break;
+                }
 
                 let arguments = node
                     .pins
@@ -545,13 +653,10 @@ fn resolve_value(
     data_links: &HashMap<Uuid, &BlueprintLink>,
 ) -> BlueprintIrValue {
     let Some(link) = data_links.get(&target_pin_id).copied() else {
-        let fallback_type = current_node
-            .pins
-            .iter()
-            .find(|pin| pin.id == target_pin_id)
-            .map(|pin| pin.data_type)
-            .unwrap_or(BlueprintPinType::Void);
-        return BlueprintIrValue::Default(fallback_type);
+        let Some(pin) = current_node.pins.iter().find(|pin| pin.id == target_pin_id) else {
+            return BlueprintIrValue::Default(BlueprintPinType::Void);
+        };
+        return pin_literal_or_default(current_node.id, pin);
     };
 
     let Some(source_node) = node_map.get(&link.from_node_id).copied() else {
@@ -560,6 +665,59 @@ fn resolve_value(
     let source_pin_id = link.from_pin_id;
 
     match &source_node.kind {
+        BlueprintNodeKind::Catalog { descriptor_id } => match descriptor_id.as_str() {
+            "value.bool_true" => BlueprintIrValue::BoolLiteral {
+                node_id: source_node.id,
+                pin_id: source_pin_id,
+                value: true,
+            },
+            "value.bool_false" => BlueprintIrValue::BoolLiteral {
+                node_id: source_node.id,
+                pin_id: source_pin_id,
+                value: false,
+            },
+            "value.int_zero" => BlueprintIrValue::IntLiteral {
+                node_id: source_node.id,
+                pin_id: source_pin_id,
+                value: 0,
+            },
+            "value.float_zero" => BlueprintIrValue::FloatLiteral {
+                node_id: source_node.id,
+                pin_id: source_pin_id,
+                value: 0.0,
+            },
+            "value.string_empty" => BlueprintIrValue::StringLiteral {
+                node_id: source_node.id,
+                pin_id: source_pin_id,
+                value: String::new(),
+            },
+            _ => {
+                let arguments = source_node
+                    .pins
+                    .iter()
+                    .filter(|pin| {
+                        pin.direction == BlueprintPinDirection::Input
+                            && pin.data_type != BlueprintPinType::Exec
+                    })
+                    .map(|pin| {
+                        resolve_value(source_node, pin.id, node_map, variable_map, data_links)
+                    })
+                    .collect();
+                let output_type = source_node
+                    .pins
+                    .iter()
+                    .find(|pin| pin.id == source_pin_id)
+                    .map(|pin| pin.data_type)
+                    .unwrap_or(BlueprintPinType::Void);
+                BlueprintIrValue::FunctionalCall {
+                    node_id: source_node.id,
+                    pin_id: source_pin_id,
+                    functional_node_id: descriptor_id.clone(),
+                    arguments,
+                    output_type,
+                }
+            }
+        },
         BlueprintNodeKind::LiteralString { value } => BlueprintIrValue::StringLiteral {
             node_id: source_node.id,
             pin_id: source_pin_id,
@@ -600,6 +758,30 @@ fn resolve_value(
                 BlueprintIrValue::Default(BlueprintPinType::Void)
             }
         }
+        BlueprintNodeKind::Functional { node_id } => {
+            let arguments = source_node
+                .pins
+                .iter()
+                .filter(|pin| {
+                    pin.direction == BlueprintPinDirection::Input
+                        && pin.data_type != BlueprintPinType::Exec
+                })
+                .map(|pin| resolve_value(source_node, pin.id, node_map, variable_map, data_links))
+                .collect();
+            let output_type = source_node
+                .pins
+                .iter()
+                .find(|pin| pin.id == source_pin_id)
+                .map(|pin| pin.data_type)
+                .unwrap_or(BlueprintPinType::Void);
+            BlueprintIrValue::FunctionalCall {
+                node_id: source_node.id,
+                pin_id: source_pin_id,
+                functional_node_id: node_id.clone(),
+                arguments,
+                output_type,
+            }
+        }
         _ => {
             let data_type = source_node
                 .pins
@@ -609,6 +791,58 @@ fn resolve_value(
                 .unwrap_or(BlueprintPinType::Void);
             BlueprintIrValue::Default(data_type)
         }
+    }
+}
+
+fn pin_literal_or_default(node_id: Uuid, pin: &BlueprintPin) -> BlueprintIrValue {
+    let value = pin
+        .value
+        .clone()
+        .or_else(|| default_input_pin_value(pin.data_type));
+    let Some(value) = value else {
+        return BlueprintIrValue::Default(pin.data_type);
+    };
+
+    match pin.data_type {
+        BlueprintPinType::Bool => BlueprintIrValue::BoolLiteral {
+            node_id,
+            pin_id: pin.id,
+            value: value.as_bool().unwrap_or(true),
+        },
+        BlueprintPinType::Int => BlueprintIrValue::IntLiteral {
+            node_id,
+            pin_id: pin.id,
+            value: value.as_i64().unwrap_or(0),
+        },
+        BlueprintPinType::Float => BlueprintIrValue::FloatLiteral {
+            node_id,
+            pin_id: pin.id,
+            value: value.as_f64().unwrap_or(0.0),
+        },
+        BlueprintPinType::String => BlueprintIrValue::StringLiteral {
+            node_id,
+            pin_id: pin.id,
+            value: value.as_str().unwrap_or_default().to_string(),
+        },
+        BlueprintPinType::Color => BlueprintIrValue::ColorLiteral {
+            node_id,
+            pin_id: pin.id,
+            value: value.as_str().unwrap_or("#ffffff").to_string(),
+        },
+        BlueprintPinType::Object => BlueprintIrValue::ObjectLiteral {
+            node_id,
+            pin_id: pin.id,
+            value,
+        },
+        BlueprintPinType::UiElementRef | BlueprintPinType::PageRef | BlueprintPinType::ApiRef => {
+            BlueprintIrValue::ReferenceLiteral {
+                node_id,
+                pin_id: pin.id,
+                data_type: pin.data_type,
+                value: value.as_str().unwrap_or_default().to_string(),
+            }
+        }
+        _ => BlueprintIrValue::Default(pin.data_type),
     }
 }
 

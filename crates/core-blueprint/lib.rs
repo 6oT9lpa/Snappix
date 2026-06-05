@@ -24,11 +24,11 @@ pub use lowering::{
     BlueprintIrProject, BlueprintIrStatement, BlueprintIrValue,
 };
 pub use model::{
-    blueprint_name_for_page, BlueprintDocument, BlueprintDocumentKind, BlueprintExport,
-    BlueprintFunctionParameter, BlueprintFunctionSignature, BlueprintFunctionTarget,
-    BlueprintGraph, BlueprintGraphKind, BlueprintLink, BlueprintLocalVariable, BlueprintNode,
-    BlueprintNodeKind, BlueprintNumericPolicy, BlueprintNumericPromotion, BlueprintNumericWidth,
-    BlueprintOwner, BlueprintPin, BlueprintPinDirection, BlueprintPinKind, BlueprintPinType,
-    BlueprintPoint, LogicData,
+    blueprint_name_for_page, default_input_pin_value, BlueprintDocument, BlueprintDocumentKind,
+    BlueprintExport, BlueprintFunctionParameter, BlueprintFunctionSignature,
+    BlueprintFunctionTarget, BlueprintGraph, BlueprintGraphKind, BlueprintLink,
+    BlueprintLocalVariable, BlueprintNode, BlueprintNodeKind, BlueprintNumericPolicy,
+    BlueprintNumericPromotion, BlueprintNumericWidth, BlueprintOwner, BlueprintPin,
+    BlueprintPinDirection, BlueprintPinKind, BlueprintPinType, BlueprintPoint, LogicData,
 };
 pub use validate::{validate_project, BlueprintDiagnostic, BlueprintDiagnosticSeverity};
